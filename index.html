@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#2a78d6" />
+<title>Lift Log</title>
+<link rel="manifest" href="manifest.json" />
+<link rel="icon" href="icons/icon-192.png" />
+<link rel="apple-touch-icon" href="icons/icon-192.png" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="Lift Log" />
+<link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+<div id="app">
+
+  <header class="topbar">
+    <h1 class="brand">Lift Log</h1>
+    <button id="quickThemeToggle" class="icon-btn" aria-label="Toggle dark mode" title="Toggle dark mode">
+      <svg class="icon icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+      <svg class="icon icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/></svg>
+    </button>
+  </header>
+
+  <main id="main">
+
+    <!-- DASHBOARD -->
+    <section id="view-dashboard" class="view" data-view="dashboard">
+      <div id="summaryRow" class="summary-row"></div>
+      <div class="section-head">
+        <h2>Your goals</h2>
+      </div>
+      <div id="exerciseCards" class="card-grid"></div>
+      <div id="dashboardEmpty" class="empty-state" hidden>
+        <p>No exercises yet.</p>
+        <button class="btn btn-primary" data-action="add-exercise">Add your first exercise</button>
+      </div>
+    </section>
+
+    <!-- LOG -->
+    <section id="view-log" class="view" data-view="log" hidden>
+      <div class="section-head">
+        <h2>Log a workout</h2>
+      </div>
+      <form id="logForm" class="card form-card">
+        <label class="field">
+          <span class="field-label">Exercise</span>
+          <select id="logExercise" required></select>
+        </label>
+        <label class="field">
+          <span class="field-label">Date</span>
+          <input type="date" id="logDate" required />
+        </label>
+        <div id="logDynamicFields"></div>
+        <label class="field">
+          <span class="field-label">Note (optional)</span>
+          <input type="text" id="logNote" placeholder="How did it feel?" maxlength="200" />
+        </label>
+        <button type="submit" class="btn btn-primary btn-block">Save entry</button>
+      </form>
+
+      <div class="section-head">
+        <h2>Recent entries</h2>
+      </div>
+      <div id="recentEntries" class="entry-list"></div>
+    </section>
+
+    <!-- HISTORY -->
+    <section id="view-history" class="view" data-view="history" hidden>
+      <div class="section-head">
+        <h2>History</h2>
+      </div>
+      <label class="field">
+        <span class="field-label">Filter by exercise</span>
+        <select id="historyFilter"></select>
+      </label>
+      <div id="historyList" class="entry-list"></div>
+      <div id="historyEmpty" class="empty-state" hidden>
+        <p>No entries logged yet.</p>
+      </div>
+    </section>
+
+    <!-- SETTINGS -->
+    <section id="view-settings" class="view" data-view="settings" hidden>
+      <div class="section-head"><h2>Appearance</h2></div>
+      <div class="card">
+        <div class="setting-row">
+          <span>Theme</span>
+          <div class="segmented" id="themeSegmented" role="radiogroup" aria-label="Theme">
+            <button type="button" data-theme-choice="light" role="radio">Light</button>
+            <button type="button" data-theme-choice="dark" role="radio">Dark</button>
+            <button type="button" data-theme-choice="system" role="radio">System</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="section-head"><h2>Units</h2></div>
+      <div class="card">
+        <div class="setting-row">
+          <span>Weight</span>
+          <div class="segmented" id="weightUnitSegmented" role="radiogroup" aria-label="Weight unit">
+            <button type="button" data-unit-choice="lb" role="radio">lb</button>
+            <button type="button" data-unit-choice="kg" role="radio">kg</button>
+          </div>
+        </div>
+        <div class="setting-row">
+          <span>Distance</span>
+          <div class="segmented" id="distanceUnitSegmented" role="radiogroup" aria-label="Distance unit">
+            <button type="button" data-unit-choice="mi" role="radio">mi</button>
+            <button type="button" data-unit-choice="km" role="radio">km</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="section-head">
+        <h2>Exercises</h2>
+        <button class="btn btn-secondary btn-sm" data-action="add-exercise">+ Add exercise</button>
+      </div>
+      <div id="exerciseManageList" class="entry-list"></div>
+
+      <div class="section-head"><h2>Backup</h2></div>
+      <div class="card">
+        <p class="muted-text">Your data lives only on this device. Export a backup file regularly, especially before clearing browser data or switching phones.</p>
+        <div class="btn-row">
+          <button class="btn btn-secondary" id="exportBtn">Export backup (.json)</button>
+          <button class="btn btn-secondary" id="importBtn">Import backup</button>
+        </div>
+        <input type="file" id="importFile" accept="application/json" hidden />
+      </div>
+
+      <div class="section-head"><h2>About</h2></div>
+      <div class="card">
+        <p class="muted-text">Lift Log v1.0 &middot; installed as a home-screen app, all data stored on-device.</p>
+      </div>
+    </section>
+
+  </main>
+
+  <nav class="tabbar" id="tabbar">
+    <button class="tab" data-tab="dashboard" aria-current="page">
+      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="12" width="4" height="9"/><rect x="10" y="7" width="4" height="14"/><rect x="17" y="3" width="4" height="18"/></svg>
+      <span>Goals</span>
+    </button>
+    <button class="tab" data-tab="log">
+      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v8M8 12h8"/></svg>
+      <span>Log</span>
+    </button>
+    <button class="tab" data-tab="history">
+      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/><path d="M12 8v4l3 3"/></svg>
+      <span>History</span>
+    </button>
+    <button class="tab" data-tab="settings">
+      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/></svg>
+      <span>Settings</span>
+    </button>
+  </nav>
+
+</div>
+
+<!-- Modal overlay (exercise detail, add/edit exercise, confirm) -->
+<div id="modalRoot" class="modal-root" hidden>
+  <div class="modal-backdrop" id="modalBackdrop"></div>
+  <div class="modal-sheet" id="modalSheet" role="dialog" aria-modal="true"></div>
+</div>
+
+<div id="toast" class="toast" hidden></div>
+
+<script src="js/charts.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
