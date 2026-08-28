@@ -1,6 +1,6 @@
 {
-  "name": "Lift Log",
-  "short_name": "Lift Log",
+  "name": "Fit Log",
+  "short_name": "Fit Log",
   "description": "Personal strength, running, and bodyweight goal tracker",
   "start_url": "./index.html",
   "scope": "./",

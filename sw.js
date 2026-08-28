@@ -1,6 +1,6 @@
-// Lift Log service worker — app-shell caching for offline use.
+// Fit Log service worker — app-shell caching for offline use.
 // Bump CACHE_VERSION whenever any cached file changes so clients pick up the update.
-const CACHE_VERSION = 'liftlog-v1';
+const CACHE_VERSION = 'fitlog-v2';
 const APP_SHELL = [
   './',
   './index.html',
