@@ -1,6 +1,17 @@
 /* ============================================================================
    FIT LOG — app.js
    ============================================================================
+   A plain HTML/CSS/JavaScript app — no build step, no framework, no
+   third-party libraries. Every screen is one page (index.html) whose content
+   is swapped out by this file; "screens" are <section> elements shown and
+   hidden here rather than separate pages. All application data lives in the
+   browser's localStorage on-device — nothing is ever sent over the network.
+
+   The file is organized top-to-bottom as one list of sections, each marked
+   with a banner comment like the one below. An editor's "find" (Ctrl+F /
+   Cmd+F) on a section's name is the fastest way to jump to it — line numbers
+   are omitted here since they drift as the file changes. Reading order, and
+   what each section is responsible for:
 
      SCHEMA VERSION & MIGRATIONS  – the data shape, and the safe way to
                                      change it later without losing anyone's
@@ -18,6 +29,13 @@
                                      set ever logged for this exercise?"
      Progressive-overload
        suggestion engine          – the "Next session" recommendation logic.
+     Body & wellness trackers     – generic "log a number against an
+                                     optional goal" trackers (weight, body
+                                     fat %, height, sleep, and anything a
+                                     user adds) — the scalable metric-
+                                     tracking building block.
+     Water                        – daily water intake: cups, totals,
+                                     progress toward the daily goal.
      Theme                        – light/dark/system, and applying it to
                                      the page.
      Toast                        – the small "Entry saved" popup.
@@ -25,17 +43,28 @@
                                      that every other modal builds on top of.
      Dynamic set fields           – the weight/reps/cardio input rows shared
                                      by the Log tab and the edit-entry modal.
-     Rendering: Dashboard         – the Goals cards + Daily rows home screen.
-     Rendering: Log tab           – the quick-add workout form.
-     Rendering: History           – the full, filterable entry list.
+     Rendering: Dashboard         – the Goals cards, Body & wellness cards,
+                                     and Water section on the home screen.
+     Rendering: Log tab           – quick-add for a workout set, a tracker
+                                     measurement, or a cup of water.
+     Rendering: History           – the full, filterable entry list, split
+                                     by workout/measurement/water category.
      Entry modal                  – editing or deleting one logged entry.
      Exercise detail modal        – tapping a goal card: chart, PRs, the
                                      suggestion card, all of that exercise's
                                      entries.
      Add / edit exercise modal    – creating a new exercise or changing an
                                      existing one's name/section/goal/etc.
-     Settings                     – units, theme, the exercise management
-                                     list, export/import backup.
+     Tracker detail modal         – tapping a Body & wellness card: chart
+                                     and history of that tracker's entries.
+     Add / edit tracker modal     – creating a new tracker or changing an
+                                     existing one's name/unit/goal/etc.
+     Water: cup management        – adding, editing, and deleting cup sizes.
+     Manage                       – the Manage tab: exercise, tracker, and
+                                     water-cup lists (add/edit/archive/
+                                     delete), grouped by category.
+     Settings                     – units and theme, reached via the header
+                                     gear icon; export/import backup.
      Tabs / global wiring         – wires up every click handler once, and
                                      switchTab()/renderAll(), which redraw
                                      the current screen after any change.
@@ -90,7 +119,7 @@
      import path runs the exact same migrations.
      ========================================================================== */
 
-  const SCHEMA_VERSION = 3;
+  const SCHEMA_VERSION = 4;
 
   // Known "daily" exercise ids from before the Goal/Daily/Other split
   // existed (schema v1). Used only by the v1->v2 migration below.
@@ -132,7 +161,23 @@
       });
       return data;
     },
-    // Next migration goes here, keyed `3: (data) => { ...; return data; }`.
+    // v3 -> v4: introduced body/wellness trackers (`trackers` +
+    // `measurements`) and water tracking (`water` + `waterEntries`) as
+    // brand-new top-level fields, alongside two new unit settings. All
+    // purely additive — nothing about exercises or workout entries changes.
+    // A pre-existing save gets the same starter trackers/cups a fresh
+    // install seeds (see defaultTrackers()/defaultWater()), rather than
+    // empty lists, so upgrading actually surfaces the new features.
+    3: (data) => {
+      if (!Array.isArray(data.trackers)) data.trackers = defaultTrackers();
+      if (!Array.isArray(data.measurements)) data.measurements = [];
+      if (!data.water) data.water = defaultWater();
+      if (!Array.isArray(data.waterEntries)) data.waterEntries = [];
+      if (!data.settings.lengthUnit) data.settings.lengthUnit = 'in';
+      if (!data.settings.volumeUnit) data.settings.volumeUnit = 'flOz';
+      return data;
+    },
+    // Next migration goes here, keyed `4: (data) => { ...; return data; }`.
   };
 
   /** Walks `data` forward through MIGRATIONS until it matches SCHEMA_VERSION. */
@@ -148,13 +193,46 @@
 
   /* ============================== Defaults ============================== */
 
+  // Starter body/wellness trackers — every one is a plain "log a number,
+  // optionally against a goal" tracker (`kind: 'metric'`). `kind` exists on
+  // day one even though 'metric' is the only value today, so a future
+  // tracker kind (e.g. a yes/no daily habit checklist) is a new `kind`
+  // value and a new renderer, not a data-shape change for existing ones —
+  // see the "Manage: trackers" section for where `kind` is read.
+  function defaultTrackers() {
+    const now = new Date().toISOString();
+    return [
+      { id: 'trk_weight', name: 'Weight', kind: 'metric', unitKind: 'weight', goal: null, direction: null, archived: false, createdAt: now },
+      { id: 'trk_bodyfat', name: 'Body Fat %', kind: 'metric', unitKind: 'percent', goal: null, direction: null, archived: false, createdAt: now },
+      { id: 'trk_height', name: 'Height', kind: 'metric', unitKind: 'length', goal: null, direction: null, archived: false, createdAt: now },
+      { id: 'trk_sleephours', name: 'Sleep Hours', kind: 'metric', unitKind: 'hours', goal: null, direction: null, archived: false, createdAt: now },
+      { id: 'trk_sleepfeel', name: 'Sleep Feeling', kind: 'metric', unitKind: 'rating', ratingMax: 5, goal: null, direction: null, archived: false, createdAt: now },
+    ];
+  }
+
+  // Water's starter cup sizes and daily goal, canonically in milliliters
+  // (see the Unit helpers section for why a canonical/display split exists
+  // at all) — editable and replaceable from Manage, never read for anything
+  // but seeding a fresh install or an upgrade that never had water data.
+  function defaultWater() {
+    return {
+      goalMl: 2000,
+      cups: [
+        { id: 'cup_glass', name: 'Glass', amountMl: 240 },
+        { id: 'cup_bottle', name: 'Bottle', amountMl: 500 },
+      ],
+    };
+  }
+
+  const DEFAULT_SETTINGS = { theme: 'system', weightUnit: 'lb', distanceUnit: 'mi', lengthUnit: 'in', volumeUnit: 'flOz' };
+
   // The starting data for a brand-new install — already in the current
   // schema shape, so it never has to pass through the migrations above.
   function defaultData() {
     const now = new Date().toISOString();
     return {
       version: SCHEMA_VERSION,
-      settings: { theme: 'system', weightUnit: 'lb', distanceUnit: 'mi' },
+      settings: Object.assign({}, DEFAULT_SETTINGS),
       exercises: [
         { id: 'ex_bench', name: 'Bench Press', kind: 'weight', bodyRegion: 'upper', section: 'goal', goal: 225, archived: false, createdAt: now },
         { id: 'ex_squat', name: 'Squat', kind: 'weight', bodyRegion: 'lower', section: 'goal', goal: 315, archived: false, createdAt: now },
@@ -165,6 +243,10 @@
         { id: 'ex_running', name: 'Running', kind: 'cardio', section: 'goal', distanceGoal: 5, paceGoal: null, goal: null, archived: false, createdAt: now },
       ],
       entries: [],
+      trackers: defaultTrackers(),
+      measurements: [],
+      water: defaultWater(),
+      waterEntries: [],
     };
   }
 
@@ -182,7 +264,7 @@
       if (!raw) { state = defaultData(); save(); return; }
       const parsed = JSON.parse(raw);
       if (!parsed || !Array.isArray(parsed.exercises) || !Array.isArray(parsed.entries)) throw new Error('bad shape');
-      parsed.settings = Object.assign({ theme: 'system', weightUnit: 'lb', distanceUnit: 'mi' }, parsed.settings || {});
+      parsed.settings = Object.assign({}, DEFAULT_SETTINGS, parsed.settings || {});
       state = runMigrations(parsed);
       save(); // persist the migrated shape once, so this doesn't re-run every load
     } catch (e) {
@@ -212,6 +294,8 @@
 
   const LB_PER_KG = 0.45359237;
   const KM_PER_MI = 1.609344;
+  const CM_PER_IN = 2.54;
+  const ML_PER_FLOZ = 29.5735295625;
 
   // Data is saved in one fixed ("canonical") unit — pounds for weight, miles
   // for distance/pace — regardless of the current Settings toggle. `Units`
@@ -231,6 +315,18 @@
     // pace stored canonically as seconds per mile
     secPerMiToDisplaySecPerUnit: (s) => (state.settings.distanceUnit === 'km' ? s / KM_PER_MI : s),
     displaySecPerUnitToSecPerMi: (s) => (state.settings.distanceUnit === 'km' ? s * KM_PER_MI : s),
+
+    // Body-measurement lengths (height, waist, bicep, ...) canonically in
+    // centimeters — a separate unit from running distance (miles/km above)
+    // since inches/cm and miles/km are different scales for different things.
+    cmToDisplay: (cm) => (state.settings.lengthUnit === 'cm' ? cm : cm / CM_PER_IN),
+    displayToCm: (v) => (state.settings.lengthUnit === 'cm' ? v : v * CM_PER_IN),
+    lengthUnitLabel: () => state.settings.lengthUnit,
+
+    // Water volume canonically in milliliters.
+    mlToDisplay: (ml) => (state.settings.volumeUnit === 'mL' ? ml : ml / ML_PER_FLOZ),
+    displayToMl: (v) => (state.settings.volumeUnit === 'mL' ? v : v * ML_PER_FLOZ),
+    volumeUnitLabel: () => (state.settings.volumeUnit === 'mL' ? 'mL' : 'fl oz'),
   };
 
   function round(v, dp) {
@@ -263,6 +359,16 @@
     if (secPerMi == null || Number.isNaN(secPerMi) || !Number.isFinite(secPerMi)) return '—';
     const s = Units.secPerMiToDisplaySecPerUnit(secPerMi);
     return `${fmtSecShort(s)} /${Units.distanceUnitLabel()}`;
+  }
+  function fmtLength(cm) {
+    if (cm == null || Number.isNaN(cm)) return '—';
+    const v = Units.cmToDisplay(cm);
+    return `${round(v, 1)} ${Units.lengthUnitLabel()}`;
+  }
+  function fmtVolume(ml) {
+    if (ml == null || Number.isNaN(ml)) return '—';
+    const v = Units.mlToDisplay(ml);
+    return `${round(v, v < 10 ? 1 : 0)} ${Units.volumeUnitLabel()}`;
   }
   function fmtDuration(totalSec) {
     if (totalSec == null || Number.isNaN(totalSec)) return '—';
@@ -572,6 +678,98 @@
     return '';
   }
 
+  /* ============================== Body & wellness trackers ==============================
+     A tracker is a user-defined "log a number, optionally against a goal"
+     metric — the same generic shape covers body weight, body-fat %, a
+     circumference, sleep hours, a mood rating, or anything else added later
+     (calories, a supplement dose, ...) with zero new code, just a new
+     tracker instance. One canonical value per unitKind keeps the lb/kg-style
+     display-vs-storage split (see Unit helpers) working the same way it
+     does for exercises. */
+
+  function activeTrackers() { return state.trackers.filter((t) => !t.archived); }
+  function trackerById(id) { return state.trackers.find((t) => t.id === id); }
+  function measurementsFor(trackerId) { return state.measurements.filter((m) => m.trackerId === trackerId); }
+
+  // The most recently logged value. A tracker reflects current state
+  // (today's weight, last night's sleep) rather than a lifetime best like an
+  // exercise PR, so "latest" — not "highest/lowest ever" — is the right
+  // notion of "current" here.
+  function latestMeasurement(trackerId) {
+    const list = measurementsFor(trackerId).slice().sort((a, b) => (a.date + a.id).localeCompare(b.date + b.id));
+    return list.length ? list[list.length - 1] : null;
+  }
+
+  function fmtTrackerValue(tracker, v) {
+    if (v == null || Number.isNaN(v)) return '—';
+    switch (tracker.unitKind) {
+      case 'weight': return fmtWeight(v);
+      case 'length': return fmtLength(v);
+      case 'percent': return `${round(v, 1)}%`;
+      case 'hours': return `${round(v, 1)} hr`;
+      case 'rating': return `${Math.round(v)}/${tracker.ratingMax || 5}`;
+      default: return `${round(v, 1)}${tracker.unitLabel ? ' ' + tracker.unitLabel : ''}`;
+    }
+  }
+
+  function trackerGoalLabel(tracker) {
+    return tracker.goal != null ? `Goal ${fmtTrackerValue(tracker, tracker.goal)}` : '';
+  }
+
+  // Same shape as progressPct() for exercises: percent of goal reached,
+  // "lower is better" when direction is 'down' (e.g. a body-fat % goal).
+  function trackerProgressPct(tracker, value) {
+    if (value == null || !tracker.goal) return { pct: 0, achieved: false };
+    const pct = tracker.direction === 'down'
+      ? (value <= 0 ? 0 : (tracker.goal / value) * 100)
+      : (value / tracker.goal) * 100;
+    return { pct: Math.max(0, pct), achieved: pct >= 100 };
+  }
+
+  // Converts a tracker's canonical value (weight in lb, length in cm, ...)
+  // to/from the number an <input> should show, per its unitKind — the one
+  // place logging/edit forms need to know which unit a tracker's raw value
+  // is stored in. Every other unitKind is stored and displayed as the same
+  // plain number (percent, hours, a rating, a free-unit count).
+  function trackerDisplayFromCanonical(tracker, v) {
+    if (v == null) return '';
+    if (tracker.unitKind === 'weight') return round(Units.lbToDisplay(v), 1);
+    if (tracker.unitKind === 'length') return round(Units.cmToDisplay(v), 1);
+    return v;
+  }
+  function trackerCanonicalFromDisplay(tracker, v) {
+    if (tracker.unitKind === 'weight') return Units.displayToLb(v);
+    if (tracker.unitKind === 'length') return Units.displayToCm(v);
+    return v;
+  }
+  function trackerUnitLabel(tracker) {
+    switch (tracker.unitKind) {
+      case 'weight': return Units.weightUnitLabel();
+      case 'length': return Units.lengthUnitLabel();
+      case 'percent': return '%';
+      case 'hours': return 'hr';
+      case 'rating': return `/ ${tracker.ratingMax || 5}`;
+      default: return tracker.unitLabel || '';
+    }
+  }
+
+  /* ============================== Water ==============================
+     Water is a small, dedicated feature rather than another tracker kind —
+     tap-a-cup logging is a different interaction from typing a number, so
+     it earns its own simple data shape (see defaultWater()) instead of
+     being forced into the generic tracker model above. */
+
+  function cupById(id) { return state.water.cups.find((c) => c.id === id); }
+  function waterEntriesForDate(date) { return state.waterEntries.filter((e) => e.date === date); }
+  function waterTotalForDate(date) { return waterEntriesForDate(date).reduce((sum, e) => sum + e.amountMl, 0); }
+  function waterProgressPct(date) {
+    const total = waterTotalForDate(date);
+    const goal = state.water.goalMl;
+    if (!goal) return { pct: 0, achieved: false, total };
+    const pct = (total / goal) * 100;
+    return { pct: Math.max(0, pct), achieved: pct >= 100, total };
+  }
+
   /* ============================== Theme ============================== */
 
   function resolvedTheme() {
@@ -584,6 +782,19 @@
     if (state.settings.theme === 'system') root.removeAttribute('data-theme');
     else root.setAttribute('data-theme', state.settings.theme);
     root.setAttribute('data-resolved-theme', resolvedTheme());
+    syncThemeColorMeta();
+  }
+
+  // The OS status bar / address bar tint (the <meta name="theme-color"> tag)
+  // is read by the browser chrome, not by CSS, so it can't reference a CSS
+  // custom property directly. Rather than keeping a second hand-synced copy
+  // of a color, this reads the resolved --page value straight off the page
+  // — once the attributes above are set — so the status bar always matches
+  // the app's actual background instead of a fixed accent color.
+  function syncThemeColorMeta() {
+    const page = getComputedStyle(document.documentElement).getPropertyValue('--page').trim();
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (page && meta) meta.setAttribute('content', page);
   }
 
   /* ============================== Toast ============================== */
@@ -917,6 +1128,89 @@
       </div>`;
   }
 
+  // A body/wellness tracker's dashboard card — deliberately the same visual
+  // shape as an exercise's goalCardHtml (current value, goal, meter,
+  // sparkline) so the dashboard reads as one consistent language rather
+  // than "workouts styled one way, everything else styled another."
+  function trackerCardHtml(tracker) {
+    const latest = latestMeasurement(tracker.id);
+    const value = latest ? latest.value : null;
+    const { pct, achieved } = trackerProgressPct(tracker, value);
+    const fillPct = Math.min(100, pct);
+    const history = measurementsFor(tracker.id).slice().sort((a, c) => a.date.localeCompare(c.date));
+    const trend = history.map((m) => m.value);
+    return `
+      <div class="card ex-card" data-tracker-id="${tracker.id}">
+        <div class="ex-card-top">
+          <div class="ex-card-name">${escapeHtml(tracker.name)}</div>
+        </div>
+        <div class="ex-card-values">
+          <div class="ex-card-current">${fmtTrackerValue(tracker, value)}</div>
+          ${tracker.goal != null ? `<div class="ex-card-goal">/ ${trackerGoalLabel(tracker).replace('Goal ', '')}</div>` : ''}
+        </div>
+        ${tracker.goal != null ? `
+          <div class="meter"><div class="meter-fill ${achieved ? 'is-complete' : ''}" style="--fill:${fillPct}%"></div></div>
+          <div class="ex-card-foot"><span class="ex-card-pct ${achieved ? 'is-complete' : ''}">${achieved ? '✓ Goal reached' : `${Math.round(pct)}%`}</span></div>` : ''}
+        ${trend.filter((v) => v != null).length >= 2 ? `<div class="ex-card-spark">${Charts.sparkline(trend, { width: 280, height: 34 })}</div>` : ''}
+      </div>`;
+  }
+
+  function renderBodySection() {
+    const trackers = activeTrackers();
+    document.getElementById('bodySectionHead').hidden = trackers.length === 0;
+    const wrap = document.getElementById('bodyCards');
+    wrap.hidden = trackers.length === 0;
+    wrap.innerHTML = trackers.map(trackerCardHtml).join('');
+    wrap.querySelectorAll('[data-tracker-id]').forEach((card) => {
+      card.addEventListener('click', () => openTrackerDetail(card.getAttribute('data-tracker-id')));
+    });
+  }
+
+  function cupButtonsHtml() {
+    return state.water.cups.map((cup) => `
+      <button type="button" class="btn btn-secondary cup-btn" data-cup-id="${cup.id}">
+        <span>${escapeHtml(cup.name)}</span><span class="cup-btn-amount">${fmtVolume(cup.amountMl)}</span>
+      </button>`).join('');
+  }
+
+  // Logging water is a one-tap action (pick a cup, done) rather than a form
+  // submission, so it lives directly on the dashboard as well as in Log —
+  // wherever the user already is when they want to record a drink.
+  function logWaterAmount(amountMl, cupId) {
+    if (!amountMl || amountMl <= 0) { toast('Enter an amount greater than zero.'); return; }
+    state.waterEntries.push({ id: genId('wtr'), date: todayISO(), amountMl, cupId: cupId || null });
+    save();
+    toast('Water logged');
+    renderDashboard();
+    renderRecentEntries();
+    renderHistory();
+  }
+
+  function renderWaterSection() {
+    const hasCups = state.water.cups.length > 0;
+    document.getElementById('waterSectionHead').hidden = !hasCups;
+    const wrap = document.getElementById('waterDashboardWrap');
+    wrap.hidden = !hasCups;
+    if (!hasCups) { wrap.innerHTML = ''; return; }
+    const { pct, achieved, total } = waterProgressPct(todayISO());
+    const fillPct = Math.min(100, pct);
+    wrap.innerHTML = `
+      <div class="card">
+        <div class="ex-card-values">
+          <div class="ex-card-current">${fmtVolume(total)}</div>
+          ${state.water.goalMl ? `<div class="ex-card-goal">/ ${fmtVolume(state.water.goalMl)} today</div>` : ''}
+        </div>
+        ${state.water.goalMl ? `
+          <div class="meter"><div class="meter-fill ${achieved ? 'is-complete' : ''}" style="--fill:${fillPct}%"></div></div>
+          <div class="ex-card-foot"><span class="ex-card-pct ${achieved ? 'is-complete' : ''}">${achieved ? '✓ Goal reached' : `${Math.round(pct)}%`}</span></div>` : ''}
+        <div class="cup-button-row">${cupButtonsHtml()}</div>
+      </div>`;
+    wrap.querySelectorAll('.cup-btn').forEach((btn) => btn.addEventListener('click', () => {
+      const cup = cupById(btn.dataset.cupId);
+      if (cup) logWaterAmount(cup.amountMl, cup.id);
+    }));
+  }
+
   function renderDashboard() {
     renderSummary();
     const all = activeExercises();
@@ -929,7 +1223,7 @@
 
     const cardsWrap = document.getElementById('exerciseCards');
     cardsWrap.innerHTML = goalList.map(goalCardHtml).join('');
-    cardsWrap.querySelectorAll('.ex-card').forEach((card) => {
+    cardsWrap.querySelectorAll('.ex-card[data-exercise-id]').forEach((card) => {
       card.addEventListener('click', () => openExerciseDetail(card.getAttribute('data-exercise-id')));
     });
 
@@ -940,6 +1234,9 @@
     dailyWrap.querySelectorAll('.daily-row').forEach((row) => {
       row.addEventListener('click', () => openExerciseDetail(row.getAttribute('data-exercise-id')));
     });
+
+    renderWaterSection();
+    renderBodySection();
   }
 
   /* ============================== Rendering: Log tab ============================== */
@@ -964,6 +1261,33 @@
     select.innerHTML = html;
   }
 
+  // The Log tab covers three kinds of entry now — a workout set, a body
+  // measurement, or water — switched by a segmented control at the top
+  // rather than three separate tabs, since they're all "add one thing"
+  // forms sharing the same "Recent entries" list below. A category is only
+  // offered once there's something to log for it: Measurement needs at
+  // least one tracker, Water needs at least one cup — both ship pre-seeded,
+  // but stay hidden if the user deletes down to zero.
+  let logCategory = 'workout';
+
+  function availableLogCategories() {
+    const cats = [{ id: 'workout', label: 'Workout' }];
+    if (activeTrackers().length) cats.push({ id: 'measurement', label: 'Body' });
+    if (state.water.cups.length) cats.push({ id: 'water', label: 'Water' });
+    return cats;
+  }
+
+  function renderLogCategorySegmented() {
+    const cats = availableLogCategories();
+    if (!cats.some((c) => c.id === logCategory)) logCategory = cats[0].id;
+    const seg = document.getElementById('logCategorySegmented');
+    seg.innerHTML = cats.map((c) => `<button type="button" data-log-cat="${c.id}" role="radio">${c.label}</button>`).join('');
+    seg.querySelectorAll('button').forEach((b) => {
+      b.setAttribute('aria-checked', String(b.dataset.logCat === logCategory));
+      b.addEventListener('click', () => { logCategory = b.dataset.logCat; renderLogView(); });
+    });
+  }
+
   function renderLogForm() {
     const select = document.getElementById('logExercise');
     const prevValue = select.value;
@@ -974,9 +1298,79 @@
     renderDynamicFields(document.getElementById('logDynamicFields'), ex);
   }
 
+  function populateTrackerSelect(select) {
+    const prevValue = select.value;
+    select.innerHTML = activeTrackers().map((t) => `<option value="${t.id}">${escapeHtml(t.name)}</option>`).join('');
+    if (prevValue && [...select.options].some((o) => o.value === prevValue)) select.value = prevValue;
+  }
+
+  function renderLogMeasurementForm() {
+    const select = document.getElementById('logTracker');
+    populateTrackerSelect(select);
+    document.getElementById('logMeasurementDate').value = document.getElementById('logMeasurementDate').value || todayISO();
+    const tracker = trackerById(select.value);
+    document.getElementById('logMeasurementValueLabel').textContent = tracker ? `Value (${trackerUnitLabel(tracker)})` : 'Value';
+  }
+
+  function handleLogMeasurementSubmit(ev) {
+    ev.preventDefault();
+    const tracker = trackerById(document.getElementById('logTracker').value);
+    if (!tracker) { toast('Add a tracker first.'); return; }
+    const raw = parseFloat(document.getElementById('logMeasurementValue').value);
+    if (Number.isNaN(raw)) { toast('Enter a value.'); return; }
+    const date = document.getElementById('logMeasurementDate').value || todayISO();
+    const note = document.getElementById('logMeasurementNote').value.trim();
+    state.measurements.push({ id: genId('meas'), trackerId: tracker.id, date, value: trackerCanonicalFromDisplay(tracker, raw), note: note || null });
+    save();
+    toast('Entry saved');
+    document.getElementById('logMeasurementValue').value = '';
+    document.getElementById('logMeasurementNote').value = '';
+    renderRecentEntries();
+    renderDashboard();
+    renderHistory();
+  }
+
+  function renderLogWaterPanel() {
+    document.getElementById('logWaterUnitLabel').textContent = Units.volumeUnitLabel();
+    const wrap = document.getElementById('waterCupButtons');
+    wrap.innerHTML = cupButtonsHtml();
+    wrap.querySelectorAll('.cup-btn').forEach((btn) => btn.addEventListener('click', () => {
+      const cup = cupById(btn.dataset.cupId);
+      if (cup) logWaterAmount(cup.amountMl, cup.id);
+    }));
+  }
+
+  // Redraws whichever of the three Log sub-forms is currently selected,
+  // plus the shared "Recent entries" list below it.
+  function renderLogView() {
+    renderLogCategorySegmented();
+    document.getElementById('logForm').hidden = logCategory !== 'workout';
+    document.getElementById('logMeasurementForm').hidden = logCategory !== 'measurement';
+    document.getElementById('logWaterPanel').hidden = logCategory !== 'water';
+    if (logCategory === 'workout') renderLogForm();
+    if (logCategory === 'measurement') renderLogMeasurementForm();
+    if (logCategory === 'water') renderLogWaterPanel();
+    renderRecentEntries();
+  }
+
+  // "Recent entries" always reflects whichever Log category is active,
+  // rather than always showing workouts — otherwise it would look broken
+  // while logging water or a measurement.
   function renderRecentEntries() {
-    const recent = state.entries.slice().sort((a, b) => (b.date + b.id).localeCompare(a.date + a.id)).slice(0, 8);
     const wrap = document.getElementById('recentEntries');
+    if (logCategory === 'measurement') {
+      const recent = state.measurements.slice().sort((a, b) => (b.date + b.id).localeCompare(a.date + a.id)).slice(0, 8);
+      wrap.innerHTML = recent.length ? recent.map((m) => measurementRowHtml(m)).join('') : `<p class="muted-text">Nothing logged yet.</p>`;
+      wireMeasurementRowClicks(wrap);
+      return;
+    }
+    if (logCategory === 'water') {
+      const recent = state.waterEntries.slice().sort((a, b) => (b.date + b.id).localeCompare(a.date + a.id)).slice(0, 8);
+      wrap.innerHTML = recent.length ? recent.map((e) => waterEntryRowHtml(e)).join('') : `<p class="muted-text">Nothing logged yet.</p>`;
+      wireWaterEntryRowClicks(wrap);
+      return;
+    }
+    const recent = state.entries.slice().sort((a, b) => (b.date + b.id).localeCompare(a.date + a.id)).slice(0, 8);
     if (!recent.length) { wrap.innerHTML = `<p class="muted-text">Nothing logged yet — your first entry will show up here.</p>`; return; }
     wrap.innerHTML = recent.map((e) => entryRowHtml(e)).join('');
     wireEntryRowClicks(wrap);
@@ -1013,6 +1407,57 @@
   function wireEntryRowClicks(container) {
     container.querySelectorAll('.entry-row[data-entry-id]').forEach((row) => {
       row.addEventListener('click', () => openEntryModal(row.getAttribute('data-entry-id')));
+    });
+  }
+
+  function waterEntryRowHtml(e) {
+    const cup = e.cupId ? cupById(e.cupId) : null;
+    return `
+      <div class="entry-row" data-water-entry-id="${e.id}">
+        <div class="entry-row-main">
+          <div class="entry-row-title">${cup ? escapeHtml(cup.name) : 'Custom amount'}</div>
+          <div class="entry-row-sub">${fmtVolume(e.amountMl)}</div>
+        </div>
+        <div class="entry-row-date">${fmtDateShort(e.date)}</div>
+      </div>`;
+  }
+
+  function wireWaterEntryRowClicks(container) {
+    container.querySelectorAll('.entry-row[data-water-entry-id]').forEach((row) => {
+      row.addEventListener('click', () => openWaterEntryModal(row.getAttribute('data-water-entry-id')));
+    });
+  }
+
+  function openWaterEntryModal(entryId) {
+    const e = state.waterEntries.find((x) => x.id === entryId);
+    if (!e) return;
+    openModal(`
+      <div class="modal-title-row"><h2>Edit water entry</h2><button class="modal-close" data-action="close-modal">✕</button></div>
+      <div class="form-card">
+        <label class="field"><span class="field-label">Date</span><input type="date" id="editWaterDate" value="${e.date}" /></label>
+        <label class="field"><span class="field-label">Amount (${Units.volumeUnitLabel()})</span>
+          <input type="number" step="any" min="0" id="editWaterAmount" value="${round(Units.mlToDisplay(e.amountMl), 1)}" /></label>
+        <div class="btn-row"><button class="btn btn-primary btn-block" id="saveWaterEntryBtn">Save changes</button></div>
+        <button class="btn btn-danger btn-block" id="deleteWaterEntryBtn">Delete entry</button>
+      </div>
+    `);
+    document.getElementById('saveWaterEntryBtn').addEventListener('click', () => {
+      const raw = parseFloat(document.getElementById('editWaterAmount').value);
+      if (Number.isNaN(raw) || raw <= 0) { toast('Enter an amount greater than zero.'); return; }
+      e.date = document.getElementById('editWaterDate').value || e.date;
+      e.amountMl = Units.displayToMl(raw);
+      save();
+      closeModal();
+      toast('Entry updated');
+      renderRecentEntries(); renderDashboard(); renderHistory();
+    });
+    document.getElementById('deleteWaterEntryBtn').addEventListener('click', () => {
+      confirmDialog('Delete entry?', 'This can’t be undone.', 'Delete', () => {
+        state.waterEntries = state.waterEntries.filter((x) => x.id !== entryId);
+        save();
+        toast('Entry deleted');
+        renderRecentEntries(); renderDashboard(); renderHistory();
+      }, true);
     });
   }
 
@@ -1053,7 +1498,34 @@
     if (prev && [...select.options].some((o) => o.value === prev)) select.value = prev;
   }
 
+  let historyCategory = 'workout';
+
+  function renderHistoryCategorySegmented() {
+    document.querySelectorAll('#historyCategorySegmented button').forEach((b) => {
+      b.setAttribute('aria-checked', String(b.dataset.historyCat === historyCategory));
+    });
+    document.getElementById('historyFilterField').hidden = historyCategory !== 'workout';
+  }
+
   function renderHistory() {
+    renderHistoryCategorySegmented();
+    const wrap = document.getElementById('historyList');
+
+    if (historyCategory === 'measurement') {
+      const list = state.measurements.slice().sort((a, b) => (b.date + b.id).localeCompare(a.date + a.id));
+      document.getElementById('historyEmpty').hidden = list.length > 0;
+      wrap.innerHTML = list.map((m) => measurementRowHtml(m)).join('');
+      wireMeasurementRowClicks(wrap);
+      return;
+    }
+    if (historyCategory === 'water') {
+      const list = state.waterEntries.slice().sort((a, b) => (b.date + b.id).localeCompare(a.date + a.id));
+      document.getElementById('historyEmpty').hidden = list.length > 0;
+      wrap.innerHTML = list.map((e) => waterEntryRowHtml(e)).join('');
+      wireWaterEntryRowClicks(wrap);
+      return;
+    }
+
     renderHistoryFilter();
     const filter = document.getElementById('historyFilter').value || '__all__';
     const list = state.entries
@@ -1061,7 +1533,6 @@
       .slice()
       .sort((a, b) => (b.date + b.id).localeCompare(a.date + a.id));
     document.getElementById('historyEmpty').hidden = list.length > 0;
-    const wrap = document.getElementById('historyList');
     wrap.innerHTML = list.map((e) => entryRowHtml(e)).join('');
     wireEntryRowClicks(wrap);
   }
@@ -1147,7 +1618,7 @@
           <div class="suggestion-label">Next session${sugg.metric ? ` · ${sugg.metric === 'pace' ? 'Pace' : 'Distance'}` : ''}</div>
           <div class="suggestion-headline">${escapeHtml(sugg.headline)}</div>
           ${sugg.detail ? `<div class="suggestion-detail">${escapeHtml(sugg.detail)}</div>` : ''}
-          ${sugg.method ? `<div class="suggestion-method">${SUGGESTION_METHOD_NOTE[sugg.method]} Adjust for soreness and sleep.</div>` : ''}
+          ${sugg.method ? `<div class="suggestion-method">${SUGGESTION_METHOD_NOTE[sugg.method]} General heuristic, not personalized coaching — adjust for soreness, sleep, and stress.</div>` : ''}
         </div>`).join('')}
 
       <div class="pr-grid">
@@ -1387,13 +1858,341 @@
     }
   }
 
-  /* ============================== Settings ============================== */
+  /* ============================== Tracker detail modal ============================== */
 
-  function renderSettings() {
-    document.querySelectorAll('#themeSegmented button').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.themeChoice === state.settings.theme)));
-    document.querySelectorAll('#weightUnitSegmented button').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.unitChoice === state.settings.weightUnit)));
-    document.querySelectorAll('#distanceUnitSegmented button').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.unitChoice === state.settings.distanceUnit)));
+  function measurementRowHtml(m) {
+    const tracker = trackerById(m.trackerId);
+    return `
+      <div class="entry-row" data-measurement-id="${m.id}">
+        <div class="entry-row-main">
+          <div class="entry-row-title">${escapeHtml(tracker ? tracker.name : 'Deleted tracker')}</div>
+          <div class="entry-row-sub">${tracker ? escapeHtml(fmtTrackerValue(tracker, m.value)) : m.value}${m.note ? ` — “${escapeHtml(m.note)}”` : ''}</div>
+        </div>
+        <div class="entry-row-date">${fmtDateShort(m.date)}</div>
+      </div>`;
+  }
 
+  function wireMeasurementRowClicks(container) {
+    container.querySelectorAll('.entry-row[data-measurement-id]').forEach((row) => {
+      row.addEventListener('click', () => openMeasurementModal(row.getAttribute('data-measurement-id')));
+    });
+  }
+
+  function openMeasurementModal(measurementId) {
+    const m = state.measurements.find((x) => x.id === measurementId);
+    if (!m) return;
+    const tracker = trackerById(m.trackerId);
+    openModal(`
+      <div class="modal-title-row"><h2>Edit entry</h2><button class="modal-close" data-action="close-modal">✕</button></div>
+      <p class="muted-text modal-subtitle">${escapeHtml(tracker ? tracker.name : 'Deleted tracker')}</p>
+      <div class="form-card">
+        <label class="field"><span class="field-label">Date</span><input type="date" id="editMeasurementDate" value="${m.date}" /></label>
+        <label class="field"><span class="field-label">Value${tracker ? ` (${trackerUnitLabel(tracker)})` : ''}</span>
+          <input type="number" step="any" id="editMeasurementValue" value="${tracker ? trackerDisplayFromCanonical(tracker, m.value) : m.value}" /></label>
+        <label class="field"><span class="field-label">Note</span><input type="text" id="editMeasurementNote" value="${m.note ? escapeHtml(m.note) : ''}" maxlength="200" /></label>
+        <div class="btn-row"><button class="btn btn-primary btn-block" id="saveMeasurementBtn">Save changes</button></div>
+        <button class="btn btn-danger btn-block" id="deleteMeasurementBtn">Delete entry</button>
+      </div>
+    `);
+    document.getElementById('saveMeasurementBtn').addEventListener('click', () => {
+      const raw = parseFloat(document.getElementById('editMeasurementValue').value);
+      if (Number.isNaN(raw)) { toast('Enter a value.'); return; }
+      m.date = document.getElementById('editMeasurementDate').value || m.date;
+      m.value = tracker ? trackerCanonicalFromDisplay(tracker, raw) : raw;
+      m.note = document.getElementById('editMeasurementNote').value.trim() || null;
+      save();
+      closeModal();
+      toast('Entry updated');
+      renderRecentEntries(); renderDashboard(); renderHistory();
+    });
+    document.getElementById('deleteMeasurementBtn').addEventListener('click', () => {
+      confirmDialog('Delete entry?', 'This can’t be undone.', 'Delete', () => {
+        state.measurements = state.measurements.filter((x) => x.id !== measurementId);
+        save();
+        toast('Entry deleted');
+        renderRecentEntries(); renderDashboard(); renderHistory();
+      }, true);
+    });
+  }
+
+  // Mirrors renderExerciseDetail: current value/goal/meter, a trend chart,
+  // and the full entry list — deliberately simpler (no progressive-overload
+  // suggestion, no PR grid) since a body/wellness tracker's job is showing
+  // where things stand and where they've been, not coaching a next session.
+  function renderTrackerDetail(trackerId, scale) {
+    const tracker = trackerById(trackerId);
+    if (!tracker) return;
+    const history = measurementsFor(trackerId).slice().sort((a, b) => a.date.localeCompare(b.date));
+    const scaled = scale === 'last10' ? history.slice(-10) : history;
+    const chartPoints = scaled.map((m) => ({ date: m.date, value: m.value }));
+    const latest = latestMeasurement(trackerId);
+    const value = latest ? latest.value : null;
+    const { pct, achieved } = trackerProgressPct(tracker, value);
+
+    openModal(`
+      <div class="modal-title-row"><h2>${escapeHtml(tracker.name)}</h2><button class="modal-close" data-action="close-modal">✕</button></div>
+      <div class="ex-card-values">
+        <div class="ex-card-current">${fmtTrackerValue(tracker, value)}</div>
+        ${tracker.goal != null ? `<div class="ex-card-goal">/ ${trackerGoalLabel(tracker).replace('Goal ', '')}</div>` : ''}
+      </div>
+      ${tracker.goal != null ? `<div class="meter"><div class="meter-fill ${achieved ? 'is-complete' : ''}" style="--fill:${Math.min(100, pct)}%"></div></div>
+      <div class="ex-card-foot"><span class="ex-card-pct ${achieved ? 'is-complete' : ''}">${achieved ? '✓ Goal reached' : `${Math.round(pct)}% to goal`}</span></div>` : ''}
+
+      <div class="pr-grid">
+        <div class="pr-tile"><div class="value">${history.length}</div><div class="label">Entries logged</div></div>
+        <div class="pr-tile"><div class="value">${latest ? fmtDateShort(latest.date) : '—'}</div><div class="label">Last logged</div></div>
+      </div>
+
+      <div class="section-head">
+        <h2>Trend</h2>
+        <div class="segmented" id="trkChartScaleSegmented" role="radiogroup" aria-label="Chart range">
+          <button type="button" data-scale="last10" role="radio">Last 10</button>
+          <button type="button" data-scale="all" role="radio">All time</button>
+        </div>
+      </div>
+      <div class="chart-wrap">${Charts.lineChart(chartPoints, { goal: tracker.goal, formatValue: (v) => fmtTrackerValue(tracker, v) })}</div>
+
+      <div class="btn-row">
+        <button class="btn btn-secondary" id="editTrackerBtn">Edit tracker</button>
+        <button class="btn btn-secondary" id="archiveTrackerBtn">${tracker.archived ? 'Unarchive' : 'Archive'}</button>
+      </div>
+
+      <div class="section-head"><h2>All entries</h2></div>
+      <div class="entry-list" id="trackerEntryList">${history.slice().reverse().map((m) => measurementRowHtml(m)).join('') || '<p class="muted-text">No entries yet.</p>'}</div>
+    `);
+    document.querySelectorAll('#trkChartScaleSegmented button').forEach((btn) => {
+      btn.setAttribute('aria-checked', String(btn.dataset.scale === scale));
+      btn.addEventListener('click', () => renderTrackerDetail(trackerId, btn.dataset.scale));
+    });
+    wireMeasurementRowClicks(document.getElementById('trackerEntryList'));
+    document.getElementById('editTrackerBtn').addEventListener('click', () => openTrackerForm(tracker.id));
+    document.getElementById('archiveTrackerBtn').addEventListener('click', () => {
+      tracker.archived = !tracker.archived;
+      save();
+      closeModal();
+      toast(tracker.archived ? 'Tracker archived' : 'Tracker unarchived');
+      renderAll();
+    });
+  }
+
+  function openTrackerDetail(trackerId) {
+    renderTrackerDetail(trackerId, 'last10');
+  }
+
+  /* ============================== Add / edit tracker modal ============================== */
+
+  const UNIT_KIND_LABELS = { weight: 'Weight', length: 'Length', percent: 'Percent', hours: 'Hours', rating: 'Rating (1–5)', count: 'Custom number' };
+
+  function unitLabelForKind(unitKind, ratingMax) {
+    switch (unitKind) {
+      case 'weight': return Units.weightUnitLabel();
+      case 'length': return Units.lengthUnitLabel();
+      case 'percent': return '%';
+      case 'hours': return 'hr';
+      case 'rating': return `/ ${ratingMax || 5}`;
+      default: return '';
+    }
+  }
+
+  function openTrackerForm(trackerId) {
+    const editing = !!trackerId;
+    const tracker = editing ? trackerById(trackerId) : null;
+    const hasEntries = editing && measurementsFor(trackerId).length > 0;
+    const unitKind = tracker ? tracker.unitKind : 'weight';
+    const direction = tracker ? (tracker.direction || 'up') : 'up';
+
+    openModal(`
+      <div class="modal-title-row"><h2>${editing ? 'Edit tracker' : 'Add tracker'}</h2><button class="modal-close" data-action="close-modal">✕</button></div>
+      <div class="form-card">
+        <label class="field"><span class="field-label">Name</span>
+          <input type="text" id="trkName" value="${tracker ? escapeHtml(tracker.name) : ''}" placeholder="e.g. Waist, Protein, Resting Heart Rate" maxlength="60" /></label>
+
+        <div class="field">
+          <span class="field-label">Value type${hasEntries ? ' (locked — has logged entries)' : ''}</span>
+          <div class="segmented" id="trkUnitKindSegmentedA" role="radiogroup">
+            ${['weight', 'length', 'percent'].map((k) => `<button type="button" data-unit-kind="${k}" role="radio" ${hasEntries && unitKind !== k ? 'disabled' : ''}>${UNIT_KIND_LABELS[k]}</button>`).join('')}
+          </div>
+          <div class="segmented" id="trkUnitKindSegmentedB" role="radiogroup">
+            ${['hours', 'rating', 'count'].map((k) => `<button type="button" data-unit-kind="${k}" role="radio" ${hasEntries && unitKind !== k ? 'disabled' : ''}>${UNIT_KIND_LABELS[k]}</button>`).join('')}
+          </div>
+        </div>
+
+        <div class="field" id="trkUnitLabelField" hidden>
+          <span class="field-label">Unit label <span class="muted-text">(optional, e.g. "kcal", "g", "steps")</span></span>
+          <input type="text" id="trkUnitLabelInput" value="${tracker && tracker.unitLabel ? escapeHtml(tracker.unitLabel) : ''}" maxlength="20" />
+        </div>
+
+        <div id="trkGoalFieldWrap"></div>
+
+        <div class="field">
+          <span class="field-label">Direction <span class="muted-text">(which way is progress, if a goal is set)</span></span>
+          <div class="segmented" id="trkDirectionSegmented" role="radiogroup">
+            <button type="button" data-direction="up" role="radio">Higher is better</button>
+            <button type="button" data-direction="down" role="radio">Lower is better</button>
+          </div>
+        </div>
+
+        <button type="button" class="btn btn-primary btn-block" id="saveTrackerBtn">${editing ? 'Save changes' : 'Add tracker'}</button>
+        ${editing ? `<button type="button" class="btn btn-secondary btn-block" id="archiveTrackerToggleBtn">${tracker.archived ? 'Unarchive tracker' : 'Archive tracker'}</button>` : ''}
+        ${editing ? `<button type="button" class="btn-text-danger" id="deleteTrackerBtn">Delete tracker permanently</button>` : ''}
+      </div>
+    `);
+
+    let selectedUnitKind = unitKind;
+    let selectedDirection = direction;
+    let selectedRatingMax = tracker && tracker.ratingMax ? tracker.ratingMax : 5;
+
+    function renderGoalField() {
+      const wrap = document.getElementById('trkGoalFieldWrap');
+      document.getElementById('trkUnitLabelField').hidden = selectedUnitKind !== 'count';
+      const unitLabel = selectedUnitKind === 'count'
+        ? (document.getElementById('trkUnitLabelInput').value.trim() || '')
+        : unitLabelForKind(selectedUnitKind, selectedRatingMax);
+      const v = tracker && tracker.goal != null ? trackerDisplayFromCanonical(tracker, tracker.goal) : '';
+      wrap.innerHTML = `<label class="field"><span class="field-label">Goal ${unitLabel ? `(${unitLabel})` : ''} <span class="muted-text">(optional)</span></span>
+        <input type="number" step="any" id="trkGoalInput" value="${v}" placeholder="Leave blank to just track" /></label>`;
+    }
+
+    function setUnitKindUI(k) {
+      selectedUnitKind = k;
+      document.querySelectorAll('#trkUnitKindSegmentedA button, #trkUnitKindSegmentedB button').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.unitKind === k)));
+      renderGoalField();
+    }
+    function setDirectionUI(d) {
+      selectedDirection = d;
+      document.querySelectorAll('#trkDirectionSegmented button').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.direction === d)));
+    }
+
+    document.querySelectorAll('#trkUnitKindSegmentedA button, #trkUnitKindSegmentedB button').forEach((b) => {
+      b.addEventListener('click', () => { if (!b.disabled) setUnitKindUI(b.dataset.unitKind); });
+    });
+    document.querySelectorAll('#trkDirectionSegmented button').forEach((b) => b.addEventListener('click', () => setDirectionUI(b.dataset.direction)));
+    document.getElementById('trkUnitLabelField').querySelector('input').addEventListener('input', renderGoalField);
+    setUnitKindUI(selectedUnitKind);
+    setDirectionUI(selectedDirection);
+
+    document.getElementById('saveTrackerBtn').addEventListener('click', () => {
+      const name = document.getElementById('trkName').value.trim();
+      if (!name) { toast('Give it a name.'); return; }
+      const unitLabel = selectedUnitKind === 'count' ? (document.getElementById('trkUnitLabelInput').value.trim() || null) : null;
+      const rawGoal = parseFloat(document.getElementById('trkGoalInput').value);
+      const hasGoal = !Number.isNaN(rawGoal) && document.getElementById('trkGoalInput').value !== '';
+      const fields = { unitKind: selectedUnitKind, unitLabel, ratingMax: selectedUnitKind === 'rating' ? selectedRatingMax : null, direction: selectedDirection };
+      const canonicalGoal = hasGoal ? trackerCanonicalFromDisplay(Object.assign({}, tracker, fields), rawGoal) : null;
+      if (editing) {
+        Object.assign(tracker, { name }, fields, { goal: canonicalGoal });
+      } else {
+        state.trackers.push(Object.assign({ id: genId('trk'), name, archived: false, kind: 'metric', createdAt: new Date().toISOString() }, fields, { goal: canonicalGoal }));
+      }
+      save();
+      closeModal();
+      toast(editing ? 'Tracker updated' : 'Tracker added');
+      renderAll();
+    });
+
+    if (editing) {
+      document.getElementById('archiveTrackerToggleBtn').addEventListener('click', () => {
+        tracker.archived = !tracker.archived;
+        save();
+        closeModal();
+        toast(tracker.archived ? 'Tracker archived' : 'Tracker unarchived');
+        renderAll();
+      });
+      document.getElementById('deleteTrackerBtn').addEventListener('click', () => {
+        const entryCount = measurementsFor(trackerId).length;
+        const body = entryCount
+          ? `This permanently deletes "${tracker.name}" and its ${entryCount} logged entr${entryCount === 1 ? 'y' : 'ies'}. This can't be undone.`
+          : `This tracker has no logged entries. This can't be undone.`;
+        confirmDialog('Delete tracker permanently?', body, 'Delete', () => {
+          state.trackers = state.trackers.filter((t) => t.id !== trackerId);
+          state.measurements = state.measurements.filter((m) => m.trackerId !== trackerId);
+          save(); closeModal(); toast('Tracker deleted'); renderAll();
+        }, true);
+      });
+    }
+  }
+
+  /* ============================== Water: cup management ============================== */
+
+  function cupRowHtml(cup) {
+    return `
+      <div class="entry-row is-manage" data-cup-id="${cup.id}">
+        <div class="entry-row-main">
+          <div class="entry-row-title">${escapeHtml(cup.name)}</div>
+          <div class="entry-row-sub">${fmtVolume(cup.amountMl)}</div>
+        </div>
+        <div class="entry-row-actions">
+          <button class="btn btn-secondary btn-sm" data-action="edit-cup" data-id="${cup.id}">Edit</button>
+        </div>
+      </div>`;
+  }
+
+  function openCupForm(cupId) {
+    const editing = !!cupId;
+    const cup = editing ? cupById(cupId) : null;
+    openModal(`
+      <div class="modal-title-row"><h2>${editing ? 'Edit cup' : 'Add cup'}</h2><button class="modal-close" data-action="close-modal">✕</button></div>
+      <div class="form-card">
+        <label class="field"><span class="field-label">Name</span>
+          <input type="text" id="cupName" value="${cup ? escapeHtml(cup.name) : ''}" placeholder="e.g. Water bottle" maxlength="40" /></label>
+        <label class="field"><span class="field-label">Amount (${Units.volumeUnitLabel()})</span>
+          <input type="number" step="any" min="0" id="cupAmount" value="${cup ? round(Units.mlToDisplay(cup.amountMl), 1) : ''}" placeholder="e.g. 16" /></label>
+        <button type="button" class="btn btn-primary btn-block" id="saveCupBtn">${editing ? 'Save changes' : 'Add cup'}</button>
+        ${editing ? `<button type="button" class="btn-text-danger" id="deleteCupBtn">Delete cup</button>` : ''}
+      </div>
+    `);
+    document.getElementById('saveCupBtn').addEventListener('click', () => {
+      const name = document.getElementById('cupName').value.trim();
+      const raw = parseFloat(document.getElementById('cupAmount').value);
+      if (!name) { toast('Give it a name.'); return; }
+      if (Number.isNaN(raw) || raw <= 0) { toast('Enter an amount greater than zero.'); return; }
+      const amountMl = Units.displayToMl(raw);
+      if (editing) {
+        cup.name = name;
+        cup.amountMl = amountMl;
+      } else {
+        state.water.cups.push({ id: genId('cup'), name, amountMl });
+      }
+      save();
+      closeModal();
+      toast(editing ? 'Cup updated' : 'Cup added');
+      renderManage();
+      renderDashboard();
+      renderLogForm();
+    });
+    if (editing) {
+      document.getElementById('deleteCupBtn').addEventListener('click', () => {
+        confirmDialog('Delete this cup?', 'This can’t be undone. Past water entries already logged aren’t affected.', 'Delete', () => {
+          state.water.cups = state.water.cups.filter((c) => c.id !== cupId);
+          save();
+          closeModal();
+          toast('Cup deleted');
+          renderManage();
+          renderDashboard();
+          renderLogForm();
+        }, true);
+      });
+    }
+  }
+
+  /* ============================== Manage ==============================
+     One tab with three sub-panels, switched by manageCategorySegmented:
+     Exercises (the lift/reps/cardio definitions, previously listed in
+     Settings), Body (the metric trackers from the section above), and
+     Water (daily goal + cup sizes). All configuration lives here now;
+     Settings (reached from the header) is app-wide preferences only. */
+
+  let manageCategory = 'exercises';
+
+  function setManageCategory(cat) {
+    manageCategory = cat;
+    document.querySelectorAll('#manageCategorySegmented button').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.manageCat === cat)));
+    document.getElementById('manageExercisesPanel').hidden = cat !== 'exercises';
+    document.getElementById('manageMeasurementsPanel').hidden = cat !== 'measurements';
+    document.getElementById('manageWaterPanel').hidden = cat !== 'water';
+  }
+
+  function renderExerciseManageList() {
     const wrap = document.getElementById('exerciseManageList');
     const groups = groupBySection(state.exercises);
     wrap.innerHTML = ['goal', 'daily', 'accessory'].map((sec) => {
@@ -1421,6 +2220,59 @@
     }));
   }
 
+  function trackerManageRowHtml(tracker) {
+    return `
+      <div class="entry-row is-manage" data-tracker-id="${tracker.id}">
+        <div class="entry-row-main">
+          <div class="entry-row-title">${escapeHtml(tracker.name)} ${tracker.archived ? '<span class="chip chip-archived">archived</span>' : ''}</div>
+          <div class="entry-row-sub">${UNIT_KIND_LABELS[tracker.unitKind] || ''}${tracker.goal != null ? ` · ${trackerGoalLabel(tracker)}` : ' · no goal set'}</div>
+        </div>
+        <div class="entry-row-actions">
+          ${tracker.archived ? `<button class="btn btn-secondary btn-sm" data-action="unarchive-tracker" data-id="${tracker.id}">Unarchive</button>` : ''}
+          <button class="btn btn-secondary btn-sm" data-action="edit-tracker" data-id="${tracker.id}">Edit</button>
+        </div>
+      </div>`;
+  }
+
+  function renderTrackerManageList() {
+    const wrap = document.getElementById('trackerManageList');
+    wrap.innerHTML = state.trackers.map(trackerManageRowHtml).join('') || '<p class="muted-text">No trackers yet — add one to start tracking anything you like.</p>';
+    wrap.querySelectorAll('[data-action="edit-tracker"]').forEach((btn) => btn.addEventListener('click', () => openTrackerForm(btn.dataset.id)));
+    wrap.querySelectorAll('[data-action="unarchive-tracker"]').forEach((btn) => btn.addEventListener('click', () => {
+      const t = trackerById(btn.dataset.id);
+      if (!t) return;
+      t.archived = false;
+      save();
+      toast('Tracker unarchived');
+      renderAll();
+    }));
+  }
+
+  function renderWaterManagePanel() {
+    document.getElementById('waterGoalUnitLabel').textContent = Units.volumeUnitLabel();
+    document.getElementById('waterGoalInput').value = state.water.goalMl ? round(Units.mlToDisplay(state.water.goalMl), 1) : '';
+    const wrap = document.getElementById('cupManageList');
+    wrap.innerHTML = state.water.cups.map(cupRowHtml).join('') || '<p class="muted-text">No cups yet.</p>';
+    wrap.querySelectorAll('[data-action="edit-cup"]').forEach((btn) => btn.addEventListener('click', () => openCupForm(btn.dataset.id)));
+  }
+
+  function renderManage() {
+    setManageCategory(manageCategory);
+    renderExerciseManageList();
+    renderTrackerManageList();
+    renderWaterManagePanel();
+  }
+
+  /* ============================== Settings ============================== */
+
+  function renderSettings() {
+    document.querySelectorAll('#themeSegmented button').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.themeChoice === state.settings.theme)));
+    document.querySelectorAll('#weightUnitSegmented button').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.unitChoice === state.settings.weightUnit)));
+    document.querySelectorAll('#distanceUnitSegmented button').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.unitChoice === state.settings.distanceUnit)));
+    document.querySelectorAll('#lengthUnitSegmented button').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.unitChoice === state.settings.lengthUnit)));
+    document.querySelectorAll('#volumeUnitSegmented button').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.unitChoice === state.settings.volumeUnit)));
+  }
+
   function exportBackup() {
     const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -1441,7 +2293,7 @@
         const parsed = JSON.parse(reader.result);
         if (!Array.isArray(parsed.exercises) || !Array.isArray(parsed.entries)) throw new Error('bad shape');
         confirmDialog('Replace all data?', 'Importing will overwrite everything currently in the app with this backup file.', 'Import', () => {
-          parsed.settings = Object.assign({ theme: 'system', weightUnit: 'lb', distanceUnit: 'mi' }, parsed.settings || {});
+          parsed.settings = Object.assign({}, DEFAULT_SETTINGS, parsed.settings || {});
           // Run the same migration pipeline load() uses — a backup exported
           // from an older version of the app is brought up to the current
           // shape the same way, additively, instead of being rejected.
@@ -1464,7 +2316,11 @@
   // matches `tab`, updates the bottom tab bar's highlighted icon, and
   // re-renders that one tab so it always shows current data (rather than
   // whatever it last looked like). There's no real router here — with only
-  // four screens, "show this one, hide the rest" is simplest.
+  // a handful of screens, "show this one, hide the rest" is simplest.
+  // Settings has no tabbar button (it opens from the header gear icon
+  // instead — see openSettings() below), so switching to it correctly
+  // leaves every tab unhighlighted, which is the desired look for a screen
+  // layered on top rather than a sixth peer tab.
   function switchTab(tab) {
     document.querySelectorAll('.view').forEach((v) => { v.hidden = v.dataset.view !== tab; });
     document.querySelectorAll('.tab').forEach((t) => {
@@ -1472,21 +2328,35 @@
       else t.removeAttribute('aria-current');
     });
     if (tab === 'dashboard') renderDashboard();
-    if (tab === 'log') renderLogForm();
+    if (tab === 'log') renderLogView();
     if (tab === 'history') renderHistory();
+    if (tab === 'manage') renderManage();
     if (tab === 'settings') renderSettings();
+  }
+
+  // Settings is reached from the header gear icon rather than a bottom tab,
+  // so it needs to remember which tab was active in order to return there
+  // on close instead of always landing back on Dashboard.
+  let lastTabBeforeSettings = 'dashboard';
+  function openSettings() {
+    const activeTab = document.querySelector('.tab[aria-current="page"]');
+    lastTabBeforeSettings = activeTab ? activeTab.dataset.tab : 'dashboard';
+    switchTab('settings');
+  }
+  function closeSettings() {
+    switchTab(lastTabBeforeSettings);
   }
 
   // The heavy-handed "just redraw everything" refresh, used after anything
   // that could affect more than one screen at once (import, unit change,
-  // adding/editing/archiving an exercise). Cheap enough for how little data
-  // this app holds — no need for more surgical updates.
+  // adding/editing/archiving an exercise or tracker). Cheap enough for how
+  // little data this app holds — no need for more surgical updates.
   function renderAll() {
     applyTheme();
     renderDashboard();
-    renderLogForm();
-    renderRecentEntries();
+    renderLogView();
     renderHistory();
+    renderManage();
     renderSettings();
   }
 
@@ -1496,13 +2366,8 @@
       if (btn) switchTab(btn.dataset.tab);
     });
 
-    document.getElementById('quickThemeToggle').addEventListener('click', () => {
-      const next = resolvedTheme() === 'dark' ? 'light' : 'dark';
-      state.settings.theme = next;
-      save();
-      applyTheme();
-      renderSettings();
-    });
+    document.getElementById('openSettingsBtn').addEventListener('click', openSettings);
+    document.querySelectorAll('[data-action="close-settings"]').forEach((btn) => btn.addEventListener('click', closeSettings));
 
     document.getElementById('logExercise').addEventListener('change', (ev) => {
       if (ev.target.value === '__add_new__') {
@@ -1514,7 +2379,41 @@
     });
     document.getElementById('logForm').addEventListener('submit', handleLogSubmit);
 
+    document.getElementById('logTracker').addEventListener('change', (ev) => {
+      const tracker = trackerById(ev.target.value);
+      document.getElementById('logMeasurementValueLabel').textContent = tracker ? `Value (${trackerUnitLabel(tracker)})` : 'Value';
+    });
+    document.getElementById('logMeasurementForm').addEventListener('submit', handleLogMeasurementSubmit);
+
+    document.getElementById('logWaterCustomAddBtn').addEventListener('click', () => {
+      const raw = parseFloat(document.getElementById('logWaterCustomAmount').value);
+      if (Number.isNaN(raw) || raw <= 0) { toast('Enter an amount greater than zero.'); return; }
+      logWaterAmount(Units.displayToMl(raw), null);
+      document.getElementById('logWaterCustomAmount').value = '';
+    });
+
     document.getElementById('historyFilter').addEventListener('change', renderHistory);
+    document.getElementById('historyCategorySegmented').addEventListener('click', (ev) => {
+      const btn = ev.target.closest('button'); if (!btn) return;
+      historyCategory = btn.dataset.historyCat;
+      renderHistory();
+    });
+
+    document.getElementById('manageCategorySegmented').addEventListener('click', (ev) => {
+      const btn = ev.target.closest('button'); if (!btn) return;
+      setManageCategory(btn.dataset.manageCat);
+    });
+    document.querySelectorAll('[data-action="add-exercise"]').forEach((btn) => btn.addEventListener('click', () => openExerciseForm(null)));
+    document.querySelectorAll('[data-action="add-tracker"]').forEach((btn) => btn.addEventListener('click', () => openTrackerForm(null)));
+    document.querySelectorAll('[data-action="add-cup"]').forEach((btn) => btn.addEventListener('click', () => openCupForm(null)));
+    document.getElementById('saveWaterGoalBtn').addEventListener('click', () => {
+      const raw = parseFloat(document.getElementById('waterGoalInput').value);
+      state.water.goalMl = (!Number.isNaN(raw) && raw > 0) ? Units.displayToMl(raw) : null;
+      save();
+      toast('Water goal saved');
+      renderManage();
+      renderDashboard();
+    });
 
     document.getElementById('themeSegmented').addEventListener('click', (ev) => {
       const btn = ev.target.closest('button'); if (!btn) return;
@@ -1528,8 +2427,14 @@
       const btn = ev.target.closest('button'); if (!btn) return;
       state.settings.distanceUnit = btn.dataset.unitChoice; save(); renderAll();
     });
-
-    document.querySelectorAll('[data-action="add-exercise"]').forEach((btn) => btn.addEventListener('click', () => openExerciseForm(null)));
+    document.getElementById('lengthUnitSegmented').addEventListener('click', (ev) => {
+      const btn = ev.target.closest('button'); if (!btn) return;
+      state.settings.lengthUnit = btn.dataset.unitChoice; save(); renderAll();
+    });
+    document.getElementById('volumeUnitSegmented').addEventListener('click', (ev) => {
+      const btn = ev.target.closest('button'); if (!btn) return;
+      state.settings.volumeUnit = btn.dataset.unitChoice; save(); renderAll();
+    });
 
     document.getElementById('exportBtn').addEventListener('click', exportBackup);
     document.getElementById('importBtn').addEventListener('click', () => document.getElementById('importFile').click());
@@ -1557,6 +2462,7 @@
     load();
     applyTheme();
     document.getElementById('logDate').value = todayISO();
+    document.getElementById('logMeasurementDate').value = todayISO();
     wireEvents();
     renderAll();
 
