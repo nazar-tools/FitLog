@@ -1,17 +1,6 @@
 /* ============================================================================
    FIT LOG — app.js
    ============================================================================
-   A plain HTML/CSS/JavaScript app — no build step, no framework, no
-   third-party libraries. Every screen is one page (index.html) whose content
-   is swapped out by this file; "screens" are <section> elements shown and
-   hidden here rather than separate pages. All application data lives in the
-   browser's localStorage on-device — nothing is ever sent over the network.
-
-   The file is organized top-to-bottom as one list of sections, each marked
-   with a banner comment like the one below. An editor's "find" (Ctrl+F /
-   Cmd+F) on a section's name is the fastest way to jump to it — line numbers
-   are omitted here since they drift as the file changes. Reading order, and
-   what each section is responsible for:
 
      SCHEMA VERSION & MIGRATIONS  – the data shape, and the safe way to
                                      change it later without losing anyone's
@@ -1158,7 +1147,7 @@
           <div class="suggestion-label">Next session${sugg.metric ? ` · ${sugg.metric === 'pace' ? 'Pace' : 'Distance'}` : ''}</div>
           <div class="suggestion-headline">${escapeHtml(sugg.headline)}</div>
           ${sugg.detail ? `<div class="suggestion-detail">${escapeHtml(sugg.detail)}</div>` : ''}
-          ${sugg.method ? `<div class="suggestion-method">${SUGGESTION_METHOD_NOTE[sugg.method]} General heuristic, not personalized coaching — adjust for soreness, sleep, and stress.</div>` : ''}
+          ${sugg.method ? `<div class="suggestion-method">${SUGGESTION_METHOD_NOTE[sugg.method]} Adjust for soreness and sleep.</div>` : ''}
         </div>`).join('')}
 
       <div class="pr-grid">
