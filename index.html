@@ -22,7 +22,7 @@
 <body>
 <div id="app">
 
-  <header class="topbar">
+  <header class="topbar" id="topbar">
     <h1 class="brand">Fit Log</h1>
     <button id="openSettingsBtn" class="icon-btn" aria-label="Settings" title="Settings">
       <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/></svg>
@@ -30,6 +30,17 @@
   </header>
 
   <main id="main">
+
+    <!-- FIRST-RUN SETUP WIZARD (only ever shown once, before any data exists —
+         see startSetupWizard() in app.js) -->
+    <section id="view-setup" class="view" data-view="setup" hidden>
+      <div class="section-head"><h2 id="setupStepLabel">Welcome to Fit Log</h2></div>
+      <div id="setupContent"></div>
+      <div class="btn-row">
+        <button type="button" class="btn btn-secondary" id="setupBackBtn" hidden>Back</button>
+        <button type="button" class="btn btn-primary" id="setupNextBtn">Next</button>
+      </div>
+    </section>
 
     <!-- DASHBOARD -->
     <section id="view-dashboard" class="view" data-view="dashboard">
@@ -92,6 +103,10 @@
         <label class="field">
           <span class="field-label" id="logMeasurementValueLabel">Value</span>
           <input type="number" step="any" id="logMeasurementValue" required />
+        </label>
+        <label class="field" id="logSleepQualityField" hidden>
+          <span class="field-label">Sleep quality (1-5, optional)</span>
+          <input type="number" step="1" min="1" max="5" id="logSleepQuality" />
         </label>
         <label class="field">
           <span class="field-label">Note (optional)</span>
@@ -191,7 +206,7 @@
 
       <div id="manageWaterPanel" hidden>
         <div class="section-head"><h2>Daily water goal</h2></div>
-        <div class="card">
+        <div class="card form-card">
           <label class="field">
             <span class="field-label">Goal (<span id="waterGoalUnitLabel"></span>)</span>
             <input type="number" step="any" min="0" id="waterGoalInput" />
@@ -223,10 +238,19 @@
       </div>
 
       <div class="section-head"><h2>Profile</h2></div>
-      <div class="card">
+      <div class="card form-card">
         <p class="muted-text">Used only by the optional insight calculators below (BMI, strength level, pace level) — never required, and nothing here is used anywhere else in the app.</p>
-        <label class="field"><span class="field-label">Height (<span id="profileHeightUnitLabel"></span>)</span>
-          <input type="number" step="any" min="0" id="profileHeightInput" placeholder="Not set" /></label>
+        <div class="field" id="profileHeightFieldCm">
+          <span class="field-label">Height (cm)</span>
+          <input type="number" step="any" min="0" id="profileHeightCm" placeholder="Not set" />
+        </div>
+        <div class="field" id="profileHeightFieldFtIn">
+          <span class="field-label">Height (ft/in)</span>
+          <div class="inline-time-fields">
+            <input type="number" step="1" min="0" inputmode="numeric" id="profileHeightFt" placeholder="ft" />
+            <input type="number" step="1" min="0" max="11" inputmode="numeric" id="profileHeightIn" placeholder="in" />
+          </div>
+        </div>
         <div class="setting-row">
           <span>Sex <span class="muted-text">(for strength/pace benchmarks)</span></span>
           <div class="segmented" id="profileSexSegmented" role="radiogroup" aria-label="Sex">
@@ -323,7 +347,7 @@
 
       <div class="section-head"><h2>About</h2></div>
       <div class="card">
-        <p class="muted-text">Fit Log v2.1 &middot; installed as a home-screen app, all data stored on-device.</p>
+        <p class="muted-text">Fit Log v1.0 &middot; installed as a home-screen app, all data stored on-device.</p>
       </div>
     </section>
 

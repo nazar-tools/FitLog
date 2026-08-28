@@ -31,10 +31,12 @@
        suggestion engine          – the "Next session" recommendation logic.
      Body & wellness trackers     – generic "log a number against an
                                      optional goal" trackers (weight, body
-                                     fat %, sleep, and anything a user
-                                     adds) — the scalable metric-tracking
-                                     building block. Height lives in
-                                     Settings' Profile instead — it isn't
+                                     fat %, and anything a user adds) — the
+                                     scalable metric-tracking building
+                                     block. Sleep is the one composite
+                                     tracker (hours + a quality rating per
+                                     entry, `kind: 'sleep'`). Height lives
+                                     in Settings' Profile instead — it isn't
                                      something that trends over time, so
                                      it's a one-time fact, not a tracker.
      Insights & standards         – optional, off-by-default calculators
@@ -81,6 +83,11 @@
                                      sex — fixed facts, not trackers) and
                                      the Insights toggles, reached via the
                                      header gear icon; export/import backup.
+     First-run setup wizard       – shown once, only when there's no saved
+                                     data at all, instead of silently
+                                     seeding the same fixed goals for
+                                     everyone; builds the real starting
+                                     data from what's answered.
      Tabs / global wiring         – wires up every click handler once, and
                                      switchTab()/renderAll(), which redraw
                                      the current screen after any change.
@@ -135,7 +142,7 @@
      import path runs the exact same migrations.
      ========================================================================== */
 
-  const SCHEMA_VERSION = 5;
+  const SCHEMA_VERSION = 6;
 
   // Known "daily" exercise ids from before the Goal/Daily/Other split
   // existed (schema v1). Used only by the v1->v2 migration below.
@@ -226,7 +233,50 @@
       data.exercises.forEach((ex) => { if (ex.kind === 'weight' && ex.liftType === undefined) ex.liftType = null; });
       return data;
     },
-    // Next migration goes here, keyed `5: (data) => { ...; return data; }`.
+    // v5 -> v6: Sleep Hours and Sleep Feeling were two separate trackers,
+    // meaning one night's sleep took two log entries. They're merged here
+    // into one `kind: 'sleep'` tracker (id `trk_sleep`) whose measurements
+    // carry both an hours `value` and a 1-5 `quality` on the same entry —
+    // see the "Body & wellness trackers" section for how `kind` branches.
+    //
+    // Merging is best-effort and date-based (the normal case is one sleep
+    // log per night): for each date either tracker has an entry on, take
+    // the LATEST entry per tracker per date (highest id) and pair them —
+    // an hours-only or quality-only date still gets a merged entry with
+    // the other field left null, so nothing is dropped either way.
+    5: (data) => {
+      const hoursTracker = (data.trackers || []).find((t) => t.id === 'trk_sleephours');
+      const feelTracker = (data.trackers || []).find((t) => t.id === 'trk_sleepfeel');
+      if (hoursTracker || feelTracker) {
+        const lastPerDate = (trackerId) => {
+          const map = new Map();
+          (data.measurements || [])
+            .filter((m) => m.trackerId === trackerId)
+            .sort((a, b) => (a.date + a.id).localeCompare(b.date + b.id))
+            .forEach((m) => map.set(m.date, m));
+          return map;
+        };
+        const hoursByDate = hoursTracker ? lastPerDate(hoursTracker.id) : new Map();
+        const feelByDate = feelTracker ? lastPerDate(feelTracker.id) : new Map();
+        const dates = new Set([...hoursByDate.keys(), ...feelByDate.keys()]);
+        dates.forEach((date) => {
+          const h = hoursByDate.get(date);
+          const f = feelByDate.get(date);
+          data.measurements.push({
+            id: genId('meas'), trackerId: 'trk_sleep', date,
+            value: h ? h.value : null, quality: f ? f.value : null,
+            note: (h && h.note) || (f && f.note) || null,
+          });
+        });
+        data.trackers = (data.trackers || []).filter((t) => t.id !== 'trk_sleephours' && t.id !== 'trk_sleepfeel');
+        data.measurements = data.measurements.filter((m) => m.trackerId !== 'trk_sleephours' && m.trackerId !== 'trk_sleepfeel');
+        if (!data.trackers.some((t) => t.id === 'trk_sleep')) {
+          data.trackers.push({ id: 'trk_sleep', name: 'Sleep', kind: 'sleep', unitKind: 'hours', goal: (hoursTracker && hoursTracker.goal) || null, direction: (hoursTracker && hoursTracker.direction) || null, archived: (hoursTracker && hoursTracker.archived) || false, createdAt: new Date().toISOString() });
+        }
+      }
+      return data;
+    },
+    // Next migration goes here, keyed `6: (data) => { ...; return data; }`.
   };
 
   /** Walks `data` forward through MIGRATIONS until it matches SCHEMA_VERSION. */
@@ -242,19 +292,22 @@
 
   /* ============================== Defaults ============================== */
 
-  // Starter body/wellness trackers — every one is a plain "log a number,
-  // optionally against a goal" tracker (`kind: 'metric'`). `kind` exists on
-  // day one even though 'metric' is the only value today, so a future
-  // tracker kind (e.g. a yes/no daily habit checklist) is a new `kind`
-  // value and a new renderer, not a data-shape change for existing ones —
-  // see the "Manage: trackers" section for where `kind` is read.
+  // Starter body/wellness trackers. Weight and Body Fat % are the plain
+  // "log a number, optionally against a goal" shape (`kind: 'metric'`).
+  // Sleep is the one composite tracker: one entry per night carries both
+  // hours (`value`, this tracker's normal unitKind) and a 1-5 quality
+  // rating (`quality`) — `kind: 'sleep'` is what tells the shared
+  // rendering/logging code to show and read that second field; see the
+  // "Body & wellness trackers" section below for where `kind` branches.
+  // A future kind beyond these two (e.g. a yes/no daily habit checklist)
+  // is a new `kind` value and a new branch, not a data-shape change for
+  // existing trackers.
   function defaultTrackers() {
     const now = new Date().toISOString();
     return [
       { id: 'trk_weight', name: 'Weight', kind: 'metric', unitKind: 'weight', goal: null, direction: null, archived: false, createdAt: now },
       { id: 'trk_bodyfat', name: 'Body Fat %', kind: 'metric', unitKind: 'percent', goal: null, direction: null, archived: false, createdAt: now },
-      { id: 'trk_sleephours', name: 'Sleep Hours', kind: 'metric', unitKind: 'hours', goal: null, direction: null, archived: false, createdAt: now },
-      { id: 'trk_sleepfeel', name: 'Sleep Feeling', kind: 'metric', unitKind: 'rating', ratingMax: 5, goal: null, direction: null, archived: false, createdAt: now },
+      { id: 'trk_sleep', name: 'Sleep', kind: 'sleep', unitKind: 'hours', goal: null, direction: null, archived: false, createdAt: now },
     ];
   }
 
@@ -301,9 +354,9 @@
       settings: Object.assign({}, DEFAULT_SETTINGS),
       profile: defaultProfile(),
       exercises: [
-        { id: 'ex_bench', name: 'Bench Press', kind: 'weight', bodyRegion: 'upper', section: 'goal', goal: 225, liftType: 'bench', archived: false, createdAt: now },
-        { id: 'ex_squat', name: 'Squat', kind: 'weight', bodyRegion: 'lower', section: 'goal', goal: 315, liftType: 'squat', archived: false, createdAt: now },
-        { id: 'ex_deadlift', name: 'Deadlift', kind: 'weight', bodyRegion: 'lower', section: 'goal', goal: 405, liftType: 'deadlift', archived: false, createdAt: now },
+        { id: 'ex_bench', name: 'Bench Press', kind: 'weight', bodyRegion: 'upper', section: 'goal', goal: PLATE_GOALS.bench, liftType: 'bench', archived: false, createdAt: now },
+        { id: 'ex_squat', name: 'Squat', kind: 'weight', bodyRegion: 'lower', section: 'goal', goal: PLATE_GOALS.squat, liftType: 'squat', archived: false, createdAt: now },
+        { id: 'ex_deadlift', name: 'Deadlift', kind: 'weight', bodyRegion: 'lower', section: 'goal', goal: PLATE_GOALS.deadlift, liftType: 'deadlift', archived: false, createdAt: now },
         { id: 'ex_pushups', name: 'Push-ups', kind: 'reps', section: 'daily', goal: 50, archived: false, createdAt: now },
         { id: 'ex_bwsquats', name: 'Bodyweight Squats', kind: 'reps', section: 'daily', goal: 50, archived: false, createdAt: now },
         { id: 'ex_pullups', name: 'Pull-ups', kind: 'reps', section: 'daily', goal: 15, archived: false, createdAt: now },
@@ -324,11 +377,23 @@
      gets to disk" in one place. */
 
   let state = null;
+  // True only for a genuinely first-ever run (see load() below) — init()
+  // checks this to show the setup wizard instead of the normal dashboard.
+  let needsSetup = false;
 
   function load() {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) { state = defaultData(); save(); return; }
+      if (!raw) {
+        // Truly first run. `state` gets an inert skeleton so the rest of
+        // the app has something safe to read, but it's deliberately NOT
+        // saved yet — finishSetup() (see "First-run setup wizard" below)
+        // builds and saves the real starting data once answered, so
+        // closing mid-wizard leaves nothing partial behind to reopen into.
+        state = defaultData();
+        needsSetup = true;
+        return;
+      }
       const parsed = JSON.parse(raw);
       if (!parsed || !Array.isArray(parsed.exercises) || !Array.isArray(parsed.entries)) throw new Error('bad shape');
       parsed.settings = Object.assign({}, DEFAULT_SETTINGS, parsed.settings || {});
@@ -399,6 +464,16 @@
   function round(v, dp) {
     const f = Math.pow(10, dp);
     return Math.round(v * f) / f;
+  }
+
+  // Splits a canonical height in cm into whole feet + inches for display —
+  // nobody knows their height as a single number of inches, so Profile's
+  // imperial height field is feet-and-inches (see the Settings section
+  // below), never the plain "in" a length tracker like Waist uses.
+  function cmToFtIn(cm) {
+    const totalIn = cm / CM_PER_IN;
+    const ft = Math.floor(totalIn / 12);
+    return { ft, inch: round(totalIn - ft * 12, 1) };
   }
 
   function fmtWeight(lb) {
@@ -783,6 +858,15 @@
     return tracker.goal != null ? `Goal ${fmtTrackerValue(tracker, tracker.goal)}` : '';
   }
 
+  // The Sleep tracker's second field (see `kind: 'sleep'` above) — a plain
+  // 1-5 rating, optional, clamped and rounded rather than trusting raw
+  // input straight from a number field.
+  function clampQuality(raw) {
+    const n = parseFloat(raw);
+    return Number.isNaN(n) ? null : Math.max(1, Math.min(5, Math.round(n)));
+  }
+  function fmtQuality(q) { return q == null ? null : `${q}/5`; }
+
   // Same shape as progressPct() for exercises: percent of goal reached,
   // "lower is better" when direction is 'down' (e.g. a body-fat % goal).
   function trackerProgressPct(tracker, value) {
@@ -852,6 +936,17 @@
     deadlift: { label: 'Deadlift', male: [1.0, 1.25, 2.0, 2.5, 3.0], female: [0.65, 0.95, 1.5, 2.0, 2.5] },
   };
   const LIFT_TYPE_LABELS = { bench: 'Bench Press', squat: 'Squat', deadlift: 'Deadlift' };
+
+  // Fixed "plates" goals — a barbell loaded to 2/3/4 plates a side (plus the
+  // 45lb bar) for bench/squat/deadlift respectively — offered in the setup
+  // wizard as the plain alternative to a bodyweight-standard goal below, and
+  // also what a brand-new install's defaultData() seeds (see below).
+  const PLATE_GOALS = { bench: 225, squat: 315, deadlift: 405 };
+  // Which LIFT_STANDARDS threshold index a wizard tier name maps to —
+  // [Beginner, Novice, Intermediate, Advanced, Elite] — Beginner/Novice are
+  // omitted from the wizard itself since they're a trivially low bar for
+  // something being set as a goal, not just a classification.
+  const TIER_TO_INDEX = { intermediate: 2, advanced: 3, elite: 4 };
 
   // Pace tiers as seconds-per-mile ceilings for [Elite, Advanced, Good,
   // Recreational] — faster (lower) than the ceiling qualifies for that
@@ -1326,7 +1421,7 @@
           <div class="ex-card-badge">${kindBadge(ex)}</div>
         </div>
         ${progressHtml}
-        ${chartPoints.length >= 2 ? `<div class="ex-card-chart">${Charts.lineChart(chartPoints, { goal: chartGoal, width: 300, height: 84, formatValue: (v) => formatValueForExercise(ex, v, trendMetric) })}</div>` : ''}
+        ${chartPoints.length >= 2 ? `<div class="ex-card-chart">${Charts.lineChart(chartPoints, { goal: chartGoal, width: 300, height: 96, formatValue: (v) => formatValueForExercise(ex, v, trendMetric) })}</div>` : ''}
         ${insightHtml}
       </div>`;
   }
@@ -1400,6 +1495,8 @@
       ? `<div class="insight-line">BMI ${insights.bmi.value} &middot; <strong>${insights.bmi.category}</strong></div>`
       : (insights && !insights.bmi && state.settings.showWeightInsights && tracker.id === BODY_WEIGHT_TRACKER_ID
           ? `<div class="insight-line muted-text">Set your height in Settings → Profile to see your BMI.</div>` : '');
+    const qualityLine = tracker.kind === 'sleep' && latest && latest.quality != null
+      ? `<div class="insight-line">Quality ${fmtQuality(latest.quality)}</div>` : '';
     return `
       <div class="card ex-card" data-tracker-id="${tracker.id}">
         <div class="ex-card-top">
@@ -1413,7 +1510,8 @@
         ${tracker.goal != null ? `
           <div class="meter"><div class="meter-fill ${achieved ? 'is-complete' : ''}" style="--fill:${fillPct}%"></div></div>
           <div class="ex-card-foot"><span class="ex-card-pct ${achieved ? 'is-complete' : ''}">${achieved ? '✓ Goal reached' : `${Math.round(pct)}%`}</span></div>` : ''}
-        ${chartPoints.length >= 2 ? `<div class="ex-card-chart">${Charts.lineChart(chartPoints, { goal: tracker.goal, width: 300, height: 84, formatValue: (v) => fmtTrackerValue(tracker, v) })}</div>` : ''}
+        ${chartPoints.length >= 2 ? `<div class="ex-card-chart">${Charts.lineChart(chartPoints, { goal: tracker.goal, width: 300, height: 96, formatValue: (v) => fmtTrackerValue(tracker, v) })}</div>` : ''}
+        ${qualityLine}
         ${bmiLine}
       </div>`;
   }
@@ -1578,7 +1676,9 @@
     populateTrackerSelect(select);
     document.getElementById('logMeasurementDate').value = document.getElementById('logMeasurementDate').value || todayISO();
     const tracker = trackerById(select.value);
-    document.getElementById('logMeasurementValueLabel').textContent = tracker ? `Value (${trackerUnitLabel(tracker)})` : 'Value';
+    const isSleep = tracker && tracker.kind === 'sleep';
+    document.getElementById('logMeasurementValueLabel').textContent = tracker ? (isSleep ? 'Hours slept' : `Value (${trackerUnitLabel(tracker)})`) : 'Value';
+    document.getElementById('logSleepQualityField').hidden = !isSleep;
   }
 
   function handleLogMeasurementSubmit(ev) {
@@ -1589,10 +1689,12 @@
     if (Number.isNaN(raw)) { toast('Enter a value.'); return; }
     const date = document.getElementById('logMeasurementDate').value || todayISO();
     const note = document.getElementById('logMeasurementNote').value.trim();
-    state.measurements.push({ id: genId('meas'), trackerId: tracker.id, date, value: trackerCanonicalFromDisplay(tracker, raw), note: note || null });
+    const quality = tracker.kind === 'sleep' ? clampQuality(document.getElementById('logSleepQuality').value) : undefined;
+    state.measurements.push({ id: genId('meas'), trackerId: tracker.id, date, value: trackerCanonicalFromDisplay(tracker, raw), quality, note: note || null });
     save();
     toast('Entry saved');
     document.getElementById('logMeasurementValue').value = '';
+    document.getElementById('logSleepQuality').value = '';
     document.getElementById('logMeasurementNote').value = '';
     renderRecentEntries();
     renderDashboard();
@@ -2231,11 +2333,13 @@
 
   function measurementRowHtml(m) {
     const tracker = trackerById(m.trackerId);
+    const valueText = tracker ? fmtTrackerValue(tracker, m.value) : m.value;
+    const qualityText = tracker && tracker.kind === 'sleep' && m.quality != null ? ` · Quality ${fmtQuality(m.quality)}` : '';
     return `
       <div class="entry-row" data-measurement-id="${m.id}">
         <div class="entry-row-main">
           <div class="entry-row-title">${escapeHtml(tracker ? tracker.name : 'Deleted tracker')}</div>
-          <div class="entry-row-sub">${tracker ? escapeHtml(fmtTrackerValue(tracker, m.value)) : m.value}${m.note ? ` — “${escapeHtml(m.note)}”` : ''}</div>
+          <div class="entry-row-sub">${escapeHtml(valueText)}${qualityText}${m.note ? ` — “${escapeHtml(m.note)}”` : ''}</div>
         </div>
         <div class="entry-row-date">${fmtDateShort(m.date)}</div>
       </div>`;
@@ -2251,13 +2355,16 @@
     const m = state.measurements.find((x) => x.id === measurementId);
     if (!m) return;
     const tracker = trackerById(m.trackerId);
+    const isSleep = tracker && tracker.kind === 'sleep';
     openModal(`
       <div class="modal-title-row"><h2>Edit entry</h2><button class="modal-close" data-action="close-modal">✕</button></div>
       <p class="muted-text modal-subtitle">${escapeHtml(tracker ? tracker.name : 'Deleted tracker')}</p>
       <div class="form-card">
         <label class="field"><span class="field-label">Date</span><input type="date" id="editMeasurementDate" value="${m.date}" /></label>
-        <label class="field"><span class="field-label">Value${tracker ? ` (${trackerUnitLabel(tracker)})` : ''}</span>
+        <label class="field"><span class="field-label">${isSleep ? 'Hours slept' : `Value${tracker ? ` (${trackerUnitLabel(tracker)})` : ''}`}</span>
           <input type="number" step="any" id="editMeasurementValue" value="${tracker ? trackerDisplayFromCanonical(tracker, m.value) : m.value}" /></label>
+        ${isSleep ? `<label class="field"><span class="field-label">Sleep quality (1-5, optional)</span>
+          <input type="number" step="1" min="1" max="5" id="editMeasurementQuality" value="${m.quality != null ? m.quality : ''}" /></label>` : ''}
         <label class="field"><span class="field-label">Note</span><input type="text" id="editMeasurementNote" value="${m.note ? escapeHtml(m.note) : ''}" maxlength="200" /></label>
         <div class="btn-row"><button class="btn btn-primary btn-block" id="saveMeasurementBtn">Save changes</button></div>
         <button class="btn btn-danger btn-block" id="deleteMeasurementBtn">Delete entry</button>
@@ -2268,6 +2375,7 @@
       if (Number.isNaN(raw)) { toast('Enter a value.'); return; }
       m.date = document.getElementById('editMeasurementDate').value || m.date;
       m.value = tracker ? trackerCanonicalFromDisplay(tracker, raw) : raw;
+      if (isSleep) m.quality = clampQuality(document.getElementById('editMeasurementQuality').value);
       m.note = document.getElementById('editMeasurementNote').value.trim() || null;
       save();
       closeModal();
@@ -2298,12 +2406,15 @@
     const value = latest ? latest.value : null;
     const { pct, achieved } = trackerProgressPct(tracker, value);
 
+    const qualityLine = tracker.kind === 'sleep' && latest && latest.quality != null
+      ? `<div class="insight-line">Last quality ${fmtQuality(latest.quality)}</div>` : '';
     openModal(`
       <div class="modal-title-row"><h2>${escapeHtml(tracker.name)}</h2><button class="modal-close" data-action="close-modal">✕</button></div>
       <div class="ex-card-values">
         <div class="ex-card-current">${fmtTrackerValue(tracker, value)}</div>
         ${tracker.goal != null ? `<div class="ex-card-goal">/ ${trackerGoalLabel(tracker).replace('Goal ', '')}</div>` : ''}
       </div>
+      ${qualityLine}
       ${tracker.goal != null ? `<div class="meter"><div class="meter-fill ${achieved ? 'is-complete' : ''}" style="--fill:${Math.min(100, pct)}%"></div></div>
       <div class="ex-card-foot"><span class="ex-card-pct ${achieved ? 'is-complete' : ''}">${achieved ? '✓ Goal reached' : `${Math.round(pct)}% to goal`}</span></div>` : ''}
 
@@ -2369,6 +2480,11 @@
     const hasEntries = editing && measurementsFor(trackerId).length > 0;
     const unitKind = tracker ? tracker.unitKind : 'weight';
     const direction = tracker ? (tracker.direction || 'up') : 'up';
+    // Sleep's value type is fixed (hours + a quality rating are part of what
+    // `kind: 'sleep'` means, not a plain unitKind choice) — locked the same
+    // way an in-use tracker's type is, just for a different reason.
+    const isSleep = tracker && tracker.kind === 'sleep';
+    const typeLocked = hasEntries || isSleep;
 
     openModal(`
       <div class="modal-title-row"><h2>${editing ? 'Edit tracker' : 'Add tracker'}</h2><button class="modal-close" data-action="close-modal">✕</button></div>
@@ -2377,12 +2493,12 @@
           <input type="text" id="trkName" value="${tracker ? escapeHtml(tracker.name) : ''}" placeholder="e.g. Waist, Protein, Resting Heart Rate" maxlength="60" /></label>
 
         <div class="field">
-          <span class="field-label">Value type${hasEntries ? ' (locked — has logged entries)' : ''}</span>
+          <span class="field-label">Value type${isSleep ? ' (fixed — Sleep also tracks quality)' : hasEntries ? ' (locked — has logged entries)' : ''}</span>
           <div class="segmented" id="trkUnitKindSegmentedA" role="radiogroup">
-            ${['weight', 'length', 'percent'].map((k) => `<button type="button" data-unit-kind="${k}" role="radio" ${hasEntries && unitKind !== k ? 'disabled' : ''}>${UNIT_KIND_LABELS[k]}</button>`).join('')}
+            ${['weight', 'length', 'percent'].map((k) => `<button type="button" data-unit-kind="${k}" role="radio" ${typeLocked && unitKind !== k ? 'disabled' : ''}>${UNIT_KIND_LABELS[k]}</button>`).join('')}
           </div>
           <div class="segmented" id="trkUnitKindSegmentedB" role="radiogroup">
-            ${['hours', 'rating', 'count'].map((k) => `<button type="button" data-unit-kind="${k}" role="radio" ${hasEntries && unitKind !== k ? 'disabled' : ''}>${UNIT_KIND_LABELS[k]}</button>`).join('')}
+            ${['hours', 'rating', 'count'].map((k) => `<button type="button" data-unit-kind="${k}" role="radio" ${typeLocked && unitKind !== k ? 'disabled' : ''}>${UNIT_KIND_LABELS[k]}</button>`).join('')}
           </div>
         </div>
 
@@ -2645,13 +2761,14 @@
     document.querySelectorAll('#lengthUnitSegmented button').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.unitChoice === state.settings.lengthUnit)));
     document.querySelectorAll('#volumeUnitSegmented button').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.unitChoice === state.settings.volumeUnit)));
 
-    document.getElementById('profileHeightUnitLabel').textContent = Units.lengthUnitLabel();
-    // The height field's *value* is deliberately NOT synced here (only its
-    // unit label is) — see openSettings() below for why: syncing it on
-    // every render would clobber a height the user just typed but hasn't
-    // saved yet, the moment they tap the adjacent Sex control (which,
-    // like every other settings control, saves instantly and re-renders
-    // this whole view).
+    // Which height field to show follows the unit setting; the *values* in
+    // them are deliberately NOT synced here — see syncProfileHeightInputs()
+    // and openSettings() below for why: syncing on every render would
+    // clobber a height the user just typed but hasn't saved yet, the moment
+    // they tap the adjacent Sex control (which, like every other settings
+    // control, saves instantly and re-renders this whole view).
+    document.getElementById('profileHeightFieldCm').hidden = state.settings.lengthUnit !== 'cm';
+    document.getElementById('profileHeightFieldFtIn').hidden = state.settings.lengthUnit === 'cm';
     document.querySelectorAll('#profileSexSegmented button').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.sexChoice === (state.profile.sex || ''))));
 
     document.querySelectorAll('#dashboardChartScaleSegmented button').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.scaleChoice === state.settings.chartScale)));
@@ -2698,6 +2815,327 @@
     reader.readAsText(file);
   }
 
+  /* ============================== First-run setup wizard ==============================
+     Shown exactly once — only when there is no saved data at all (see
+     load() below) — instead of silently seeding the same fixed starter
+     goals for everyone. It builds the same kind of shape defaultData()
+     would, just tailored to what this person actually wants to track;
+     anything skipped here is still addable later from Manage/Settings,
+     exactly as if it had come from the old fixed defaults. */
+
+  let setupStep = 1;
+  const SETUP_STEP_COUNT = 4;
+  let setupAnswers = {
+    heightFt: '', heightIn: '', heightCm: '',
+    weight: '', sex: '',
+    liftingEnabled: true,
+    lifts: {
+      bench: { enabled: true, mode: 'plates', tier: 'intermediate' },
+      squat: { enabled: true, mode: 'plates', tier: 'intermediate' },
+      deadlift: { enabled: true, mode: 'plates', tier: 'intermediate' },
+    },
+    runningEnabled: true,
+    runningGoalType: 'distance',
+    runningDistance: '5',
+    runningPaceMin: '10',
+    runningPaceSec: '0',
+    waterEnabled: true,
+    waterGoal: '',
+    weightGoalEnabled: false,
+    weightGoalValue: '',
+    insightsEnabled: false,
+  };
+
+  function startSetupWizard() {
+    setupStep = 1;
+    document.getElementById('topbar').hidden = true;
+    document.getElementById('tabbar').hidden = true;
+    switchTab('setup');
+    renderSetupStep();
+  }
+
+  // A Settings-style on/off row (see e.g. #showWeightInsightsSegmented) —
+  // every wizard toggle re-renders its whole step on change, since flipping
+  // one always shows or hides other fields below it.
+  function setupBoolRowHtml(id, label, checked) {
+    return `<div class="setting-row"><span>${label}</span>
+      <div class="segmented" id="${id}" role="radiogroup" aria-label="${label}">
+        <button type="button" data-bool-choice="off" role="radio" aria-checked="${!checked}">Off</button>
+        <button type="button" data-bool-choice="on" role="radio" aria-checked="${checked}">On</button>
+      </div></div>`;
+  }
+  function wireSetupBoolRow(id, onChange) {
+    document.querySelectorAll(`#${id} button`).forEach((b) => b.addEventListener('click', () => onChange(b.dataset.boolChoice === 'on')));
+  }
+
+  function renderSetupStep() {
+    document.getElementById('setupBackBtn').hidden = setupStep === 1;
+    document.getElementById('setupNextBtn').textContent = setupStep === SETUP_STEP_COUNT ? 'Finish setup' : 'Next';
+    if (setupStep === 1) renderSetupStep1();
+    else if (setupStep === 2) renderSetupStep2();
+    else if (setupStep === 3) renderSetupStep3();
+    else renderSetupStep4();
+  }
+
+  function renderSetupStep1() {
+    document.getElementById('setupStepLabel').textContent = 'Step 1 of 4 · About you';
+    const cm = state.settings.lengthUnit === 'cm';
+    document.getElementById('setupContent').innerHTML = `
+      <p class="muted-text">A couple of basics, both optional — used only to size your goals below and the optional insight calculators in Settings.</p>
+      <div class="form-card">
+        ${cm ? `
+        <label class="field"><span class="field-label">Height (cm)</span>
+          <input type="number" step="any" min="0" id="setupHeightCm" value="${escapeHtml(setupAnswers.heightCm)}" placeholder="Not set" /></label>
+        ` : `
+        <div class="field"><span class="field-label">Height (ft/in)</span>
+          <div class="inline-time-fields">
+            <input type="number" step="1" min="0" inputmode="numeric" id="setupHeightFt" value="${escapeHtml(setupAnswers.heightFt)}" placeholder="ft" />
+            <input type="number" step="1" min="0" max="11" inputmode="numeric" id="setupHeightIn" value="${escapeHtml(setupAnswers.heightIn)}" placeholder="in" />
+          </div>
+        </div>
+        `}
+        <label class="field"><span class="field-label">Weight (${Units.weightUnitLabel()})</span>
+          <input type="number" step="any" min="0" id="setupWeight" value="${escapeHtml(setupAnswers.weight)}" placeholder="Not set" /></label>
+        <div class="setting-row">
+          <span>Sex <span class="muted-text">(for strength/pace benchmarks)</span></span>
+          <div class="segmented" id="setupSexSegmented" role="radiogroup" aria-label="Sex">
+            <button type="button" data-sex-choice="" role="radio" aria-checked="${setupAnswers.sex === ''}">Not set</button>
+            <button type="button" data-sex-choice="male" role="radio" aria-checked="${setupAnswers.sex === 'male'}">Male</button>
+            <button type="button" data-sex-choice="female" role="radio" aria-checked="${setupAnswers.sex === 'female'}">Female</button>
+          </div>
+        </div>
+      </div>`;
+    document.querySelectorAll('#setupSexSegmented button').forEach((b) => {
+      b.addEventListener('click', () => { captureSetupStep(); setupAnswers.sex = b.dataset.sexChoice; renderSetupStep1(); });
+    });
+  }
+
+  function renderSetupStep2() {
+    document.getElementById('setupStepLabel').textContent = 'Step 2 of 4 · Lifting goals';
+    const lifts = setupAnswers.lifts;
+    const canUseStandards = setupAnswers.weight !== '' && setupAnswers.sex !== '';
+    document.getElementById('setupContent').innerHTML = `
+      ${setupBoolRowHtml('setupLiftingToggle', 'Track lifting goals', setupAnswers.liftingEnabled)}
+      ${setupAnswers.liftingEnabled ? `
+        <p class="muted-text">Each lift can use a fixed plates goal, or a bodyweight-multiple standard${canUseStandards ? '' : ' (enter weight + sex in step 1 to unlock this)'}.</p>
+        <div class="card form-card">
+          ${['bench', 'squat', 'deadlift'].map((key) => {
+            const lift = lifts[key];
+            return `
+            <div class="form-card">
+              <div class="setting-row">
+                <span>${LIFT_TYPE_LABELS[key]}</span>
+                <div class="segmented" data-lift-toggle="${key}" role="radiogroup" aria-label="Track ${LIFT_TYPE_LABELS[key]}">
+                  <button type="button" data-bool-choice="off" role="radio" aria-checked="${!lift.enabled}">Off</button>
+                  <button type="button" data-bool-choice="on" role="radio" aria-checked="${lift.enabled}">On</button>
+                </div>
+              </div>
+              ${lift.enabled ? `
+              <div class="segmented" data-lift-mode="${key}" role="radiogroup" aria-label="${LIFT_TYPE_LABELS[key]} goal style">
+                <button type="button" data-mode-choice="plates" role="radio" aria-checked="${lift.mode === 'plates'}">Plates (${PLATE_GOALS[key]} lb)</button>
+                <button type="button" data-mode-choice="standard" role="radio" aria-checked="${lift.mode === 'standard'}" ${canUseStandards ? '' : 'disabled'}>Bodyweight standard</button>
+              </div>
+              ${lift.mode === 'standard' && canUseStandards ? `
+              <div class="segmented" data-lift-tier="${key}" role="radiogroup" aria-label="${LIFT_TYPE_LABELS[key]} tier">
+                ${['intermediate', 'advanced', 'elite'].map((t) => `<button type="button" data-tier-choice="${t}" role="radio" aria-checked="${lift.tier === t}">${t[0].toUpperCase()}${t.slice(1)}</button>`).join('')}
+              </div>` : ''}` : ''}
+            </div>`;
+          }).join('')}
+        </div>
+      ` : ''}`;
+    wireSetupBoolRow('setupLiftingToggle', (v) => { setupAnswers.liftingEnabled = v; renderSetupStep2(); });
+    ['bench', 'squat', 'deadlift'].forEach((key) => {
+      const toggleEl = document.querySelector(`[data-lift-toggle="${key}"]`);
+      if (toggleEl) toggleEl.querySelectorAll('button').forEach((b) => b.addEventListener('click', () => { lifts[key].enabled = b.dataset.boolChoice === 'on'; renderSetupStep2(); }));
+      const modeEl = document.querySelector(`[data-lift-mode="${key}"]`);
+      if (modeEl) modeEl.querySelectorAll('button').forEach((b) => b.addEventListener('click', () => { if (!b.disabled) { lifts[key].mode = b.dataset.modeChoice; renderSetupStep2(); } }));
+      const tierEl = document.querySelector(`[data-lift-tier="${key}"]`);
+      if (tierEl) tierEl.querySelectorAll('button').forEach((b) => b.addEventListener('click', () => { lifts[key].tier = b.dataset.tierChoice; renderSetupStep2(); }));
+    });
+  }
+
+  function renderSetupStep3() {
+    document.getElementById('setupStepLabel').textContent = 'Step 3 of 4 · Running goal';
+    const t = setupAnswers.runningGoalType;
+    document.getElementById('setupContent').innerHTML = `
+      ${setupBoolRowHtml('setupRunningToggle', 'Track running', setupAnswers.runningEnabled)}
+      ${setupAnswers.runningEnabled ? `
+      <div class="card form-card">
+        <div class="setting-row">
+          <span>Goal by</span>
+          <div class="segmented" id="setupRunGoalType" role="radiogroup" aria-label="Running goal type">
+            <button type="button" data-type-choice="distance" role="radio" aria-checked="${t === 'distance'}">Distance</button>
+            <button type="button" data-type-choice="pace" role="radio" aria-checked="${t === 'pace'}">Pace</button>
+            <button type="button" data-type-choice="both" role="radio" aria-checked="${t === 'both'}">Both</button>
+          </div>
+        </div>
+        ${t !== 'pace' ? `<label class="field"><span class="field-label">Distance goal (${Units.distanceUnitLabel()})</span>
+          <input type="number" step="any" min="0" id="setupRunDistance" value="${escapeHtml(setupAnswers.runningDistance)}" /></label>` : ''}
+        ${t !== 'distance' ? `<label class="field"><span class="field-label">Pace goal (min:sec / ${Units.distanceUnitLabel()})</span>
+          <div class="inline-time-fields">
+            <input type="number" step="1" min="0" inputmode="numeric" id="setupRunPaceMin" value="${escapeHtml(setupAnswers.runningPaceMin)}" placeholder="min" />
+            <input type="number" step="1" min="0" max="59" inputmode="numeric" id="setupRunPaceSec" value="${escapeHtml(setupAnswers.runningPaceSec)}" placeholder="sec" />
+          </div></label>` : ''}
+      </div>` : ''}`;
+    wireSetupBoolRow('setupRunningToggle', (v) => { captureSetupStep(); setupAnswers.runningEnabled = v; renderSetupStep3(); });
+    if (setupAnswers.runningEnabled) {
+      document.querySelectorAll('#setupRunGoalType button').forEach((b) => b.addEventListener('click', () => {
+        captureSetupStep(); // keep whatever's already typed before the field set changes shape
+        setupAnswers.runningGoalType = b.dataset.typeChoice;
+        renderSetupStep3();
+      }));
+    }
+  }
+
+  function renderSetupStep4() {
+    document.getElementById('setupStepLabel').textContent = 'Step 4 of 4 · Other goals';
+    document.getElementById('setupContent').innerHTML = `
+      ${setupBoolRowHtml('setupWaterToggle', 'Water tracking', setupAnswers.waterEnabled)}
+      ${setupAnswers.waterEnabled ? `<div class="card form-card">
+        <label class="field"><span class="field-label">Daily water goal (${Units.volumeUnitLabel()})</span>
+          <input type="number" step="any" min="0" id="setupWaterGoal" value="${escapeHtml(setupAnswers.waterGoal || round(Units.mlToDisplay(2000), 0))}" /></label>
+      </div>` : ''}
+      ${setupBoolRowHtml('setupWeightGoalToggle', 'Body weight goal', setupAnswers.weightGoalEnabled)}
+      ${setupAnswers.weightGoalEnabled ? `<div class="card form-card">
+        <label class="field"><span class="field-label">Target weight (${Units.weightUnitLabel()})</span>
+          <input type="number" step="any" min="0" id="setupWeightGoal" value="${escapeHtml(setupAnswers.weightGoalValue)}" /></label>
+      </div>` : ''}
+      ${setupBoolRowHtml('setupInsightsToggle', 'Insight calculators (BMI, strength level, pace level)', setupAnswers.insightsEnabled)}
+      <p class="muted-text">General published benchmarks, not personalized or medical advice — each can be turned off individually later in Settings → Insights.</p>`;
+    wireSetupBoolRow('setupWaterToggle', (v) => { captureSetupStep(); setupAnswers.waterEnabled = v; renderSetupStep4(); });
+    wireSetupBoolRow('setupWeightGoalToggle', (v) => { captureSetupStep(); setupAnswers.weightGoalEnabled = v; renderSetupStep4(); });
+    wireSetupBoolRow('setupInsightsToggle', (v) => { captureSetupStep(); setupAnswers.insightsEnabled = v; renderSetupStep4(); });
+  }
+
+  // Plain text/number inputs aren't captured until Back/Next is pressed
+  // (unlike the toggles above, which write into setupAnswers immediately on
+  // click since they also change what's on screen) — this is what reads
+  // them just before the step changes.
+  function captureSetupStep() {
+    if (setupStep === 1) {
+      const cmEl = document.getElementById('setupHeightCm');
+      if (cmEl) setupAnswers.heightCm = cmEl.value;
+      const ftEl = document.getElementById('setupHeightFt');
+      if (ftEl) setupAnswers.heightFt = ftEl.value;
+      const inEl = document.getElementById('setupHeightIn');
+      if (inEl) setupAnswers.heightIn = inEl.value;
+      setupAnswers.weight = document.getElementById('setupWeight').value;
+    } else if (setupStep === 3 && setupAnswers.runningEnabled) {
+      const distEl = document.getElementById('setupRunDistance');
+      if (distEl) setupAnswers.runningDistance = distEl.value;
+      const minEl = document.getElementById('setupRunPaceMin');
+      if (minEl) setupAnswers.runningPaceMin = minEl.value;
+      const secEl = document.getElementById('setupRunPaceSec');
+      if (secEl) setupAnswers.runningPaceSec = secEl.value;
+    } else if (setupStep === 4) {
+      const waterEl = document.getElementById('setupWaterGoal');
+      if (waterEl) setupAnswers.waterGoal = waterEl.value;
+      const goalEl = document.getElementById('setupWeightGoal');
+      if (goalEl) setupAnswers.weightGoalValue = goalEl.value;
+    }
+  }
+
+  function goSetupNext() {
+    captureSetupStep();
+    if (setupStep === SETUP_STEP_COUNT) { finishSetup(); return; }
+    setupStep++;
+    renderSetupStep();
+  }
+  function goSetupBack() {
+    captureSetupStep();
+    setupStep--;
+    renderSetupStep();
+  }
+
+  function heightCmFromSetup() {
+    if (state.settings.lengthUnit === 'cm') {
+      const cmVal = parseFloat(setupAnswers.heightCm);
+      return (!Number.isNaN(cmVal) && cmVal > 0) ? cmVal : null;
+    }
+    const totalIn = (parseFloat(setupAnswers.heightFt) || 0) * 12 + (parseFloat(setupAnswers.heightIn) || 0);
+    return totalIn > 0 ? Units.displayToCm(totalIn) : null;
+  }
+
+  // Builds the real starting `state` from every answer collected above —
+  // the wizard's equivalent of defaultData(), just tailored per-answer
+  // instead of fixed. Runs exactly once, right before the very first save.
+  function finishSetup() {
+    const now = new Date().toISOString();
+    const heightCm = heightCmFromSetup();
+    const rawWeight = parseFloat(setupAnswers.weight);
+    const weightLb = (!Number.isNaN(rawWeight) && rawWeight > 0) ? Units.displayToLb(rawWeight) : null;
+    const sex = setupAnswers.sex || null;
+
+    const exercises = [];
+    if (setupAnswers.liftingEnabled) {
+      ['bench', 'squat', 'deadlift'].forEach((key) => {
+        const lift = setupAnswers.lifts[key];
+        if (!lift.enabled) return;
+        let goal = PLATE_GOALS[key];
+        if (lift.mode === 'standard' && weightLb && sex) {
+          const mult = LIFT_STANDARDS[key][sex][TIER_TO_INDEX[lift.tier]];
+          goal = Math.round((weightLb * mult) / 5) * 5;
+        }
+        exercises.push({ id: `ex_${key}`, name: LIFT_TYPE_LABELS[key], kind: 'weight', bodyRegion: key === 'bench' ? 'upper' : 'lower', section: 'goal', goal, liftType: key, archived: false, createdAt: now });
+      });
+    }
+    // Daily bodyweight targets are seeded unconditionally, same as the old
+    // fixed defaults — the wizard's toggles are for the bigger goal-style
+    // decisions (lifting/running/water/weight), not every single exercise.
+    exercises.push(
+      { id: 'ex_pushups', name: 'Push-ups', kind: 'reps', section: 'daily', goal: 50, archived: false, createdAt: now },
+      { id: 'ex_bwsquats', name: 'Bodyweight Squats', kind: 'reps', section: 'daily', goal: 50, archived: false, createdAt: now },
+      { id: 'ex_pullups', name: 'Pull-ups', kind: 'reps', section: 'daily', goal: 15, archived: false, createdAt: now },
+    );
+    if (setupAnswers.runningEnabled) {
+      const t = setupAnswers.runningGoalType;
+      const distanceGoal = t !== 'pace' ? Units.displayToMi(parseFloat(setupAnswers.runningDistance) || 5) : null;
+      const paceSec = (parseInt(setupAnswers.runningPaceMin, 10) || 0) * 60 + (parseInt(setupAnswers.runningPaceSec, 10) || 0);
+      const paceGoal = t !== 'distance' && paceSec > 0 ? Units.displaySecPerUnitToSecPerMi(paceSec) : null;
+      exercises.push({ id: 'ex_running', name: 'Running', kind: 'cardio', section: 'goal', distanceGoal, paceGoal, goal: null, archived: false, createdAt: now });
+    }
+
+    const trackers = defaultTrackers();
+    const measurements = [];
+    if (weightLb != null) {
+      measurements.push({ id: genId('meas'), trackerId: 'trk_weight', date: todayISO(), value: weightLb, note: null });
+      if (setupAnswers.weightGoalEnabled && setupAnswers.weightGoalValue !== '') {
+        const targetLb = Units.displayToLb(parseFloat(setupAnswers.weightGoalValue));
+        if (!Number.isNaN(targetLb)) {
+          const weightTracker = trackers.find((tr) => tr.id === 'trk_weight');
+          weightTracker.goal = targetLb;
+          weightTracker.direction = targetLb < weightLb ? 'down' : 'up';
+        }
+      }
+    }
+
+    const water = defaultWater();
+    water.goalMl = null;
+    if (setupAnswers.waterEnabled) {
+      const rawGoal = parseFloat(setupAnswers.waterGoal);
+      water.goalMl = (!Number.isNaN(rawGoal) && rawGoal > 0) ? Units.displayToMl(rawGoal) : defaultWater().goalMl;
+    }
+
+    state.profile.heightCm = heightCm;
+    state.profile.sex = sex;
+    state.exercises = exercises;
+    state.entries = [];
+    state.trackers = trackers;
+    state.measurements = measurements;
+    state.water = water;
+    state.waterEntries = [];
+    state.settings.showWeightInsights = setupAnswers.insightsEnabled;
+    state.settings.showStrengthLevel = setupAnswers.insightsEnabled;
+    state.settings.showPaceLevel = setupAnswers.insightsEnabled;
+
+    save();
+    document.getElementById('topbar').hidden = false;
+    document.getElementById('tabbar').hidden = false;
+    switchTab('dashboard');
+    renderAll();
+    toast('All set — welcome to Fit Log!');
+  }
+
   /* ============================== Tabs / global wiring ============================== */
 
   // Hides every <section class="view"> except the one whose data-view
@@ -2726,15 +3164,27 @@
   // so it needs to remember which tab was active in order to return there
   // on close instead of always landing back on Dashboard.
   let lastTabBeforeSettings = 'dashboard';
+  // One-time value sync for the Profile height field(s), on entry only —
+  // see the comment in renderSettings() for why this can't live in the
+  // general re-render path. Also re-run whenever the length unit itself is
+  // switched (see wireEvents' lengthUnitSegmented handler), since that
+  // changes which fields are shown and what they should contain — unlike
+  // every other settings control, that one *has* to resync the value.
+  function syncProfileHeightInputs() {
+    if (state.settings.lengthUnit === 'cm') {
+      document.getElementById('profileHeightCm').value = state.profile.heightCm ? round(state.profile.heightCm, 1) : '';
+    } else {
+      const { ft, inch } = state.profile.heightCm ? cmToFtIn(state.profile.heightCm) : { ft: '', inch: '' };
+      document.getElementById('profileHeightFt').value = ft;
+      document.getElementById('profileHeightIn').value = inch;
+    }
+  }
+
   function openSettings() {
     const activeTab = document.querySelector('.tab[aria-current="page"]');
     lastTabBeforeSettings = activeTab ? activeTab.dataset.tab : 'dashboard';
     switchTab('settings');
-    // One-time sync, on entry only — see the comment in renderSettings()
-    // next to profileHeightUnitLabel for why this can't live in the
-    // general re-render path.
-    document.getElementById('profileHeightInput').value =
-      state.profile.heightCm ? round(Units.cmToDisplay(state.profile.heightCm), 1) : '';
+    syncProfileHeightInputs();
   }
   function closeSettings() {
     switchTab(lastTabBeforeSettings);
@@ -2754,6 +3204,9 @@
   }
 
   function wireEvents() {
+    document.getElementById('setupNextBtn').addEventListener('click', goSetupNext);
+    document.getElementById('setupBackBtn').addEventListener('click', goSetupBack);
+
     document.getElementById('tabbar').addEventListener('click', (ev) => {
       const btn = ev.target.closest('.tab');
       if (btn) switchTab(btn.dataset.tab);
@@ -2772,10 +3225,10 @@
     });
     document.getElementById('logForm').addEventListener('submit', handleLogSubmit);
 
-    document.getElementById('logTracker').addEventListener('change', (ev) => {
-      const tracker = trackerById(ev.target.value);
-      document.getElementById('logMeasurementValueLabel').textContent = tracker ? `Value (${trackerUnitLabel(tracker)})` : 'Value';
-    });
+    // Reuses renderLogMeasurementForm() rather than re-deriving the label/
+    // quality-field visibility here too — one place decides what a tracker
+    // selection changes on screen.
+    document.getElementById('logTracker').addEventListener('change', renderLogMeasurementForm);
     document.getElementById('logMeasurementForm').addEventListener('submit', handleLogMeasurementSubmit);
 
     document.getElementById('logWaterCustomAddBtn').addEventListener('click', () => {
@@ -2831,6 +3284,7 @@
     document.getElementById('lengthUnitSegmented').addEventListener('click', (ev) => {
       const btn = ev.target.closest('button'); if (!btn) return;
       state.settings.lengthUnit = btn.dataset.unitChoice; save(); renderAll();
+      syncProfileHeightInputs(); // unit switch changes which fields show — this one has to resync
     });
     document.getElementById('volumeUnitSegmented').addEventListener('click', (ev) => {
       const btn = ev.target.closest('button'); if (!btn) return;
@@ -2843,8 +3297,17 @@
       save(); renderAll();
     });
     document.getElementById('saveProfileBtn').addEventListener('click', () => {
-      const raw = parseFloat(document.getElementById('profileHeightInput').value);
-      state.profile.heightCm = (!Number.isNaN(raw) && raw > 0) ? Units.displayToCm(raw) : null;
+      let heightCm = null;
+      if (state.settings.lengthUnit === 'cm') {
+        const raw = parseFloat(document.getElementById('profileHeightCm').value);
+        heightCm = (!Number.isNaN(raw) && raw > 0) ? raw : null;
+      } else {
+        const ft = parseFloat(document.getElementById('profileHeightFt').value) || 0;
+        const inch = parseFloat(document.getElementById('profileHeightIn').value) || 0;
+        const totalIn = ft * 12 + inch;
+        heightCm = totalIn > 0 ? Units.displayToCm(totalIn) : null;
+      }
+      state.profile.heightCm = heightCm;
       save();
       toast('Profile saved');
       renderAll();
@@ -2899,7 +3362,8 @@
     document.getElementById('logDate').value = todayISO();
     document.getElementById('logMeasurementDate').value = todayISO();
     wireEvents();
-    renderAll();
+    if (needsSetup) startSetupWizard();
+    else renderAll();
 
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {

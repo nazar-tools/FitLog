@@ -10,7 +10,10 @@
 // there used to be a separate tiny "sparkline" renderer for cards, but a
 // smaller lineChart reads better (a real goal line and axis labels instead
 // of a bare squiggle), so that's gone in favor of one chart every screen
-// shares.
+// shares. The `width`/`height` opts only set the chart's internal drawing
+// units and aspect ratio, not its rendered pixel size — the SVG itself
+// always stretches to fill its container's actual width (see the aspect-
+// ratio style set below), so a chart never falls short of a card's edges.
 
 const Charts = (() => {
 
@@ -77,8 +80,12 @@ const Charts = (() => {
         <text x="${width - padR}" y="${(gy - 4).toFixed(2)}" text-anchor="end" class="chart-axis-text">Goal ${fmtVal(goal)}</text>`;
     }
 
+    // The SVG's box is sized purely in CSS (width:100%, height derived from
+    // the aspect-ratio below) rather than a fixed pixel height, so the chart
+    // always fills its container edge-to-edge instead of "meet" scaling
+    // letterboxing it down to fit a mismatched fixed height.
     return `
-      <svg width="100%" height="${height}" viewBox="0 0 ${width} ${height}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Progress over time">
+      <svg viewBox="0 0 ${width} ${height}" style="width:100%;height:auto;aspect-ratio:${width}/${height};display:block" role="img" aria-label="Progress over time">
         ${goalLine}
         <path d="${area}" class="chart-area"></path>
         <path d="${line}" class="chart-line"></path>

@@ -555,9 +555,10 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 1p
 }
 
 /* ============ Charts (SVG, per dataviz mark specs) ============ */
-/* Wrapper around an injected Charts.lineChart()/sparkline() SVG — just
-   spacing, so the chart drawing code in charts.js never has to think about
-   its own margins. */
+/* Wrapper around an injected Charts.lineChart() SVG — just spacing, so the
+   chart drawing code in charts.js never has to think about its own margins.
+   The SVG itself is sized to fill this wrapper's full width (see
+   charts.js) rather than a fixed pixel size. */
 .chart-wrap { margin: 4px 0 12px; }
 .chart-line { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .chart-area { fill: var(--accent); opacity: 0.10; }
