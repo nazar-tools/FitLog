@@ -40,7 +40,7 @@
       <div id="exerciseCards" class="card-grid"></div>
 
       <div class="section-head" id="dailySectionHead" hidden>
-        <h2>Daily (WFH days)</h2>
+        <h2>Daily targets</h2>
       </div>
       <div id="dailyList" class="daily-list" hidden></div>
 
@@ -120,8 +120,31 @@
 
     <!-- HISTORY -->
     <section id="view-history" class="view" data-view="history" hidden>
+      <div class="section-head"><h2>History</h2></div>
+
+      <div class="card calendar-card">
+        <div class="calendar-header">
+          <button type="button" class="icon-btn-sm" id="calPrevBtn" aria-label="Previous month">
+            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+          </button>
+          <div class="calendar-month-label" id="calMonthLabel"></div>
+          <button type="button" class="icon-btn-sm" id="calNextBtn" aria-label="Next month">
+            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>
+          </button>
+        </div>
+        <div class="calendar-weekdays">
+          <span>S</span><span>M</span><span>T</span><span>W</span><span>T</span><span>F</span><span>S</span>
+        </div>
+        <div class="calendar-grid" id="calendarGrid"></div>
+        <div class="calendar-legend">
+          <span><i class="cal-dot cal-dot-workout"></i>Workout</span>
+          <span><i class="cal-dot cal-dot-water"></i>Water goal</span>
+          <span><i class="cal-dot cal-dot-body"></i>Body</span>
+        </div>
+      </div>
+
       <div class="section-head">
-        <h2>History</h2>
+        <h2>All entries</h2>
         <div class="segmented" id="historyCategorySegmented" role="radiogroup" aria-label="History category">
           <button type="button" data-history-cat="workout" role="radio">Workouts</button>
           <button type="button" data-history-cat="measurement" role="radio">Body</button>
@@ -199,6 +222,22 @@
         </div>
       </div>
 
+      <div class="section-head"><h2>Profile</h2></div>
+      <div class="card">
+        <p class="muted-text">Used only by the optional insight calculators below (BMI, strength level, pace level) — never required, and nothing here is used anywhere else in the app.</p>
+        <label class="field"><span class="field-label">Height (<span id="profileHeightUnitLabel"></span>)</span>
+          <input type="number" step="any" min="0" id="profileHeightInput" placeholder="Not set" /></label>
+        <div class="setting-row">
+          <span>Sex <span class="muted-text">(for strength/pace benchmarks)</span></span>
+          <div class="segmented" id="profileSexSegmented" role="radiogroup" aria-label="Sex">
+            <button type="button" data-sex-choice="" role="radio">Not set</button>
+            <button type="button" data-sex-choice="male" role="radio">Male</button>
+            <button type="button" data-sex-choice="female" role="radio">Female</button>
+          </div>
+        </div>
+        <button class="btn btn-secondary btn-sm" id="saveProfileBtn">Save profile</button>
+      </div>
+
       <div class="section-head"><h2>Units</h2></div>
       <div class="card">
         <div class="setting-row">
@@ -231,6 +270,47 @@
         </div>
       </div>
 
+      <div class="section-head"><h2>Insights</h2></div>
+      <div class="card">
+        <div class="setting-row">
+          <span>Dashboard chart range</span>
+          <div class="segmented" id="dashboardChartScaleSegmented" role="radiogroup" aria-label="Chart range">
+            <button type="button" data-scale-choice="last10" role="radio">Last 10</button>
+            <button type="button" data-scale-choice="all" role="radio">Lifetime</button>
+          </div>
+        </div>
+        <div class="setting-row">
+          <span>Weight trend window</span>
+          <div class="segmented" id="insightsWindowSegmented" role="radiogroup" aria-label="Weight trend window">
+            <button type="button" data-window-choice="30" role="radio">1 mo</button>
+            <button type="button" data-window-choice="90" role="radio">3 mo</button>
+            <button type="button" data-window-choice="365" role="radio">1 yr</button>
+          </div>
+        </div>
+        <div class="setting-row">
+          <span>Body weight insights <span class="muted-text">(trend + BMI)</span></span>
+          <div class="segmented" id="showWeightInsightsSegmented" role="radiogroup" aria-label="Body weight insights">
+            <button type="button" data-bool-choice="off" role="radio">Off</button>
+            <button type="button" data-bool-choice="on" role="radio">On</button>
+          </div>
+        </div>
+        <div class="setting-row">
+          <span>Strength level <span class="muted-text">(lifts vs. bodyweight)</span></span>
+          <div class="segmented" id="showStrengthLevelSegmented" role="radiogroup" aria-label="Strength level">
+            <button type="button" data-bool-choice="off" role="radio">Off</button>
+            <button type="button" data-bool-choice="on" role="radio">On</button>
+          </div>
+        </div>
+        <div class="setting-row">
+          <span>Pace level <span class="muted-text">(runs)</span></span>
+          <div class="segmented" id="showPaceLevelSegmented" role="radiogroup" aria-label="Pace level">
+            <button type="button" data-bool-choice="off" role="radio">Off</button>
+            <button type="button" data-bool-choice="on" role="radio">On</button>
+          </div>
+        </div>
+        <p class="muted-text field-hint">Strength and pace levels use general published benchmarks, split by sex (set in Profile above) — a rough comparison, not a personalized or medical assessment.</p>
+      </div>
+
       <div class="section-head"><h2>Backup</h2></div>
       <div class="card">
         <p class="muted-text">Your data lives only on this device. Export a backup file regularly, especially before clearing browser data or switching phones.</p>
@@ -243,7 +323,7 @@
 
       <div class="section-head"><h2>About</h2></div>
       <div class="card">
-        <p class="muted-text">Fit Log v2.0 &middot; installed as a home-screen app, all data stored on-device.</p>
+        <p class="muted-text">Fit Log v2.1 &middot; installed as a home-screen app, all data stored on-device.</p>
       </div>
     </section>
 

@@ -31,9 +31,19 @@
        suggestion engine          – the "Next session" recommendation logic.
      Body & wellness trackers     – generic "log a number against an
                                      optional goal" trackers (weight, body
-                                     fat %, height, sleep, and anything a
-                                     user adds) — the scalable metric-
-                                     tracking building block.
+                                     fat %, sleep, and anything a user
+                                     adds) — the scalable metric-tracking
+                                     building block. Height lives in
+                                     Settings' Profile instead — it isn't
+                                     something that trends over time, so
+                                     it's a one-time fact, not a tracker.
+     Insights & standards         – optional, off-by-default calculators
+                                     (BMI, body-weight trend, strength-vs-
+                                     bodyweight level, running-pace level)
+                                     built on researched reference tables.
+                                     Read the comment at the top of this
+                                     section for sourcing and caveats
+                                     before changing any threshold.
      Water                        – daily water intake: cups, totals,
                                      progress toward the daily goal.
      Theme                        – light/dark/system, and applying it to
@@ -47,8 +57,12 @@
                                      and Water section on the home screen.
      Rendering: Log tab           – quick-add for a workout set, a tracker
                                      measurement, or a cup of water.
-     Rendering: History           – the full, filterable entry list, split
-                                     by workout/measurement/water category.
+     Rendering: History           – a month calendar with per-day colored
+                                     dots (workout/water-goal-hit/body
+                                     measurement) that opens a day-detail
+                                     view, above the full, filterable entry
+                                     list split by workout/measurement/
+                                     water category.
      Entry modal                  – editing or deleting one logged entry.
      Exercise detail modal        – tapping a goal card: chart, PRs, the
                                      suggestion card, all of that exercise's
@@ -63,8 +77,10 @@
      Manage                       – the Manage tab: exercise, tracker, and
                                      water-cup lists (add/edit/archive/
                                      delete), grouped by category.
-     Settings                     – units and theme, reached via the header
-                                     gear icon; export/import backup.
+     Settings                     – units and theme, a Profile card (height/
+                                     sex — fixed facts, not trackers) and
+                                     the Insights toggles, reached via the
+                                     header gear icon; export/import backup.
      Tabs / global wiring         – wires up every click handler once, and
                                      switchTab()/renderAll(), which redraw
                                      the current screen after any change.
@@ -119,7 +135,7 @@
      import path runs the exact same migrations.
      ========================================================================== */
 
-  const SCHEMA_VERSION = 4;
+  const SCHEMA_VERSION = 5;
 
   // Known "daily" exercise ids from before the Goal/Daily/Other split
   // existed (schema v1). Used only by the v1->v2 migration below.
@@ -177,7 +193,40 @@
       if (!data.settings.volumeUnit) data.settings.volumeUnit = 'flOz';
       return data;
     },
-    // Next migration goes here, keyed `4: (data) => { ...; return data; }`.
+    // v4 -> v5: added a `profile` (height + sex — fixed facts about you,
+    // not something with a trend worth charting) and settings for the
+    // dashboard chart's default range and the optional insight calculators
+    // (body-weight trend/BMI, strength-vs-bodyweight, pace level).
+    //
+    // Height specifically moves OUT of the trackers list here: it doesn't
+    // change often enough to need a logged history, so any existing Height
+    // tracker's most recent value is carried over into profile.heightCm —
+    // nothing is lost, it just becomes a single current fact instead of a
+    // trend — and the tracker (and its now-redundant measurement history)
+    // is removed. Every other tracker, and everything about exercises,
+    // entries, and water, is untouched.
+    4: (data) => {
+      if (!data.profile) data.profile = { heightCm: null, sex: null };
+      const heightTracker = (data.trackers || []).find((t) => t.id === 'trk_height');
+      if (heightTracker) {
+        const heightEntries = (data.measurements || [])
+          .filter((m) => m.trackerId === heightTracker.id)
+          .sort((a, b) => (a.date + a.id).localeCompare(b.date + b.id));
+        if (heightEntries.length && data.profile.heightCm == null) {
+          data.profile.heightCm = heightEntries[heightEntries.length - 1].value;
+        }
+        data.trackers = data.trackers.filter((t) => t.id !== heightTracker.id);
+        data.measurements = (data.measurements || []).filter((m) => m.trackerId !== heightTracker.id);
+      }
+      if (data.settings.chartScale === undefined) data.settings.chartScale = 'last10';
+      if (data.settings.insightsWindowDays === undefined) data.settings.insightsWindowDays = 90;
+      if (data.settings.showWeightInsights === undefined) data.settings.showWeightInsights = false;
+      if (data.settings.showStrengthLevel === undefined) data.settings.showStrengthLevel = false;
+      if (data.settings.showPaceLevel === undefined) data.settings.showPaceLevel = false;
+      data.exercises.forEach((ex) => { if (ex.kind === 'weight' && ex.liftType === undefined) ex.liftType = null; });
+      return data;
+    },
+    // Next migration goes here, keyed `5: (data) => { ...; return data; }`.
   };
 
   /** Walks `data` forward through MIGRATIONS until it matches SCHEMA_VERSION. */
@@ -204,10 +253,19 @@
     return [
       { id: 'trk_weight', name: 'Weight', kind: 'metric', unitKind: 'weight', goal: null, direction: null, archived: false, createdAt: now },
       { id: 'trk_bodyfat', name: 'Body Fat %', kind: 'metric', unitKind: 'percent', goal: null, direction: null, archived: false, createdAt: now },
-      { id: 'trk_height', name: 'Height', kind: 'metric', unitKind: 'length', goal: null, direction: null, archived: false, createdAt: now },
       { id: 'trk_sleephours', name: 'Sleep Hours', kind: 'metric', unitKind: 'hours', goal: null, direction: null, archived: false, createdAt: now },
       { id: 'trk_sleepfeel', name: 'Sleep Feeling', kind: 'metric', unitKind: 'rating', ratingMax: 5, goal: null, direction: null, archived: false, createdAt: now },
     ];
+  }
+
+  // A fixed fact about you rather than something with a history worth
+  // charting — height doesn't change often enough to be a tracker (see the
+  // v4->v5 migration above for how an existing Height tracker becomes
+  // this). Both fields are optional and used only by the insight
+  // calculators below (BMI, strength-vs-bodyweight, pace level) — the app
+  // works fully without either ever being set.
+  function defaultProfile() {
+    return { heightCm: null, sex: null };
   }
 
   // Water's starter cup sizes and daily goal, canonically in milliliters
@@ -224,7 +282,15 @@
     };
   }
 
-  const DEFAULT_SETTINGS = { theme: 'system', weightUnit: 'lb', distanceUnit: 'mi', lengthUnit: 'in', volumeUnit: 'flOz' };
+  const DEFAULT_SETTINGS = {
+    theme: 'system', weightUnit: 'lb', distanceUnit: 'mi', lengthUnit: 'in', volumeUnit: 'flOz',
+    // Dashboard/detail chart default range, and the optional insight
+    // calculators (see the "Insights & standards" section) — all off by
+    // default, since they're extras layered on top of the core tracking,
+    // not something to spring on an existing install unasked.
+    chartScale: 'last10', insightsWindowDays: 90,
+    showWeightInsights: false, showStrengthLevel: false, showPaceLevel: false,
+  };
 
   // The starting data for a brand-new install — already in the current
   // schema shape, so it never has to pass through the migrations above.
@@ -233,10 +299,11 @@
     return {
       version: SCHEMA_VERSION,
       settings: Object.assign({}, DEFAULT_SETTINGS),
+      profile: defaultProfile(),
       exercises: [
-        { id: 'ex_bench', name: 'Bench Press', kind: 'weight', bodyRegion: 'upper', section: 'goal', goal: 225, archived: false, createdAt: now },
-        { id: 'ex_squat', name: 'Squat', kind: 'weight', bodyRegion: 'lower', section: 'goal', goal: 315, archived: false, createdAt: now },
-        { id: 'ex_deadlift', name: 'Deadlift', kind: 'weight', bodyRegion: 'lower', section: 'goal', goal: 405, archived: false, createdAt: now },
+        { id: 'ex_bench', name: 'Bench Press', kind: 'weight', bodyRegion: 'upper', section: 'goal', goal: 225, liftType: 'bench', archived: false, createdAt: now },
+        { id: 'ex_squat', name: 'Squat', kind: 'weight', bodyRegion: 'lower', section: 'goal', goal: 315, liftType: 'squat', archived: false, createdAt: now },
+        { id: 'ex_deadlift', name: 'Deadlift', kind: 'weight', bodyRegion: 'lower', section: 'goal', goal: 405, liftType: 'deadlift', archived: false, createdAt: now },
         { id: 'ex_pushups', name: 'Push-ups', kind: 'reps', section: 'daily', goal: 50, archived: false, createdAt: now },
         { id: 'ex_bwsquats', name: 'Bodyweight Squats', kind: 'reps', section: 'daily', goal: 50, archived: false, createdAt: now },
         { id: 'ex_pullups', name: 'Pull-ups', kind: 'reps', section: 'daily', goal: 15, archived: false, createdAt: now },
@@ -395,7 +462,7 @@
   function exerciseById(id) { return state.exercises.find((e) => e.id === id); }
   function entriesFor(exId) { return state.entries.filter((e) => e.exerciseId === exId); }
   function sectionOf(ex) { return ex.section || 'goal'; }
-  const SECTION_LABELS = { goal: 'Goals', daily: 'Daily (WFH)', accessory: 'Other exercises' };
+  const SECTION_LABELS = { goal: 'Goals', daily: 'Daily targets', accessory: 'Other exercises' };
 
   // The single best/most-recent set of an entry, used both for trend values
   // and for the progressive-overload suggestion (which needs reps/RPE too,
@@ -753,6 +820,146 @@
     }
   }
 
+  /* ============================== Insights & standards ==============================
+     Optional, off-by-default calculators layered on top of the core
+     tracking — turned on in Settings ("Insights"), one toggle per kind.
+     Each one needs a fact from `state.profile` (height and/or sex) that
+     the app never requires elsewhere; if it's missing, the calculator
+     says so instead of guessing.
+
+     The benchmark numbers below are general published reference points,
+     not a personalized or medical assessment — presented with that
+     caveat in the UI, the same way the progressive-overload suggestion
+     engine caveats its own heuristics.
+       - BMI categories: CDC adult BMI guidance.
+       - Bodyweight-ratio strength standards (bench/squat/deadlift, by
+         sex): commonly published community strength-standard tables
+         (e.g. the kind of chart on Strength Level / Denstar Fitness).
+       - Pace levels: a general recreational-runner pace heuristic
+         built from typical age-graded training-pace ranges — looser
+         and less authoritative than the lift standards, since there is
+         no single widely-agreed pace-tier chart the way there is for
+         barbell lifts. */
+
+  const INSIGHT_TIER_LABELS = ['Untrained', 'Beginner', 'Novice', 'Intermediate', 'Advanced', 'Elite'];
+
+  // Bodyweight-multiplier thresholds for [Beginner, Novice, Intermediate,
+  // Advanced, Elite] — a lift meeting a threshold is classified at that
+  // tier or higher, and below the "Beginner" threshold is "Untrained".
+  const LIFT_STANDARDS = {
+    bench: { label: 'Bench Press', male: [0.5, 0.75, 1.2, 1.6, 2.0], female: [0.3, 0.5, 0.85, 1.15, 1.5] },
+    squat: { label: 'Squat', male: [0.75, 1.0, 1.65, 2.2, 2.75], female: [0.5, 0.75, 1.25, 1.75, 2.25] },
+    deadlift: { label: 'Deadlift', male: [1.0, 1.25, 2.0, 2.5, 3.0], female: [0.65, 0.95, 1.5, 2.0, 2.5] },
+  };
+  const LIFT_TYPE_LABELS = { bench: 'Bench Press', squat: 'Squat', deadlift: 'Deadlift' };
+
+  // Pace tiers as seconds-per-mile ceilings for [Elite, Advanced, Good,
+  // Recreational] — faster (lower) than the ceiling qualifies for that
+  // tier; anything slower than the last one is "Building base". Order is
+  // fastest-first here (opposite of the lift table) since a lower pace is
+  // the "better" direction.
+  const PACE_TIER_LABELS = ['Elite', 'Advanced', 'Good', 'Recreational', 'Building base'];
+  const PACE_TIERS = {
+    male: [390, 480, 570, 660], // 6:30, 8:00, 9:30, 11:00 per mile
+    female: [450, 540, 630, 720], // 7:30, 9:00, 10:30, 12:00 per mile
+  };
+
+  function classifyAscending(value, thresholds, labels) {
+    let idx = 0;
+    for (let i = 0; i < thresholds.length; i++) { if (value >= thresholds[i]) idx = i + 1; }
+    return labels[idx];
+  }
+  function classifyDescending(value, ceilings, labels) {
+    for (let i = 0; i < ceilings.length; i++) { if (value <= ceilings[i]) return labels[i]; }
+    return labels[labels.length - 1];
+  }
+
+  const BMI_CATEGORIES = [
+    { max: 18.5, label: 'Underweight' },
+    { max: 25, label: 'Healthy weight' },
+    { max: 30, label: 'Overweight' },
+    { max: Infinity, label: 'Obese' },
+  ];
+  function bmiCategory(bmi) {
+    return BMI_CATEGORIES.find((c) => bmi < c.max).label;
+  }
+
+  // A short, humanized elapsed-time phrase ("12 days", "3 months", "1.4
+  // years") for the weight-trend delta below — plain days under two weeks,
+  // weeks under two months, months under ~13 months, years beyond that.
+  function humanizeDays(days) {
+    if (days < 14) return `${days} day${days === 1 ? '' : 's'}`;
+    if (days < 60) { const w = Math.round(days / 7); return `${w} week${w === 1 ? '' : 's'}`; }
+    if (days < 400) { const m = Math.round(days / 30); return `${m} month${m === 1 ? '' : 's'}`; }
+    return `${round(days / 365, 1)} years`;
+  }
+
+  // The body-weight tracker is the one fixed anchor the other calculators
+  // (BMI, strength ratio) read from — always this seeded id if it exists.
+  // If the user deletes it, those calculators simply have nothing to
+  // compare against and say so rather than guessing at a substitute.
+  const BODY_WEIGHT_TRACKER_ID = 'trk_weight';
+  function currentBodyWeightLb() {
+    const latest = latestMeasurement(BODY_WEIGHT_TRACKER_ID);
+    return latest ? latest.value : null;
+  }
+
+  // Current weight, how much it's moved over the settings-chosen window,
+  // and BMI (once height is set in Profile) — the "Body weight insights"
+  // toggle's payload for the Weight tracker's dashboard card.
+  function weightInsights() {
+    const list = measurementsFor(BODY_WEIGHT_TRACKER_ID).slice().sort((a, b) => (a.date + a.id).localeCompare(b.date + b.id));
+    if (!list.length) return null;
+    const latest = list[list.length - 1];
+    let trend = null;
+    if (list.length >= 2) {
+      const cutoff = new Date(latest.date + 'T00:00:00');
+      cutoff.setDate(cutoff.getDate() - state.settings.insightsWindowDays);
+      const cutoffIso = cutoff.toISOString().slice(0, 10);
+      const baseline = list.filter((m) => m.date <= cutoffIso).slice(-1)[0] || list[0];
+      if (baseline.id !== latest.id) {
+        const days = Math.round((new Date(latest.date + 'T00:00:00') - new Date(baseline.date + 'T00:00:00')) / 86400000);
+        trend = { delta: latest.value - baseline.value, days };
+      }
+    }
+    let bmi = null;
+    if (state.profile.heightCm) {
+      const kg = latest.value * LB_PER_KG;
+      const m = state.profile.heightCm / 100;
+      const value = kg / (m * m);
+      bmi = { value: round(value, 1), category: bmiCategory(value) };
+    }
+    return { current: latest.value, trend, bmi };
+  }
+
+  // How a weight-based exercise's best lift compares to current
+  // bodyweight, against the researched standards above — needs the lift
+  // mapped to a known type (see the exercise form's "Lift type" field) and
+  // both a bodyweight entry and a sex set in Profile.
+  function strengthLevelInfo(ex) {
+    if (ex.kind !== 'weight' || !ex.liftType || !LIFT_STANDARDS[ex.liftType]) return null;
+    const bw = currentBodyWeightLb();
+    if (!bw) return { needsBodyWeight: true };
+    if (!state.profile.sex) return { needsSex: true };
+    const liftBest = best(ex);
+    if (liftBest == null) return null;
+    const ratio = liftBest / bw;
+    const table = LIFT_STANDARDS[ex.liftType][state.profile.sex];
+    return { ratio, tier: classifyAscending(ratio, table, INSIGHT_TIER_LABELS), liftLabel: LIFT_STANDARDS[ex.liftType].label };
+  }
+
+  // How a cardio exercise's best pace compares to the general recreational
+  // pace tiers above — needs at least one logged pace and a sex set in
+  // Profile (the tiers are only published split by sex).
+  function paceLevelInfo(ex) {
+    if (ex.kind !== 'cardio') return null;
+    const paceBest = best(ex, 'pace');
+    if (paceBest == null) return null;
+    if (!state.profile.sex) return { needsSex: true };
+    const ceilings = PACE_TIERS[state.profile.sex];
+    return { pace: paceBest, tier: classifyDescending(paceBest, ceilings, PACE_TIER_LABELS) };
+  }
+
   /* ============================== Water ==============================
      Water is a small, dedicated feature rather than another tracker kind —
      tap-a-cup logging is a different interaction from typing a number, so
@@ -1072,6 +1279,32 @@
       </div>`;
   }
 
+  // Slices `items` (already date-sorted ascending) down to the range the
+  // "Dashboard chart range" setting calls for, then maps each to a
+  // {date, value} chart point, dropping any with no value. Shared by every
+  // dashboard card and by the exercise/tracker detail modals' own chart
+  // (via renderExerciseDetail/renderTrackerDetail's own `scale` argument),
+  // so the one setting controls what "the chart" means everywhere.
+  function chartPointsFor(items, valueFn) {
+    const scaled = state.settings.chartScale === 'last10' ? items.slice(-10) : items;
+    return scaled.map((item) => ({ date: item.date, value: valueFn(item) })).filter((p) => p.value != null);
+  }
+
+  // A muted one-line readout for an optional insight calculator — either
+  // the result, or (when it needs a Profile fact that isn't set yet) a
+  // short prompt telling you exactly what to add and where.
+  function strengthLevelLineHtml(info) {
+    if (!info) return '';
+    if (info.needsBodyWeight) return `<div class="insight-line muted-text">Log your body weight to see your strength level.</div>`;
+    if (info.needsSex) return `<div class="insight-line muted-text">Set your sex in Settings → Profile to see your strength level.</div>`;
+    return `<div class="insight-line">${round(info.ratio, 2)}&times; bodyweight &middot; <strong>${info.tier}</strong></div>`;
+  }
+  function paceLevelLineHtml(info) {
+    if (!info) return '';
+    if (info.needsSex) return `<div class="insight-line muted-text">Set your sex in Settings → Profile to see your pace level.</div>`;
+    return `<div class="insight-line">${fmtPace(info.pace)} &middot; <strong>${info.tier}</strong></div>`;
+  }
+
   function goalCardHtml(ex) {
     const entries = entriesFor(ex.id).slice().sort((a, c) => a.date.localeCompare(c.date));
     const cardioMetrics = ex.kind === 'cardio' ? cardioMetricsOf(ex) : null;
@@ -1081,7 +1314,11 @@
           ? cardioMetrics.map((m) => progressBlockHtml(ex, m, { labeled: cardioMetrics.length > 1 })).join('')
           : progressBlockHtml(ex, 'distance'))
       : progressBlockHtml(ex);
-    const trend = entries.map((e) => entryValue(ex, e, trendMetric));
+    const chartPoints = chartPointsFor(entries, (e) => entryValue(ex, e, trendMetric));
+    const chartGoal = cardioMetrics ? (trendMetric ? cardioGoalFor(ex, trendMetric) : null) : ex.goal;
+    const insightHtml = ex.kind === 'weight' && state.settings.showStrengthLevel ? strengthLevelLineHtml(strengthLevelInfo(ex))
+      : ex.kind === 'cardio' && state.settings.showPaceLevel ? paceLevelLineHtml(paceLevelInfo(ex))
+      : '';
     return `
       <div class="card ex-card" data-exercise-id="${ex.id}">
         <div class="ex-card-top">
@@ -1089,60 +1326,85 @@
           <div class="ex-card-badge">${kindBadge(ex)}</div>
         </div>
         ${progressHtml}
-        ${trend.filter((v) => v != null).length >= 2 ? `<div class="ex-card-spark">${Charts.sparkline(trend, { width: 280, height: 34 })}</div>` : ''}
+        ${chartPoints.length >= 2 ? `<div class="ex-card-chart">${Charts.lineChart(chartPoints, { goal: chartGoal, width: 300, height: 84, formatValue: (v) => formatValueForExercise(ex, v, trendMetric) })}</div>` : ''}
+        ${insightHtml}
       </div>`;
   }
 
-  // Daily (WFH) exercises get a compact, low-emphasis row instead of a full
-  // goal card — the ask was "how many total pushups/squats/pullups I did",
-  // not another big progress meter.
+  // A "Daily target" exercise (push-ups, pull-ups, crunches — whatever
+  // you're aiming to do every day) gets a compact, low-emphasis row
+  // instead of a full goal card. Unlike a goal card, this row is only ever
+  // rendered for a day it's actually been logged (see renderDashboard) —
+  // it's a same-day confirmation of what you did, not a standing reminder
+  // that clutters the dashboard on days you haven't gotten to it — so
+  // "today" rather than "lifetime" is the number front and center here.
   function dailyRowHtml(ex) {
     const entries = entriesFor(ex.id).slice().sort((a, c) => a.date.localeCompare(c.date));
-    const lastEntry = entries[entries.length - 1];
-    // Cardio exercises are rare in the Daily section (it's meant for WFH
+    const todayEntries = entries.filter((e) => e.date === todayISO());
+    const lifetimeTotal = entries.reduce((sum, e) => sum + (e.sets || []).reduce((m, s) => m + (s.reps || 0), 0), 0);
+    // Cardio exercises are rare as a daily target (it's meant for WFH
     // bodyweight work), but if one lands here it still needs a sane
     // fallback rather than assuming reps-shaped data.
     if (ex.kind === 'cardio') {
       const metrics = cardioMetricsOf(ex);
       const metric = metrics[0];
-      const bestVal = metric ? best(ex, metric) : null;
+      const todayVal = todayEntries.length ? Math.max(...todayEntries.map((e) => entryValue(ex, e, metric)).filter((v) => v != null)) : null;
       return `
         <div class="daily-row" data-exercise-id="${ex.id}">
           <div class="daily-row-main">
             <div class="daily-row-name">${escapeHtml(ex.name)}</div>
-            <div class="daily-row-sub">${entries.length} session${entries.length === 1 ? '' : 's'} logged${lastEntry ? ` · last: ${fmtDateShort(lastEntry.date)}` : ' · not logged yet'}</div>
+            <div class="daily-row-sub">Logged today · ${entries.length} session${entries.length === 1 ? '' : 's'} lifetime</div>
           </div>
-          ${metric ? `<div class="daily-row-goal">${formatValueForExercise(ex, bestVal, metric)}</div>` : ''}
+          ${metric && todayVal != null ? `<div class="daily-row-goal">${formatValueForExercise(ex, todayVal, metric)}</div>` : ''}
         </div>`;
     }
-    const lifetimeTotal = entries.reduce((sum, e) => sum + (e.sets || []).reduce((m, s) => m + (s.reps || 0), 0), 0);
-    const lastTotal = lastEntry ? (lastEntry.sets || []).reduce((m, s) => m + (s.reps || 0), 0) : null;
-    const bestSet = best(ex);
+    const todayTotal = todayEntries.reduce((sum, e) => sum + (e.sets || []).reduce((m, s) => m + (s.reps || 0), 0), 0);
     return `
       <div class="daily-row" data-exercise-id="${ex.id}">
         <div class="daily-row-main">
           <div class="daily-row-name">${escapeHtml(ex.name)}</div>
-          <div class="daily-row-sub">${lifetimeTotal.toLocaleString()} lifetime reps${lastEntry ? ` · last: ${lastTotal} on ${fmtDateShort(lastEntry.date)}` : ' · not logged yet'}</div>
+          <div class="daily-row-sub">${lifetimeTotal.toLocaleString()} lifetime reps</div>
         </div>
-        ${ex.goal ? `<div class="daily-row-goal">${bestSet != null ? Math.round(bestSet) : '—'}<span class="muted-text">/${Math.round(ex.goal)}</span></div>` : ''}
+        <div class="daily-row-goal">${todayTotal}${ex.goal ? `<span class="muted-text">/${Math.round(ex.goal)}</span>` : ''}</div>
       </div>`;
   }
 
+  // Whether a trend delta is "good news" for this tracker, per its own
+  // direction setting (the same field that already drives its goal-progress
+  // math) — a shrinking number is good when direction is 'down' (e.g. a
+  // weight-loss goal), growing is good otherwise. With no direction set,
+  // there's no way to know intent, so the delta badge stays neutral.
+  function deltaSentiment(tracker, delta) {
+    if (!tracker.direction || delta === 0) return 'neutral';
+    return (tracker.direction === 'down' ? delta < 0 : delta > 0) ? 'good' : 'bad';
+  }
+
   // A body/wellness tracker's dashboard card — deliberately the same visual
-  // shape as an exercise's goalCardHtml (current value, goal, meter,
-  // sparkline) so the dashboard reads as one consistent language rather
-  // than "workouts styled one way, everything else styled another."
+  // shape as an exercise's goalCardHtml (current value, goal, meter, chart)
+  // so the dashboard reads as one consistent language rather than
+  // "workouts styled one way, everything else styled another." The body
+  // weight tracker additionally carries the optional "Body weight
+  // insights" toggle's payload: a trend-delta badge and a BMI line.
   function trackerCardHtml(tracker) {
     const latest = latestMeasurement(tracker.id);
     const value = latest ? latest.value : null;
     const { pct, achieved } = trackerProgressPct(tracker, value);
     const fillPct = Math.min(100, pct);
     const history = measurementsFor(tracker.id).slice().sort((a, c) => a.date.localeCompare(c.date));
-    const trend = history.map((m) => m.value);
+    const chartPoints = chartPointsFor(history, (m) => m.value);
+    const insights = (tracker.id === BODY_WEIGHT_TRACKER_ID && state.settings.showWeightInsights) ? weightInsights() : null;
+    const deltaBadge = insights && insights.trend
+      ? `<div class="ex-card-delta is-${deltaSentiment(tracker, insights.trend.delta)}">${insights.trend.delta > 0 ? '+' : ''}${round(insights.trend.delta, 1)} ${Units.weightUnitLabel()} in ${humanizeDays(insights.trend.days)}</div>`
+      : '';
+    const bmiLine = insights && insights.bmi
+      ? `<div class="insight-line">BMI ${insights.bmi.value} &middot; <strong>${insights.bmi.category}</strong></div>`
+      : (insights && !insights.bmi && state.settings.showWeightInsights && tracker.id === BODY_WEIGHT_TRACKER_ID
+          ? `<div class="insight-line muted-text">Set your height in Settings → Profile to see your BMI.</div>` : '');
     return `
       <div class="card ex-card" data-tracker-id="${tracker.id}">
         <div class="ex-card-top">
           <div class="ex-card-name">${escapeHtml(tracker.name)}</div>
+          ${deltaBadge}
         </div>
         <div class="ex-card-values">
           <div class="ex-card-current">${fmtTrackerValue(tracker, value)}</div>
@@ -1151,7 +1413,8 @@
         ${tracker.goal != null ? `
           <div class="meter"><div class="meter-fill ${achieved ? 'is-complete' : ''}" style="--fill:${fillPct}%"></div></div>
           <div class="ex-card-foot"><span class="ex-card-pct ${achieved ? 'is-complete' : ''}">${achieved ? '✓ Goal reached' : `${Math.round(pct)}%`}</span></div>` : ''}
-        ${trend.filter((v) => v != null).length >= 2 ? `<div class="ex-card-spark">${Charts.sparkline(trend, { width: 280, height: 34 })}</div>` : ''}
+        ${chartPoints.length >= 2 ? `<div class="ex-card-chart">${Charts.lineChart(chartPoints, { goal: tracker.goal, width: 300, height: 84, formatValue: (v) => fmtTrackerValue(tracker, v) })}</div>` : ''}
+        ${bmiLine}
       </div>`;
   }
 
@@ -1215,11 +1478,17 @@
     renderSummary();
     const all = activeExercises();
     const goalList = all.filter((e) => sectionOf(e) === 'goal');
-    const dailyList = all.filter((e) => sectionOf(e) === 'daily');
+    const dailyDefined = all.filter((e) => sectionOf(e) === 'daily');
+    // A daily target only earns a spot on the dashboard once you've
+    // actually logged it today — otherwise it'd be a standing reminder
+    // cluttering the goals page every day whether or not you got to it.
+    // It's still fully definable/loggable/editable via Log/History/Manage
+    // even on a day it doesn't show here.
+    const dailyToday = dailyDefined.filter((e) => entriesFor(e.id).some((en) => en.date === todayISO()));
     // accessory exercises are intentionally omitted from the dashboard —
     // they're still fully logged/edited via the Log and History tabs.
 
-    document.getElementById('dashboardEmpty').hidden = (goalList.length + dailyList.length) > 0;
+    document.getElementById('dashboardEmpty').hidden = (goalList.length + dailyDefined.length) > 0;
 
     const cardsWrap = document.getElementById('exerciseCards');
     cardsWrap.innerHTML = goalList.map(goalCardHtml).join('');
@@ -1227,10 +1496,10 @@
       card.addEventListener('click', () => openExerciseDetail(card.getAttribute('data-exercise-id')));
     });
 
-    document.getElementById('dailySectionHead').hidden = dailyList.length === 0;
+    document.getElementById('dailySectionHead').hidden = dailyToday.length === 0;
     const dailyWrap = document.getElementById('dailyList');
-    dailyWrap.hidden = dailyList.length === 0;
-    dailyWrap.innerHTML = dailyList.map(dailyRowHtml).join('');
+    dailyWrap.hidden = dailyToday.length === 0;
+    dailyWrap.innerHTML = dailyToday.map(dailyRowHtml).join('');
     dailyWrap.querySelectorAll('.daily-row').forEach((row) => {
       row.addEventListener('click', () => openExerciseDetail(row.getAttribute('data-exercise-id')));
     });
@@ -1483,6 +1752,87 @@
 
   /* ============================== Rendering: History ============================== */
 
+  // A month calendar sitting above the filterable entry list — a second,
+  // date-first way into the same History data rather than a replacement
+  // for the list below it. Each day gets a small colored dot per category
+  // that had activity that day (fixed colors, not user-configurable — see
+  // .cal-dot-* in styles.css): green for any workout logged, blue for
+  // hitting that day's water goal (not just for drinking anything — the
+  // dot means "goal met"), purple for any body measurement logged. Tapping
+  // a day opens everything logged that day, editable in place.
+
+  let calendarMonth = (() => { const d = new Date(); d.setDate(1); return d; })();
+
+  function dayActivity(dateIso) {
+    const workout = state.entries.some((e) => e.date === dateIso);
+    const body = state.measurements.some((m) => m.date === dateIso);
+    const waterHit = !!(state.water.goalMl && waterTotalForDate(dateIso) >= state.water.goalMl);
+    return { workout, body, waterHit };
+  }
+
+  function renderHistoryCalendar() {
+    const year = calendarMonth.getFullYear();
+    const month = calendarMonth.getMonth();
+    document.getElementById('calMonthLabel').textContent = calendarMonth.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+
+    const firstWeekday = new Date(year, month, 1).getDay();
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    const todayIso = todayISO();
+
+    let html = '';
+    for (let i = 0; i < firstWeekday; i++) html += `<button type="button" class="calendar-day" disabled></button>`;
+    for (let day = 1; day <= daysInMonth; day++) {
+      const dateIso = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+      const { workout, body, waterHit } = dayActivity(dateIso);
+      const dots = [
+        workout ? '<span class="cal-dot cal-dot-workout"></span>' : '',
+        waterHit ? '<span class="cal-dot cal-dot-water"></span>' : '',
+        body ? '<span class="cal-dot cal-dot-body"></span>' : '',
+      ].join('');
+      html += `
+        <button type="button" class="calendar-day ${dateIso === todayIso ? 'is-today' : ''}" data-date="${dateIso}">
+          <span>${day}</span>
+          <span class="calendar-day-dots">${dots}</span>
+        </button>`;
+    }
+    document.getElementById('calendarGrid').innerHTML = html;
+    document.querySelectorAll('#calendarGrid .calendar-day[data-date]').forEach((btn) => {
+      btn.addEventListener('click', () => openDayDetail(btn.dataset.date));
+    });
+  }
+
+  // Everything logged on one day, across all three categories, each row
+  // clickable straight into its own existing edit/delete modal — the
+  // calendar's "click a day to see or edit its history" affordance.
+  function openDayDetail(dateIso) {
+    const workoutEntries = state.entries.filter((e) => e.date === dateIso).sort((a, b) => a.id.localeCompare(b.id));
+    const measurements = state.measurements.filter((m) => m.date === dateIso).sort((a, b) => a.id.localeCompare(b.id));
+    const waterEntries = state.waterEntries.filter((e) => e.date === dateIso).sort((a, b) => a.id.localeCompare(b.id));
+    const nothingLogged = !workoutEntries.length && !measurements.length && !waterEntries.length;
+
+    const dateLabel = new Date(dateIso + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+
+    openModal(`
+      <div class="modal-title-row"><h2>${dateLabel}</h2><button class="modal-close" data-action="close-modal">✕</button></div>
+      ${nothingLogged ? '<p class="muted-text">Nothing logged on this day.</p>' : ''}
+      ${workoutEntries.length ? `
+        <div class="section-head"><h2>Workouts</h2></div>
+        <div class="entry-list" id="dayWorkoutList">${workoutEntries.map(entryRowHtml).join('')}</div>` : ''}
+      ${measurements.length ? `
+        <div class="section-head"><h2>Body</h2></div>
+        <div class="entry-list" id="dayMeasurementList">${measurements.map(measurementRowHtml).join('')}</div>` : ''}
+      ${waterEntries.length ? `
+        <div class="section-head"><h2>Water</h2></div>
+        <div class="entry-list" id="dayWaterList">${waterEntries.map(waterEntryRowHtml).join('')}</div>` : ''}
+    `);
+    const workoutList = document.getElementById('dayWorkoutList');
+    if (workoutList) wireEntryRowClicks(workoutList);
+    const measurementList = document.getElementById('dayMeasurementList');
+    if (measurementList) wireMeasurementRowClicks(measurementList);
+    const waterList = document.getElementById('dayWaterList');
+    if (waterList) wireWaterEntryRowClicks(waterList);
+  }
+
   function renderHistoryFilter() {
     const select = document.getElementById('historyFilter');
     const prev = select.value;
@@ -1508,6 +1858,7 @@
   }
 
   function renderHistory() {
+    renderHistoryCalendar();
     renderHistoryCategorySegmented();
     const wrap = document.getElementById('historyList');
 
@@ -1671,7 +2022,7 @@
   }
 
   function openExerciseDetail(exId) {
-    renderExerciseDetail(exId, 'last10');
+    renderExerciseDetail(exId, state.settings.chartScale);
   }
 
   /* ============================== Add / edit exercise modal ============================== */
@@ -1694,7 +2045,7 @@
           <span class="field-label">Section</span>
           <div class="segmented" id="exSectionSegmented" role="radiogroup">
             <button type="button" data-section="goal" role="radio">Goal</button>
-            <button type="button" data-section="daily" role="radio">Daily (WFH)</button>
+            <button type="button" data-section="daily" role="radio">Daily target</button>
             <button type="button" data-section="accessory" role="radio">Other</button>
           </div>
           <span class="muted-text field-hint" id="sectionHint"></span>
@@ -1717,6 +2068,16 @@
           </div>
         </div>
 
+        <div class="field" id="liftTypeField" hidden>
+          <span class="field-label">Lift type <span class="muted-text">(for the optional "Strength level" insight in Settings — leave as None to skip it)</span></span>
+          <div class="segmented" id="exLiftTypeSegmented" role="radiogroup">
+            <button type="button" data-lift-type="" role="radio">None</button>
+            <button type="button" data-lift-type="bench" role="radio">Bench</button>
+            <button type="button" data-lift-type="squat" role="radio">Squat</button>
+            <button type="button" data-lift-type="deadlift" role="radio">Deadlift</button>
+          </div>
+        </div>
+
         <div id="goalFieldWrap"></div>
 
         <button type="button" class="btn btn-primary btn-block" id="saveExerciseBtn">${editing ? 'Save changes' : 'Add exercise'}</button>
@@ -1728,10 +2089,11 @@
     let selectedKind = kind;
     let selectedSection = section;
     let selectedRegion = bodyRegion;
+    let selectedLiftType = (ex && ex.liftType) || '';
 
     const SECTION_HINTS = {
       goal: 'Shown as a full progress card on your home screen.',
-      daily: 'Shown as a compact running total on your home screen — for WFH-day bodyweight work.',
+      daily: 'Something you’re aiming to do every day (push-ups, pull-ups, ...). Only shows on your home screen on a day you’ve actually logged it.',
       accessory: 'Hidden from your home screen. Still loggable and viewable in History — for accessory/other exercises.',
     };
 
@@ -1744,14 +2106,21 @@
       selectedRegion = r;
       document.querySelectorAll('#exBodyRegionSegmented button').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.region === r)));
     }
+    function setLiftTypeUI(t) {
+      selectedLiftType = t;
+      document.querySelectorAll('#exLiftTypeSegmented button').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.liftType === t)));
+    }
     document.querySelectorAll('#exSectionSegmented button').forEach((b) => b.addEventListener('click', () => setSectionUI(b.dataset.section)));
     document.querySelectorAll('#exBodyRegionSegmented button').forEach((b) => b.addEventListener('click', () => setRegionUI(b.dataset.region)));
+    document.querySelectorAll('#exLiftTypeSegmented button').forEach((b) => b.addEventListener('click', () => setLiftTypeUI(b.dataset.liftType)));
     setSectionUI(selectedSection);
     setRegionUI(selectedRegion);
+    setLiftTypeUI(selectedLiftType);
 
     function renderGoalField() {
       const wrap = document.getElementById('goalFieldWrap');
       document.getElementById('bodyRegionField').hidden = selectedKind !== 'weight';
+      document.getElementById('liftTypeField').hidden = selectedKind !== 'weight';
       if (selectedKind === 'weight') {
         const v = ex && ex.goal ? round(Units.lbToDisplay(ex.goal), 1) : '';
         wrap.innerHTML = `<label class="field"><span class="field-label">Goal weight (${Units.weightUnitLabel()})</span><input type="number" step="any" id="goalInput" value="${v}" placeholder="e.g. 225" /></label>`;
@@ -1812,7 +2181,7 @@
         ex.name = name;
         ex.kind = selectedKind;
         ex.section = selectedSection;
-        if (selectedKind === 'weight') ex.bodyRegion = selectedRegion; else delete ex.bodyRegion;
+        if (selectedKind === 'weight') { ex.bodyRegion = selectedRegion; ex.liftType = selectedLiftType || null; } else { delete ex.bodyRegion; ex.liftType = null; }
         if (selectedKind === 'cardio') {
           ex.distanceGoal = distanceGoal;
           ex.paceGoal = paceGoal;
@@ -1820,7 +2189,7 @@
         ex.goal = goal; // meaningful for weight/reps only; left null and unread for cardio
       } else {
         const newEx = { id: genId('ex'), name, kind: selectedKind, section: selectedSection, goal, archived: false, createdAt: new Date().toISOString() };
-        if (selectedKind === 'weight') newEx.bodyRegion = selectedRegion;
+        if (selectedKind === 'weight') { newEx.bodyRegion = selectedRegion; newEx.liftType = selectedLiftType || null; }
         if (selectedKind === 'cardio') { newEx.distanceGoal = distanceGoal; newEx.paceGoal = paceGoal; }
         state.exercises.push(newEx);
       }
@@ -1976,7 +2345,7 @@
   }
 
   function openTrackerDetail(trackerId) {
-    renderTrackerDetail(trackerId, 'last10');
+    renderTrackerDetail(trackerId, state.settings.chartScale);
   }
 
   /* ============================== Add / edit tracker modal ============================== */
@@ -2250,7 +2619,11 @@
 
   function renderWaterManagePanel() {
     document.getElementById('waterGoalUnitLabel').textContent = Units.volumeUnitLabel();
-    document.getElementById('waterGoalInput').value = state.water.goalMl ? round(Units.mlToDisplay(state.water.goalMl), 1) : '';
+    // Same re-render-clobbers-an-unsaved-field guard as the Profile height
+    // field above.
+    if (document.activeElement !== document.getElementById('waterGoalInput')) {
+      document.getElementById('waterGoalInput').value = state.water.goalMl ? round(Units.mlToDisplay(state.water.goalMl), 1) : '';
+    }
     const wrap = document.getElementById('cupManageList');
     wrap.innerHTML = state.water.cups.map(cupRowHtml).join('') || '<p class="muted-text">No cups yet.</p>';
     wrap.querySelectorAll('[data-action="edit-cup"]').forEach((btn) => btn.addEventListener('click', () => openCupForm(btn.dataset.id)));
@@ -2271,6 +2644,21 @@
     document.querySelectorAll('#distanceUnitSegmented button').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.unitChoice === state.settings.distanceUnit)));
     document.querySelectorAll('#lengthUnitSegmented button').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.unitChoice === state.settings.lengthUnit)));
     document.querySelectorAll('#volumeUnitSegmented button').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.unitChoice === state.settings.volumeUnit)));
+
+    document.getElementById('profileHeightUnitLabel').textContent = Units.lengthUnitLabel();
+    // The height field's *value* is deliberately NOT synced here (only its
+    // unit label is) — see openSettings() below for why: syncing it on
+    // every render would clobber a height the user just typed but hasn't
+    // saved yet, the moment they tap the adjacent Sex control (which,
+    // like every other settings control, saves instantly and re-renders
+    // this whole view).
+    document.querySelectorAll('#profileSexSegmented button').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.sexChoice === (state.profile.sex || ''))));
+
+    document.querySelectorAll('#dashboardChartScaleSegmented button').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.scaleChoice === state.settings.chartScale)));
+    document.querySelectorAll('#insightsWindowSegmented button').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.windowChoice === String(state.settings.insightsWindowDays))));
+    document.querySelectorAll('#showWeightInsightsSegmented button').forEach((b) => b.setAttribute('aria-checked', String((b.dataset.boolChoice === 'on') === state.settings.showWeightInsights)));
+    document.querySelectorAll('#showStrengthLevelSegmented button').forEach((b) => b.setAttribute('aria-checked', String((b.dataset.boolChoice === 'on') === state.settings.showStrengthLevel)));
+    document.querySelectorAll('#showPaceLevelSegmented button').forEach((b) => b.setAttribute('aria-checked', String((b.dataset.boolChoice === 'on') === state.settings.showPaceLevel)));
   }
 
   function exportBackup() {
@@ -2342,6 +2730,11 @@
     const activeTab = document.querySelector('.tab[aria-current="page"]');
     lastTabBeforeSettings = activeTab ? activeTab.dataset.tab : 'dashboard';
     switchTab('settings');
+    // One-time sync, on entry only — see the comment in renderSettings()
+    // next to profileHeightUnitLabel for why this can't live in the
+    // general re-render path.
+    document.getElementById('profileHeightInput').value =
+      state.profile.heightCm ? round(Units.cmToDisplay(state.profile.heightCm), 1) : '';
   }
   function closeSettings() {
     switchTab(lastTabBeforeSettings);
@@ -2398,6 +2791,14 @@
       historyCategory = btn.dataset.historyCat;
       renderHistory();
     });
+    document.getElementById('calPrevBtn').addEventListener('click', () => {
+      calendarMonth.setMonth(calendarMonth.getMonth() - 1);
+      renderHistoryCalendar();
+    });
+    document.getElementById('calNextBtn').addEventListener('click', () => {
+      calendarMonth.setMonth(calendarMonth.getMonth() + 1);
+      renderHistoryCalendar();
+    });
 
     document.getElementById('manageCategorySegmented').addEventListener('click', (ev) => {
       const btn = ev.target.closest('button'); if (!btn) return;
@@ -2434,6 +2835,40 @@
     document.getElementById('volumeUnitSegmented').addEventListener('click', (ev) => {
       const btn = ev.target.closest('button'); if (!btn) return;
       state.settings.volumeUnit = btn.dataset.unitChoice; save(); renderAll();
+    });
+
+    document.getElementById('profileSexSegmented').addEventListener('click', (ev) => {
+      const btn = ev.target.closest('button'); if (!btn) return;
+      state.profile.sex = btn.dataset.sexChoice || null;
+      save(); renderAll();
+    });
+    document.getElementById('saveProfileBtn').addEventListener('click', () => {
+      const raw = parseFloat(document.getElementById('profileHeightInput').value);
+      state.profile.heightCm = (!Number.isNaN(raw) && raw > 0) ? Units.displayToCm(raw) : null;
+      save();
+      toast('Profile saved');
+      renderAll();
+    });
+
+    document.getElementById('dashboardChartScaleSegmented').addEventListener('click', (ev) => {
+      const btn = ev.target.closest('button'); if (!btn) return;
+      state.settings.chartScale = btn.dataset.scaleChoice; save(); renderAll();
+    });
+    document.getElementById('insightsWindowSegmented').addEventListener('click', (ev) => {
+      const btn = ev.target.closest('button'); if (!btn) return;
+      state.settings.insightsWindowDays = parseInt(btn.dataset.windowChoice, 10); save(); renderAll();
+    });
+    document.getElementById('showWeightInsightsSegmented').addEventListener('click', (ev) => {
+      const btn = ev.target.closest('button'); if (!btn) return;
+      state.settings.showWeightInsights = btn.dataset.boolChoice === 'on'; save(); renderAll();
+    });
+    document.getElementById('showStrengthLevelSegmented').addEventListener('click', (ev) => {
+      const btn = ev.target.closest('button'); if (!btn) return;
+      state.settings.showStrengthLevel = btn.dataset.boolChoice === 'on'; save(); renderAll();
+    });
+    document.getElementById('showPaceLevelSegmented').addEventListener('click', (ev) => {
+      const btn = ev.target.closest('button'); if (!btn) return;
+      state.settings.showPaceLevel = btn.dataset.boolChoice === 'on'; save(); renderAll();
     });
 
     document.getElementById('exportBtn').addEventListener('click', exportBackup);

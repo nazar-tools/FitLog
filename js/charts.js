@@ -4,6 +4,13 @@
 // No categorical color decisions needed here — every chart in this app is a
 // single-series magnitude trend, so it always uses the one accent hue (set
 // via CSS custom properties / classes in styles.css), never re-picked per call.
+//
+// lineChart() is the one chart type in the app, used at both a compact size
+// (dashboard cards) and a larger size (the exercise/tracker detail modals) —
+// there used to be a separate tiny "sparkline" renderer for cards, but a
+// smaller lineChart reads better (a real goal line and axis labels instead
+// of a bare squiggle), so that's gone in favor of one chart every screen
+// shares.
 
 const Charts = (() => {
 
@@ -18,36 +25,6 @@ const Charts = (() => {
     const last = points[points.length - 1];
     const first = points[0];
     return `${top} L${last.x.toFixed(2)},${baselineY.toFixed(2)} L${first.x.toFixed(2)},${baselineY.toFixed(2)} Z`;
-  }
-
-  // values: array of numbers (nulls allowed, skipped). Returns an SVG string.
-  function sparkline(values, opts = {}) {
-    const width = opts.width || 120;
-    const height = opts.height || 36;
-    const pad = 4;
-    const clean = values.filter((v) => v != null && !Number.isNaN(v));
-    if (clean.length < 2) {
-      return `<svg class="spark" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"></svg>`;
-    }
-    let min = Math.min(...clean);
-    let max = Math.max(...clean);
-    if (min === max) { min -= 1; max += 1; }
-    const n = values.length;
-    const points = values.map((v, i) => ({
-      x: pad + (i / (n - 1)) * (width - pad * 2),
-      y: v == null ? null : height - pad - ((v - min) / (max - min)) * (height - pad * 2),
-    })).filter((p) => p.y != null);
-
-    const line = pathFromPoints(points);
-    const area = areaPathFromPoints(points, height - pad);
-    const last = points[points.length - 1];
-
-    return `
-      <svg class="spark" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none">
-        <path d="${area}" class="chart-area"></path>
-        <path d="${line}" class="chart-line" vector-effect="non-scaling-stroke"></path>
-        <circle cx="${last.x.toFixed(2)}" cy="${last.y.toFixed(2)}" r="3" class="chart-dot"></circle>
-      </svg>`;
   }
 
   // entries: array of { date: 'YYYY-MM-DD', value: number }, sorted ascending.
@@ -87,18 +64,18 @@ const Charts = (() => {
     const last = points[points.length - 1];
     const first = points[0];
 
-    let goalLine = '';
-    if (goal != null && goal >= min && goal <= max) {
-      const gy = padT + innerH - ((goal - min) / (max - min)) * innerH;
-      goalLine = `<line x1="${padL}" y1="${gy.toFixed(2)}" x2="${width - padR}" y2="${gy.toFixed(2)}" class="chart-goal-line"></line>
-        <text x="${width - padR}" y="${(gy - 4).toFixed(2)}" text-anchor="end" class="chart-axis-text">goal</text>`;
-    }
-
     const fmtDate = (d) => {
       const dt = new Date(d + 'T00:00:00');
       return dt.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
     };
     const fmtVal = opts.formatValue || ((v) => v);
+
+    let goalLine = '';
+    if (goal != null && goal >= min && goal <= max) {
+      const gy = padT + innerH - ((goal - min) / (max - min)) * innerH;
+      goalLine = `<line x1="${padL}" y1="${gy.toFixed(2)}" x2="${width - padR}" y2="${gy.toFixed(2)}" class="chart-goal-line"></line>
+        <text x="${width - padR}" y="${(gy - 4).toFixed(2)}" text-anchor="end" class="chart-axis-text">Goal ${fmtVal(goal)}</text>`;
+    }
 
     return `
       <svg width="100%" height="${height}" viewBox="0 0 ${width} ${height}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Progress over time">
@@ -107,11 +84,12 @@ const Charts = (() => {
         <path d="${line}" class="chart-line"></path>
         ${points.map((p) => `<circle cx="${p.x.toFixed(2)}" cy="${p.y.toFixed(2)}" r="3" class="chart-dot"></circle>`).join('')}
         <circle cx="${last.x.toFixed(2)}" cy="${last.y.toFixed(2)}" r="4.5" class="chart-dot"></circle>
+        ${opts.axisLabels === false ? '' : `
         <text x="${first.x.toFixed(2)}" y="${height - 4}" text-anchor="start" class="chart-axis-text">${fmtDate(first.raw.date)}</text>
-        <text x="${last.x.toFixed(2)}" y="${height - 4}" text-anchor="end" class="chart-axis-text">${fmtDate(last.raw.date)}</text>
+        <text x="${last.x.toFixed(2)}" y="${height - 4}" text-anchor="end" class="chart-axis-text">${fmtDate(last.raw.date)}</text>`}
         <text x="${last.x.toFixed(2)}" y="${(last.y - 10).toFixed(2)}" text-anchor="end" class="chart-axis-text">${fmtVal(last.raw.value)}</text>
       </svg>`;
   }
 
-  return { sparkline, lineChart };
+  return { lineChart };
 })();
