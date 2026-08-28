@@ -1,28 +1,44 @@
-/* ============ Design tokens (validated palette — see dataviz skill) ============ */
+/* ============================================================================
+   FIT LOG — styles.css
+
+   Every color, corner radius, and shadow used anywhere in the app is declared
+   exactly once, below, as a CSS custom property. Every rule elsewhere in this
+   file references one of these names rather than a literal value, and
+   neither index.html nor app.js hardcodes a color at all — visual design is
+   fully centralized here by construction, not by convention.
+
+   The ":root { ... }" block immediately below holds the light theme's
+   values. The "@media (prefers-color-scheme: dark)" and
+   ":root[data-theme='dark']" blocks that follow override the same set of
+   names for dark mode; the two are kept in sync deliberately, since a token
+   changed in one and not the other would only be correct in a single theme.
+   ============================================================================ */
 :root {
   color-scheme: light;
-  --page:            #f9f9f7;
-  --surface-1:       #fcfcfb;
-  --surface-2:       #f2f1ed;
-  --text-primary:    #0b0b0b;
-  --text-secondary:  #52514e;
-  --muted:           #898781;
-  --gridline:        #e1e0d9;
-  --baseline:        #c3c2b7;
-  --border:          rgba(11,11,11,0.10);
+  --page:            #f9f9f7;   /* the page background behind every card */
+  --surface-1:       #fcfcfb;   /* cards, modals, inputs sit on this */
+  --surface-2:       #f2f1ed;   /* a slightly recessed surface (badges, track backgrounds) */
+  --text-primary:    #0b0b0b;   /* headings, primary numbers */
+  --text-secondary:  #52514e;   /* supporting/secondary text */
+  --muted:           #898781;   /* least prominent text (timestamps, hints) */
+  --gridline:        #e1e0d9;   /* hairline dividers between rows */
+  --baseline:        #c3c2b7;   /* chart axis lines, goal reference line */
+  --border:          rgba(11,11,11,0.10); /* the subtle 1px border every card uses */
 
-  --accent:          #2a78d6;   /* sequential blue 450 */
-  --accent-track:    #b7d3f6;   /* sequential blue 150 */
-  --accent-strong:   #184f95;   /* sequential blue 600 */
-  --good:            #0ca30c;
-  --good-bg:         #e4f5e4;
-  --warning:         #fab219;
-  --critical:        #d03b3b;
-  --critical-bg:     #fbe7e6;
+  --accent:          #2a78d6;   /* THE app color — meter fill, buttons, links, active tab */
+  --accent-track:    #b7d3f6;   /* the unfilled part of a progress meter (a lighter step of --accent) */
+  --accent-strong:   #184f95;   /* a darker step of --accent, currently unused but kept for contrast needs */
+  --good:            #0ca30c;   /* "goal reached" green */
+  --good-bg:         #e4f5e4;   /* unused background tint for --good, kept for future use */
+  --warning:         #fab219;   /* reserved status color — not yet used, kept for a future caution state */
+  --critical:        #d03b3b;   /* delete/danger buttons */
+  --critical-bg:     #fbe7e6;   /* the soft red background behind a danger button */
 
-  --radius-sm: 10px;
-  --radius-md: 14px;
-  --radius-lg: 20px;
+  --radius-sm: 10px;  /* inputs, small buttons */
+  --radius-md: 14px;  /* rows, meters */
+  --radius-lg: 20px;  /* cards, modal sheet corners */
+  /* Shadows intentionally stay a fixed dark tone in both themes (a shadow is
+     a depth cue, not a brand color) rather than being theme-tokenized. */
   --shadow-1: 0 1px 2px rgba(11,11,11,0.06), 0 1px 1px rgba(11,11,11,0.04);
 }
 
@@ -175,6 +191,9 @@ button { font-family: inherit; }
   border-radius: 999px;
   white-space: nowrap;
 }
+/* Used when a badge sits on its own line (exercise detail modal) instead of
+   inside a flex row (dashboard card) — layout only, no visual/color change. */
+.badge-standalone { display: inline-block; margin-bottom: 10px; }
 .ex-card-values { display: flex; align-items: baseline; gap: 6px; margin-top: 6px; }
 .ex-card-current { font-size: 24px; font-weight: 600; }
 .ex-card-goal { font-size: 13px; color: var(--text-secondary); }
@@ -188,7 +207,13 @@ button { font-family: inherit; }
   overflow: hidden;
 }
 .meter-fill {
+  /* --fill is the one thing app.js sets inline on this element, and it's a
+     data value (current progress %), not a design choice — every visual
+     property (color, thickness, corner radius, animation) is defined here
+     in CSS, driven by `--accent` above. */
+  --fill: 0%;
   position: absolute; left: 0; top: 0; bottom: 0;
+  width: var(--fill);
   background: var(--accent);
   border-radius: 999px;
   transition: width 0.3s ease;
@@ -199,6 +224,19 @@ button { font-family: inherit; }
 .ex-card-pct { font-size: 12px; color: var(--text-secondary); }
 .ex-card-pct.is-complete { color: var(--good); font-weight: 600; display: flex; align-items: center; gap: 4px; }
 .ex-card-spark { margin-top: 8px; }
+
+/* A cardio exercise with both a distance and a pace goal renders one of
+   these per goal, stacked, inside the same card/detail view — one logged
+   run updates both blocks from the same entry. Single-goal cardio and every
+   non-cardio kind render just one plain .ex-card-values/.meter, unwrapped. */
+.ex-card-metric + .ex-card-metric { margin-top: 14px; }
+.ex-card-metric-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
 
 /* ============ Daily (WFH) compact rows ============ */
 .daily-list { display: flex; flex-direction: column; gap: 6px; }
@@ -243,6 +281,14 @@ button { font-family: inherit; }
 .form-card { display: flex; flex-direction: column; gap: 14px; }
 .field { display: flex; flex-direction: column; gap: 6px; }
 .field-label { font-size: 13px; color: var(--text-secondary); font-weight: 500; }
+/* A short explainer line under a field's control, e.g. the Section picker's
+   "shown as a full progress card..." text. */
+.field-hint { margin-top: 2px; }
+/* Two number inputs side by side (minutes+seconds, etc.) — anywhere a field
+   needs a horizontal pair instead of stacking, use this instead of an
+   inline style. */
+.inline-time-fields { display: flex; gap: 6px; }
+.inline-time-fields input { width: 100%; }
 input, select {
   font-family: inherit;
   font-size: 16px;
@@ -289,8 +335,26 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 1p
 .btn-block { width: 100%; }
 .btn-sm { padding: 6px 12px; font-size: 13px; }
 .btn-row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
+/* Confirm-dialog's Cancel/Confirm row sits under a paragraph rather than a
+   form field, so it wants a bit more breathing room above it. */
+.confirm-actions { margin-top: 18px; }
 .btn-ghost { background: transparent; color: var(--accent); border: none; padding: 4px 6px; font-weight: 600; font-size: 13px; }
 .btn[disabled] { opacity: 0.5; cursor: default; }
+/* A permanent, irreversible action rendered as plain text rather than a
+   filled button, so it reads as clearly lower-emphasis than the safe,
+   reversible action (e.g. Archive) usually placed just above it. */
+.btn-text-danger {
+  display: block;
+  width: 100%;
+  background: transparent;
+  border: none;
+  color: var(--critical);
+  font-size: 13px;
+  font-weight: 600;
+  padding: 10px 8px 0;
+  text-align: center;
+  cursor: pointer;
+}
 
 /* ============ Segmented control ============ */
 .setting-row { display: flex; align-items: center; justify-content: space-between; padding: 8px 0; }
@@ -364,10 +428,32 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 1p
   border-radius: 20px 20px 0 0;
   padding: 20px 20px calc(24px + env(safe-area-inset-bottom));
   box-shadow: 0 -4px 24px rgba(11,11,11,0.2);
+  /* Animates the spring-back / dismiss slide app.js drives via `transform`
+     while dragging the handle below; suppressed during an active drag
+     (`.is-dragging`) so the sheet tracks the pointer with no lag. */
+  transition: transform 0.2s ease;
 }
-.modal-handle { width: 36px; height: 4px; background: var(--gridline); border-radius: 999px; margin: 0 auto 16px; }
+.modal-sheet.is-dragging { transition: none; }
+.modal-handle {
+  /* The visible bar stays a slim 36x4px; `background-clip: content-box`
+     keeps color off the padding, which exists purely to give the drag
+     gesture below a comfortable touch target well beyond that thin bar. */
+  width: 36px;
+  height: 4px;
+  background: var(--gridline);
+  background-clip: content-box;
+  border-radius: 999px;
+  margin: -10px auto 10px;
+  padding: 12px 28px;
+  touch-action: none;
+  cursor: grab;
+}
+.modal-handle:active { cursor: grabbing; }
 .modal-title-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
 .modal-title-row h2 { font-size: 18px; }
+/* A muted line of context right under a modal's title (e.g. which exercise
+   an entry belongs to, in the edit-entry sheet). */
+.modal-subtitle { margin-bottom: 12px; }
 .modal-close { border: none; background: var(--surface-2); width: 32px; height: 32px; border-radius: 999px; color: var(--text-primary); cursor: pointer; }
 
 /* ============ Toast ============ */
@@ -386,6 +472,10 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 1p
 }
 
 /* ============ Charts (SVG, per dataviz mark specs) ============ */
+/* Wrapper around an injected Charts.lineChart()/sparkline() SVG — just
+   spacing, so the chart drawing code in charts.js never has to think about
+   its own margins. */
+.chart-wrap { margin: 4px 0 12px; }
 .chart-line { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .chart-area { fill: var(--accent); opacity: 0.10; }
 .chart-dot { fill: var(--accent); stroke: var(--surface-1); stroke-width: 2; }
