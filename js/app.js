@@ -3229,13 +3229,23 @@
     insightsEnabled: false,
   };
 
-  function startSetupWizard() {
-    setupStep = 1;
-    document.getElementById('topbar').hidden = true;
-    document.getElementById('tabbar').hidden = true;
-    switchTab('setup');
-    renderSetupStep();
-  }
+   function hideAppChrome() {
+     document.getElementById('topbar').hidden = true;
+     document.getElementById('tabbar').hidden = true;
+     document.getElementById('app').classList.add('no-topbar');
+   }
+   function showAppChrome() {
+     document.getElementById('topbar').hidden = false;
+     document.getElementById('tabbar').hidden = false;
+     document.getElementById('app').classList.remove('no-topbar');
+   }
+   
+   function startSetupWizard() {
+     setupStep = 1;
+     hideAppChrome();
+     switchTab('setup');
+     renderSetupStep();
+   }
 
   // A Settings-style on/off row (see e.g. #showWeightInsightsSegmented) —
   // every wizard toggle re-renders its whole step on change, since flipping
@@ -3513,8 +3523,7 @@
     state.settings.showPaceLevel = setupAnswers.insightsEnabled;
 
     save();
-    document.getElementById('topbar').hidden = false;
-    document.getElementById('tabbar').hidden = false;
+    showAppChrome();
     switchTab('dashboard');
     renderAll();
     toast('All set — welcome to Fit Log!');
@@ -3744,9 +3753,8 @@
      existing (non-empty) saved payload. Offers an explicit choice rather
      than silently discarding data that might still be salvageable. */
 
-  function showRecoveryScreen() {
-    document.getElementById('topbar').hidden = true;
-    document.getElementById('tabbar').hidden = true;
+   function showRecoveryScreen() {
+    hideAppChrome();
     switchTab('recover');
     document.getElementById('recoverExportBtn').addEventListener('click', () => {
       const blob = new Blob([rawCorrupt || ''], { type: 'application/json' });
