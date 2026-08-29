@@ -20,7 +20,10 @@
      Defaults                     – what a brand-new install starts with
                                      (the seeded exercises and their goals).
      Store                        – load()/save(): the only two functions
-                                     that touch localStorage directly.
+                                     that touch localStorage directly. See
+                                     showRecoveryScreen() (near Init) for
+                                     what happens when load() can't make
+                                     sense of an existing save file.
      Unit helpers                 – lb<->kg and mi<->km conversions, plus
                                      every number-formatting function
                                      (fmtWeight, fmtDistance, fmtPace, ...).
@@ -39,6 +42,12 @@
                                      in Settings' Profile instead — it isn't
                                      something that trends over time, so
                                      it's a one-time fact, not a tracker.
+                                     Progress is measured against a captured
+                                     `baseline`, not a plain current/goal
+                                     ratio — see trackerProgressPct(). Each
+                                     tracker also has a showOnDashboard flag
+                                     so the dashboard doesn't have to show
+                                     every tracker that exists.
      Insights & standards         – optional, off-by-default calculators
                                      (BMI, body-weight trend, strength-vs-
                                      bodyweight level, running-pace level)
@@ -52,9 +61,17 @@
                                      the page.
      Toast                        – the small "Entry saved" popup.
      Modal                        – the generic bottom-sheet popup shell
-                                     that every other modal builds on top of.
+                                     that every other modal builds on top of
+                                     (focus trap, Escape-to-close, and
+                                     restoring focus on close all live here,
+                                     once, rather than per-modal).
+     Chip picker                  – a row of tap targets (sleep quality's
+                                     1-5 rating) for a small set of discrete
+                                     choices, in place of a number input.
      Dynamic set fields           – the weight/reps/cardio input rows shared
                                      by the Log tab and the edit-entry modal.
+                                     Includes the per-set ★ "working set"
+                                     toggle topSetOf() prefers when present.
      Rendering: Dashboard         – the Goals cards, Body & wellness cards,
                                      and Water section on the home screen.
      Rendering: Log tab           – quick-add for a workout set, a tracker
@@ -91,6 +108,10 @@
      Tabs / global wiring         – wires up every click handler once, and
                                      switchTab()/renderAll(), which redraw
                                      the current screen after any change.
+     Data recovery screen         – shown instead of the app when saved data
+                                     exists but load() couldn't read it;
+                                     never overwrites it without an explicit,
+                                     confirmed choice.
      Init                         – what runs the moment the page loads.
 
    The overall flow, on every user action (saving an entry, flipping a
@@ -126,12 +147,23 @@
        1. Bump SCHEMA_VERSION by exactly 1.
        2. Add a new function to MIGRATIONS, keyed by the OLD version number
           it upgrades from (key `2` means "how a v2 save file becomes v3").
-       3. Inside that function, ONLY ADD new fields with safe defaults.
-          Never delete, rename, or repurpose a field an older version
-          wrote — that is exactly how someone's real workout history gets
-          silently wiped on an update. If a field truly isn't needed
-          anymore, just stop reading it elsewhere in the app; leave it
-          sitting harmlessly in the saved data.
+       3. The default, and by far the common case: ONLY ADD new fields with
+          safe defaults. Never delete, rename, or repurpose a field an
+          older version wrote for no reason — that is how someone's real
+          history gets silently wiped on an update. If a field truly isn't
+          needed anymore, the simplest safe move is to just stop reading it
+          elsewhere in the app and leave it sitting harmlessly in the saved
+          data, rather than removing it here.
+          Removing or restructuring old data in a migration (rather than
+          just adding to it) is a deliberate exception, not the default —
+          only do it when there's an explicit conversion that preserves the
+          information (e.g. the v4->v5 migration below moves a Height
+          tracker's latest value into profile.heightCm before deleting the
+          tracker; v5->v6 merges two sleep trackers into one before
+          deleting the originals), and it has a test with a saved fixture
+          proving nothing is lost. "Never delete a field" is the rule for
+          the common case of adding something new; it was never a promise
+          that a schema can't evolve its shape when there's a real reason.
 
      load() (below) walks any saved file forward through every migration it
      hasn't been through yet, oldest first, until it reaches SCHEMA_VERSION.
@@ -142,7 +174,7 @@
      import path runs the exact same migrations.
      ========================================================================== */
 
-  const SCHEMA_VERSION = 6;
+  const SCHEMA_VERSION = 7;
 
   // Known "daily" exercise ids from before the Goal/Daily/Other split
   // existed (schema v1). Used only by the v1->v2 migration below.
@@ -276,7 +308,28 @@
       }
       return data;
     },
-    // Next migration goes here, keyed `6: (data) => { ...; return data; }`.
+    // v6 -> v7: tracker goal progress used to be a plain current/goal ratio,
+    // which reads as nonsense for a body metric moving toward a target from
+    // some starting point (200lb -> 180lb goal at 195lb is 25% there, not
+    // the 92% that ratio gives) — see trackerProgressPct() below, which now
+    // measures against a `baseline` instead. Existing trackers with a goal
+    // already set have no recorded "starting point," so the best available
+    // proxy — the earliest logged value — is used; a tracker with no
+    // measurements yet, or no goal, gets `baseline: null` and simply falls
+    // back to the old ratio until one is established (see
+    // trackerProgressPct()'s own fallback).
+    6: (data) => {
+      (data.trackers || []).forEach((t) => {
+        if (t.baseline !== undefined) return;
+        if (t.goal == null) { t.baseline = null; return; }
+        const earliest = (data.measurements || [])
+          .filter((m) => m.trackerId === t.id)
+          .sort((a, b) => (a.date + a.id).localeCompare(b.date + b.id))[0];
+        t.baseline = earliest ? earliest.value : null;
+      });
+      return data;
+    },
+    // Next migration goes here, keyed `7: (data) => { ...; return data; }`.
   };
 
   /** Walks `data` forward through MIGRATIONS until it matches SCHEMA_VERSION. */
@@ -305,9 +358,9 @@
   function defaultTrackers() {
     const now = new Date().toISOString();
     return [
-      { id: 'trk_weight', name: 'Weight', kind: 'metric', unitKind: 'weight', goal: null, direction: null, archived: false, createdAt: now },
-      { id: 'trk_bodyfat', name: 'Body Fat %', kind: 'metric', unitKind: 'percent', goal: null, direction: null, archived: false, createdAt: now },
-      { id: 'trk_sleep', name: 'Sleep', kind: 'sleep', unitKind: 'hours', goal: null, direction: null, archived: false, createdAt: now },
+      { id: 'trk_weight', name: 'Weight', kind: 'metric', unitKind: 'weight', goal: null, baseline: null, direction: null, archived: false, createdAt: now },
+      { id: 'trk_bodyfat', name: 'Body Fat %', kind: 'metric', unitKind: 'percent', goal: null, baseline: null, direction: null, archived: false, createdAt: now },
+      { id: 'trk_sleep', name: 'Sleep', kind: 'sleep', unitKind: 'hours', goal: null, baseline: null, direction: null, archived: false, createdAt: now },
     ];
   }
 
@@ -380,10 +433,17 @@
   // True only for a genuinely first-ever run (see load() below) — init()
   // checks this to show the setup wizard instead of the normal dashboard.
   let needsSetup = false;
+  // True when saved data exists but couldn't be read (see load()'s catch
+  // below) — init() shows a recovery screen instead of guessing at
+  // defaults. `rawCorrupt` keeps the original, untouched bytes so the
+  // recovery screen can hand them back rather than losing them.
+  let needsRecovery = false;
+  let rawCorrupt = null;
 
   function load() {
+    let raw;
     try {
-      const raw = localStorage.getItem(STORAGE_KEY);
+      raw = localStorage.getItem(STORAGE_KEY);
       if (!raw) {
         // Truly first run. `state` gets an inert skeleton so the rest of
         // the app has something safe to read, but it's deliberately NOT
@@ -400,9 +460,16 @@
       state = runMigrations(parsed);
       save(); // persist the migrated shape once, so this doesn't re-run every load
     } catch (e) {
-      console.warn('Could not load saved data, starting fresh.', e);
-      state = defaultData();
-      save();
+      // A real saved payload exists but couldn't be parsed or migrated —
+      // this is NOT the same as "no data," and must not be treated like
+      // it. There is no server-side copy of this data, so overwriting
+      // localStorage here on what might be a bug in this code (rather
+      // than a genuinely unrecoverable file) could destroy real history.
+      // Leave localStorage exactly as it was and let the recovery screen
+      // (see showRecoveryScreen()) offer an explicit, informed choice.
+      console.warn('Could not read saved data — leaving it untouched.', e);
+      rawCorrupt = raw || null;
+      needsRecovery = true;
     }
   }
 
@@ -521,10 +588,19 @@
     return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${String(r).padStart(2, '0')}` : `${m}:${String(r).padStart(2, '0')}`;
   }
 
+  // A calendar day is a YYYY-MM-DD label, not a timestamp — reading it back
+  // off a Date's local getters (never .toISOString(), which reports UTC and
+  // silently shifts the date by a day in any timezone ahead of UTC) is what
+  // keeps "today," streaks, and trend windows agreeing with the calendar on
+  // the wall rather than the calendar in Greenwich.
+  function localDateISO(d) {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  }
   function todayISO() {
-    const d = new Date();
-    const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
-    return local.toISOString().slice(0, 10);
+    return localDateISO(new Date());
   }
   function fmtDateShort(iso) {
     const d = new Date(iso + 'T00:00:00');
@@ -546,6 +622,12 @@
     if (exercise.kind === 'weight') {
       const valid = (entry.sets || []).filter((s) => s.reps > 0 && s.weight != null);
       if (!valid.length) return null;
+      // A set starred as the working set (see the log form's ★ toggle) is
+      // the intended basis for a suggestion even if a heavier warm-up or
+      // test single was also logged in the same entry; fall back to
+      // "heaviest logged" only when nothing was starred.
+      const starred = valid.find((s) => s.primary);
+      if (starred) return { weight: starred.weight, reps: starred.reps, rpe: starred.rpe };
       let top = valid[0];
       for (const s of valid) { if (s.weight > top.weight || (s.weight === top.weight && s.reps > top.reps)) top = s; }
       return { weight: top.weight, reps: top.reps, rpe: top.rpe };
@@ -680,9 +762,13 @@
        1) RPE/RIR-based autoregulation (when the last top set has an RPE logged) —
           a well-supported approach in strength-training research for deciding
           session-to-session load. Bands follow common RPE/RIR coaching scales.
-       2) The "2-for-2 rule" (NSCA) as a fallback when no RPE is logged:
-          matching or beating the prior rep count at the same weight across
-          two sessions in a row signals it's time to add load.
+       2) A simple two-session trend fallback when no RPE is logged: matching
+          or beating the prior rep count at the same weight across two
+          sessions in a row signals it's time to add load. This is NOT the
+          NSCA's "2-for-2 rule" (which tracks exceeding a target rep RANGE
+          by ~2 reps across two sessions — this app doesn't model rep-range
+          targets) — it's labeled plainly below rather than claiming that
+          more specific rule's name.
      Increment sizes follow NSCA general guidance: smaller jumps for upper-body /
      single-joint lifts, larger jumps for lower-body / multi-joint lifts.
      This is a general heuristic, not personalized coaching — it's surfaced with
@@ -706,7 +792,7 @@
 
   const SUGGESTION_METHOD_NOTE = {
     rpe: 'Based on RPE/RIR-based autoregulation.',
-    '2for2': 'Based on the “2-for-2” progressive-overload rule.',
+    sametrend: 'Based on your last two sessions at this weight.',
     trend: 'Based on your last two sessions.',
   };
 
@@ -754,9 +840,9 @@
       if (prevTop && prevTop.weight === lastTop.weight) {
         if (lastTop.reps >= prevTop.reps && lastTop.reps >= 5) {
           const w = lastTop.weight + weightIncrementLb(region, 1);
-          return { headline: `Try ${fmtWeight(w)} next session`, detail: `You matched or beat your reps (${prevTop.reps} → ${lastTop.reps}) at this weight for two sessions in a row.`, method: '2for2' };
+          return { headline: `Try ${fmtWeight(w)} next session`, detail: `You matched or beat your reps (${prevTop.reps} → ${lastTop.reps}) at this weight for two sessions in a row.`, method: 'sametrend' };
         }
-        return { headline: `Repeat ${fmtWeight(lastTop.weight)} next session`, detail: `Reps dipped (${prevTop.reps} → ${lastTop.reps}) — consolidate before adding load.`, method: '2for2' };
+        return { headline: `Repeat ${fmtWeight(lastTop.weight)} next session`, detail: `Reps dipped (${prevTop.reps} → ${lastTop.reps}) — consolidate before adding load.`, method: 'sametrend' };
       }
       return { headline: `Repeat ${fmtWeight(lastTop.weight)}, or log RPE for a sharper suggestion`, detail: 'Logging an RPE (how hard that top set felt, 1–10) unlocks a tailored recommendation.', method: null };
     }
@@ -842,6 +928,10 @@
     return list.length ? list[list.length - 1] : null;
   }
 
+  // tracker.unitLabel is free-text the user (or an imported backup) typed
+  // in — this return value is interpolated straight into innerHTML in
+  // several places (dashboard/tracker cards, chart tooltips), so it's
+  // escaped right here rather than trusting every call site to remember to.
   function fmtTrackerValue(tracker, v) {
     if (v == null || Number.isNaN(v)) return '—';
     switch (tracker.unitKind) {
@@ -850,7 +940,7 @@
       case 'percent': return `${round(v, 1)}%`;
       case 'hours': return `${round(v, 1)} hr`;
       case 'rating': return `${Math.round(v)}/${tracker.ratingMax || 5}`;
-      default: return `${round(v, 1)}${tracker.unitLabel ? ' ' + tracker.unitLabel : ''}`;
+      default: return `${round(v, 1)}${tracker.unitLabel ? ' ' + escapeHtml(tracker.unitLabel) : ''}`;
     }
   }
 
@@ -867,14 +957,45 @@
   }
   function fmtQuality(q) { return q == null ? null : `${q}/5`; }
 
-  // Same shape as progressPct() for exercises: percent of goal reached,
-  // "lower is better" when direction is 'down' (e.g. a body-fat % goal).
+  // Percent of the way from `tracker.baseline` (the value when this goal
+  // was set — see the v6->v7 migration and the baseline-capture points in
+  // openTrackerForm()/handleLogMeasurementSubmit()/finishSetup()) to
+  // `tracker.goal`. This is deliberately NOT a plain current/goal ratio:
+  // for a body metric moving toward a target from somewhere else — weight
+  // 200 -> goal 180, currently 195 — current/goal math reports 92% (180/195)
+  // when only 25% of the actual 20lb has been lost. Measuring against where
+  // you started instead of against zero is what makes the percentage mean
+  // "progress" rather than "proximity."
+  // Falls back to the old direct ratio when there's no usable baseline yet
+  // (a brand-new tracker with a goal but no logged history) so a goal still
+  // shows *something* meaningful before any progress exists to measure.
   function trackerProgressPct(tracker, value) {
-    if (value == null || !tracker.goal) return { pct: 0, achieved: false };
-    const pct = tracker.direction === 'down'
-      ? (value <= 0 ? 0 : (tracker.goal / value) * 100)
-      : (value / tracker.goal) * 100;
-    return { pct: Math.max(0, pct), achieved: pct >= 100 };
+    if (value == null || tracker.goal == null) return { pct: 0, achieved: false };
+    const goal = tracker.goal;
+    const achieved = tracker.direction === 'down' ? value <= goal : value >= goal;
+    const baseline = tracker.baseline;
+    if (baseline == null || baseline === goal) {
+      const pct = tracker.direction === 'down'
+        ? (value <= 0 ? 0 : (goal / value) * 100)
+        : (value / goal) * 100;
+      return { pct: Math.max(0, pct), achieved };
+    }
+    const pct = ((baseline - value) / (baseline - goal)) * 100;
+    return { pct: Math.max(0, pct), achieved };
+  }
+
+  // A plain-language alternative to the percentage above for a tracker with
+  // a known baseline — "12 lb down · 8 lb remaining" reads unambiguously
+  // where "80%" can still be misread as "80% of my original weight" for a
+  // body metric. Returns null when there's no baseline to measure a delta
+  // from yet, or nothing left to describe (goal already reached).
+  function trackerProgressDeltaText(tracker, value) {
+    if (value == null || tracker.goal == null || tracker.baseline == null) return null;
+    const moved = Math.abs(tracker.baseline - value);
+    const remaining = Math.abs(tracker.goal - value);
+    if (remaining <= 0) return null;
+    const dir = tracker.direction === 'down' ? 'down' : 'up';
+    return `${fmtTrackerValue(tracker, moved)} ${dir} · ${fmtTrackerValue(tracker, remaining)} remaining`;
   }
 
   // Converts a tracker's canonical value (weight in lb, length in cm, ...)
@@ -893,6 +1014,8 @@
     if (tracker.unitKind === 'length') return Units.displayToCm(v);
     return v;
   }
+  // Same escaping rationale as fmtTrackerValue() above — this also lands in
+  // innerHTML (the log/edit measurement forms' field labels).
   function trackerUnitLabel(tracker) {
     switch (tracker.unitKind) {
       case 'weight': return Units.weightUnitLabel();
@@ -900,7 +1023,7 @@
       case 'percent': return '%';
       case 'hours': return 'hr';
       case 'rating': return `/ ${tracker.ratingMax || 5}`;
-      default: return tracker.unitLabel || '';
+      default: return tracker.unitLabel ? escapeHtml(tracker.unitLabel) : '';
     }
   }
 
@@ -1010,7 +1133,7 @@
     if (list.length >= 2) {
       const cutoff = new Date(latest.date + 'T00:00:00');
       cutoff.setDate(cutoff.getDate() - state.settings.insightsWindowDays);
-      const cutoffIso = cutoff.toISOString().slice(0, 10);
+      const cutoffIso = localDateISO(cutoff);
       const baseline = list.filter((m) => m.date <= cutoffIso).slice(-1)[0] || list[0];
       if (baseline.id !== latest.id) {
         const days = Math.round((new Date(latest.date + 'T00:00:00') - new Date(baseline.date + 'T00:00:00')) / 86400000);
@@ -1031,16 +1154,43 @@
   // bodyweight, against the researched standards above — needs the lift
   // mapped to a known type (see the exercise form's "Lift type" field) and
   // both a bodyweight entry and a sex set in Profile.
+  // Epley formula: a set's estimated 1-rep max from any (weight, reps) pair.
+  // Standards tables like LIFT_STANDARDS below are published as 1RM ratios,
+  // so this — not the raw heaviest weight ever lifted — is the correct
+  // like-for-like comparison; a 185lb x 10 set is a much bigger lift than a
+  // 185lb single, and only the estimate reflects that.
+  function epleyOneRM(weight, reps) {
+    return reps <= 1 ? weight : weight * (1 + reps / 30);
+  }
+
+  // The single best estimated 1RM across every logged set for this
+  // exercise, plus which actual (weight, reps) set produced it.
+  function bestEstimatedOneRM(ex) {
+    let best = null;
+    entriesFor(ex.id).forEach((entry) => {
+      (entry.sets || []).forEach((s) => {
+        if (!(s.reps > 0) || s.weight == null) return;
+        const oneRM = epleyOneRM(s.weight, s.reps);
+        if (!best || oneRM > best.oneRM) best = { oneRM, weight: s.weight, reps: s.reps };
+      });
+    });
+    return best;
+  }
+
   function strengthLevelInfo(ex) {
     if (ex.kind !== 'weight' || !ex.liftType || !LIFT_STANDARDS[ex.liftType]) return null;
     const bw = currentBodyWeightLb();
     if (!bw) return { needsBodyWeight: true };
     if (!state.profile.sex) return { needsSex: true };
-    const liftBest = best(ex);
-    if (liftBest == null) return null;
-    const ratio = liftBest / bw;
+    const heaviestLoad = best(ex);
+    const oneRepMax = bestEstimatedOneRM(ex);
+    if (heaviestLoad == null || !oneRepMax) return null;
+    const ratio = oneRepMax.oneRM / bw;
     const table = LIFT_STANDARDS[ex.liftType][state.profile.sex];
-    return { ratio, tier: classifyAscending(ratio, table, INSIGHT_TIER_LABELS), liftLabel: LIFT_STANDARDS[ex.liftType].label };
+    return {
+      ratio, tier: classifyAscending(ratio, table, INSIGHT_TIER_LABELS), liftLabel: LIFT_STANDARDS[ex.liftType].label,
+      oneRepMax: oneRepMax.oneRM, heaviestLoad,
+    };
   }
 
   // How a cardio exercise's best pace compares to the general recreational
@@ -1114,18 +1264,55 @@
 
   const modalRoot = () => document.getElementById('modalRoot');
   const modalSheet = () => document.getElementById('modalSheet');
+  let modalLastFocusedEl = null;
+
+  function focusableEls(container) {
+    return Array.from(container.querySelectorAll('a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'));
+  }
+
+  // Escape closes; Tab/Shift+Tab cycle within the sheet instead of escaping
+  // to the (hidden-behind-the-backdrop, but still technically tabbable)
+  // page underneath.
+  function handleModalKeydown(ev) {
+    if (ev.key === 'Escape') { ev.preventDefault(); closeModal(); return; }
+    if (ev.key !== 'Tab') return;
+    const focusables = focusableEls(modalSheet());
+    if (!focusables.length) return;
+    const first = focusables[0];
+    const last = focusables[focusables.length - 1];
+    if (ev.shiftKey && document.activeElement === first) { ev.preventDefault(); last.focus(); }
+    else if (!ev.shiftKey && document.activeElement === last) { ev.preventDefault(); first.focus(); }
+  }
 
   function openModal(html) {
     const sheet = modalSheet();
     sheet.style.transform = '';
     sheet.classList.remove('is-dragging');
     sheet.innerHTML = `<div class="modal-handle"></div>${html}`;
+    // A dialog needs an accessible name; every modal here starts with an
+    // <h2> title, so point at it rather than requiring each call site to
+    // wire this up itself.
+    const heading = sheet.querySelector('h2');
+    if (heading) { heading.id = 'modalTitle'; sheet.setAttribute('aria-labelledby', 'modalTitle'); }
+    else sheet.removeAttribute('aria-labelledby');
+    modalLastFocusedEl = document.activeElement;
     modalRoot().hidden = false;
     wireModalSwipeToClose(sheet);
+    document.addEventListener('keydown', handleModalKeydown);
+    // Land focus on the first real control past the ✕ (so a form's first
+    // field is ready to type into), falling back to the ✕ itself, or the
+    // sheet, if that's all there is.
+    const focusables = focusableEls(sheet);
+    const target = focusables.find((el) => el.dataset.action !== 'close-modal') || focusables[0];
+    if (target) target.focus();
+    else { sheet.tabIndex = -1; sheet.focus(); }
   }
   function closeModal() {
     modalRoot().hidden = true;
     modalSheet().innerHTML = '';
+    document.removeEventListener('keydown', handleModalKeydown);
+    if (modalLastFocusedEl && document.body.contains(modalLastFocusedEl)) modalLastFocusedEl.focus();
+    modalLastFocusedEl = null;
   }
 
   // Makes the little bar at the top of every modal sheet (`.modal-handle`)
@@ -1182,6 +1369,50 @@
     document.getElementById('confirmDialogBtn').addEventListener('click', () => { closeModal(); onConfirm(); });
   }
 
+  /* ============================== Chip picker ==============================
+     A small discrete-choice input (sleep quality's 1-5 rating, currently) —
+     a row of tap targets reads faster and is easier to hit on a phone than
+     a number field for a value that only ever takes a few known options.
+     The container's data-value is the single source of truth (empty string
+     = nothing picked, since a rating is optional); tapping the already-
+     selected chip clears it rather than requiring a separate "clear" UI. */
+  function qualityChipsHtml(id, selected) {
+    const opts = [1, 2, 3, 4, 5];
+    return `<div class="chip-picker" id="${id}" data-value="${selected != null ? selected : ''}" role="radiogroup" aria-label="Sleep quality">
+      ${opts.map((v) => `<button type="button" class="chip-option ${v === selected ? 'is-active' : ''}" data-value="${v}" role="radio" aria-checked="${v === selected}">${v}</button>`).join('')}
+    </div>`;
+  }
+  function wireChipPicker(el) {
+    if (!el) return;
+    el.querySelectorAll('.chip-option').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const turningOff = el.dataset.value === btn.dataset.value;
+        el.dataset.value = turningOff ? '' : btn.dataset.value;
+        el.querySelectorAll('.chip-option').forEach((b) => {
+          const active = !turningOff && b.dataset.value === btn.dataset.value;
+          b.classList.toggle('is-active', active);
+          b.setAttribute('aria-checked', String(active));
+        });
+      });
+    });
+  }
+  // Makes a clickable card/row div behave like a real control for keyboard
+  // and assistive-tech users — a div click handler alone gives it neither
+  // focusability nor Enter/Space activation.
+  function wireOpenable(el, onOpen) {
+    el.setAttribute('role', 'button');
+    el.setAttribute('tabindex', '0');
+    el.addEventListener('click', onOpen);
+    el.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); onOpen(); }
+    });
+  }
+  function resetChipPicker(el) {
+    if (!el) return;
+    el.dataset.value = '';
+    el.querySelectorAll('.chip-option').forEach((b) => { b.classList.remove('is-active'); b.setAttribute('aria-checked', 'false'); });
+  }
+
   function escapeHtml(s) {
     return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   }
@@ -1193,13 +1424,14 @@
     if (kind === 'weight') {
       const w = set.weight != null ? round(Units.lbToDisplay(set.weight), 2) : '';
       return `
-        <div class="set-row set-row-3" data-set-idx="${idx}">
+        <div class="set-row set-row-3" data-set-idx="${idx}" data-primary="${set.primary ? '1' : '0'}">
           <label class="field"><span class="field-label">Weight (${Units.weightUnitLabel()})</span>
             <input type="number" step="any" inputmode="decimal" class="set-weight" value="${w}" placeholder="0" /></label>
           <label class="field"><span class="field-label">Reps</span>
-            <input type="number" step="1" min="0" inputmode="numeric" class="set-reps" value="${set.reps ?? ''}" placeholder="0" /></label>
+            <input type="number" step="1" min="1" inputmode="numeric" class="set-reps" value="${set.reps ?? ''}" placeholder="0" /></label>
           <label class="field"><span class="field-label">RPE</span>
             <input type="number" step="0.5" min="1" max="10" inputmode="decimal" class="set-rpe" value="${set.rpe ?? ''}" placeholder="opt." /></label>
+          <button type="button" class="set-row-star ${set.primary ? 'is-active' : ''}" data-action="toggle-primary" aria-label="Mark as working set" title="Mark as working set (used for suggestions)">★</button>
           <button type="button" class="set-row-remove" data-action="remove-set" aria-label="Remove set">✕</button>
         </div>`;
     }
@@ -1208,7 +1440,7 @@
     return `
       <div class="set-row set-row-3" data-set-idx="${idx}">
         <label class="field"><span class="field-label">Reps</span>
-          <input type="number" step="1" min="0" inputmode="numeric" class="set-reps" value="${set.reps ?? ''}" placeholder="0" /></label>
+          <input type="number" step="1" min="1" inputmode="numeric" class="set-reps" value="${set.reps ?? ''}" placeholder="0" /></label>
         <label class="field"><span class="field-label">Added wt (${Units.weightUnitLabel()})</span>
           <input type="number" step="any" inputmode="decimal" class="set-addedweight" value="${aw}" placeholder="opt." /></label>
         <label class="field"><span class="field-label">RPE</span>
@@ -1255,8 +1487,10 @@
       const idx = wrap.children.length;
       wrap.insertAdjacentHTML('beforeend', setRowHtml(exercise.kind, idx, {}));
       wireSetRemoveButtons(container);
+      wireSetPrimaryButtons(container);
     });
     wireSetRemoveButtons(container);
+    wireSetPrimaryButtons(container);
   }
 
   function wireSetRemoveButtons(container) {
@@ -1265,6 +1499,23 @@
         const wrap = container.querySelector('.sets-container');
         if (wrap.children.length <= 1) { toast('Keep at least one set, or pick a different exercise.'); return; }
         btn.closest('.set-row').remove();
+      };
+    });
+  }
+
+  // Only one set per entry can be "the" working set — starring one clears
+  // the others in the same form, since topSetOf() needs a single answer.
+  function wireSetPrimaryButtons(container) {
+    container.querySelectorAll('[data-action="toggle-primary"]').forEach((btn) => {
+      btn.onclick = () => {
+        const row = btn.closest('.set-row');
+        const turningOn = row.dataset.primary !== '1';
+        container.querySelectorAll('.set-row').forEach((r) => {
+          r.dataset.primary = '0';
+          const b = r.querySelector('[data-action="toggle-primary"]');
+          if (b) b.classList.remove('is-active');
+        });
+        if (turningOn) { row.dataset.primary = '1'; btn.classList.add('is-active'); }
       };
     });
   }
@@ -1291,8 +1542,14 @@
         const w = parseFloat(row.querySelector('.set-weight').value);
         const r = parseFloat(row.querySelector('.set-reps').value);
         const rpe = parseFloat(row.querySelector('.set-rpe').value);
-        if (Number.isNaN(w) && Number.isNaN(r)) continue;
-        sets.push({ weight: Number.isNaN(w) ? 0 : Units.displayToLb(w), reps: Number.isNaN(r) ? 0 : r, rpe: Number.isNaN(rpe) ? null : rpe });
+        const hasW = !Number.isNaN(w);
+        const hasR = !Number.isNaN(r);
+        if (!hasW && !hasR) continue; // fully blank row — not a set, just ignore it
+        // A set is weight AND reps together or it isn't a set at all — filling
+        // in the missing side with 0 would silently write a fake 0lb or 0-rep
+        // set into history, so a half-filled row is rejected instead.
+        if (!hasW || !hasR) return { error: 'Each set needs both a weight and reps — fill in the missing value, or clear the row.' };
+        sets.push({ weight: Units.displayToLb(w), reps: r, primary: row.dataset.primary === '1' || undefined, rpe: Number.isNaN(rpe) ? null : rpe });
       } else {
         const r = parseFloat(row.querySelector('.set-reps').value);
         const aw = parseFloat(row.querySelector('.set-addedweight').value);
@@ -1312,7 +1569,7 @@
     let cursor = new Date(todayISO() + 'T00:00:00');
     // allow today to be "not yet logged" without breaking the streak
     if (!days.has(todayISO())) cursor.setDate(cursor.getDate() - 1);
-    while (days.has(cursor.toISOString().slice(0, 10))) {
+    while (days.has(localDateISO(cursor))) {
       streak++;
       cursor.setDate(cursor.getDate() - 1);
     }
@@ -1337,7 +1594,7 @@
 
   function renderSummary() {
     const weekAgo = new Date(); weekAgo.setDate(weekAgo.getDate() - 6);
-    const weekAgoIso = new Date(weekAgo.getTime() - weekAgo.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+    const weekAgoIso = localDateISO(weekAgo);
     const sessionsThisWeek = new Set(state.entries.filter((e) => e.date >= weekAgoIso).map((e) => e.date)).size;
     const goalUnits = activeGoalUnits();
     const goalsHit = goalUnits.filter((u) => progressPct(u.ex, u.metric).achieved).length;
@@ -1392,7 +1649,8 @@
     if (!info) return '';
     if (info.needsBodyWeight) return `<div class="insight-line muted-text">Log your body weight to see your strength level.</div>`;
     if (info.needsSex) return `<div class="insight-line muted-text">Set your sex in Settings → Profile to see your strength level.</div>`;
-    return `<div class="insight-line">${round(info.ratio, 2)}&times; bodyweight &middot; <strong>${info.tier}</strong></div>`;
+    return `<div class="insight-line">Est. 1RM ${fmtWeight(info.oneRepMax)} &middot; ${round(info.ratio, 2)}&times; bodyweight &middot; <strong>${info.tier}</strong></div>
+      <div class="insight-line muted-text">Heaviest logged: ${fmtWeight(info.heaviestLoad)}</div>`;
   }
   function paceLevelLineHtml(info) {
     if (!info) return '';
@@ -1509,7 +1767,8 @@
         </div>
         ${tracker.goal != null ? `
           <div class="meter"><div class="meter-fill ${achieved ? 'is-complete' : ''}" style="--fill:${fillPct}%"></div></div>
-          <div class="ex-card-foot"><span class="ex-card-pct ${achieved ? 'is-complete' : ''}">${achieved ? '✓ Goal reached' : `${Math.round(pct)}%`}</span></div>` : ''}
+          <div class="ex-card-foot"><span class="ex-card-pct ${achieved ? 'is-complete' : ''}">${achieved ? '✓ Goal reached' : `${Math.round(pct)}%`}</span></div>
+          ${!achieved && trackerProgressDeltaText(tracker, value) ? `<div class="insight-line muted-text">${trackerProgressDeltaText(tracker, value)}</div>` : ''}` : ''}
         ${chartPoints.length >= 2 ? `<div class="ex-card-chart">${Charts.lineChart(chartPoints, { goal: tracker.goal, width: 300, height: 96, formatValue: (v) => fmtTrackerValue(tracker, v) })}</div>` : ''}
         ${qualityLine}
         ${bmiLine}
@@ -1517,13 +1776,15 @@
   }
 
   function renderBodySection() {
-    const trackers = activeTrackers();
+    // Manage still lists every tracker regardless of this — hiding one from
+    // the dashboard only declutters the daily view, it doesn't archive it.
+    const trackers = activeTrackers().filter((t) => t.showOnDashboard !== false);
     document.getElementById('bodySectionHead').hidden = trackers.length === 0;
     const wrap = document.getElementById('bodyCards');
     wrap.hidden = trackers.length === 0;
     wrap.innerHTML = trackers.map(trackerCardHtml).join('');
     wrap.querySelectorAll('[data-tracker-id]').forEach((card) => {
-      card.addEventListener('click', () => openTrackerDetail(card.getAttribute('data-tracker-id')));
+      wireOpenable(card, () => openTrackerDetail(card.getAttribute('data-tracker-id')));
     });
   }
 
@@ -1591,7 +1852,7 @@
     const cardsWrap = document.getElementById('exerciseCards');
     cardsWrap.innerHTML = goalList.map(goalCardHtml).join('');
     cardsWrap.querySelectorAll('.ex-card[data-exercise-id]').forEach((card) => {
-      card.addEventListener('click', () => openExerciseDetail(card.getAttribute('data-exercise-id')));
+      wireOpenable(card, () => openExerciseDetail(card.getAttribute('data-exercise-id')));
     });
 
     document.getElementById('dailySectionHead').hidden = dailyToday.length === 0;
@@ -1599,7 +1860,7 @@
     dailyWrap.hidden = dailyToday.length === 0;
     dailyWrap.innerHTML = dailyToday.map(dailyRowHtml).join('');
     dailyWrap.querySelectorAll('.daily-row').forEach((row) => {
-      row.addEventListener('click', () => openExerciseDetail(row.getAttribute('data-exercise-id')));
+      wireOpenable(row, () => openExerciseDetail(row.getAttribute('data-exercise-id')));
     });
 
     renderWaterSection();
@@ -1689,12 +1950,22 @@
     if (Number.isNaN(raw)) { toast('Enter a value.'); return; }
     const date = document.getElementById('logMeasurementDate').value || todayISO();
     const note = document.getElementById('logMeasurementNote').value.trim();
-    const quality = tracker.kind === 'sleep' ? clampQuality(document.getElementById('logSleepQuality').value) : undefined;
+    const quality = tracker.kind === 'sleep' ? clampQuality(document.getElementById('logSleepQuality').dataset.value) : undefined;
+    // If this tracker has a goal but never got a baseline (e.g. the goal was
+    // set before this feature existed and the v6->v7 migration found no
+    // history to backfill from), the value it was AT before this new entry
+    // becomes that baseline — or, if this is the very first entry ever,
+    // the entry's own value (0% progress, which is correct: nothing to
+    // measure movement against yet).
+    if (tracker.goal != null && tracker.baseline == null) {
+      const prevLatest = latestMeasurement(tracker.id);
+      tracker.baseline = prevLatest ? prevLatest.value : trackerCanonicalFromDisplay(tracker, raw);
+    }
     state.measurements.push({ id: genId('meas'), trackerId: tracker.id, date, value: trackerCanonicalFromDisplay(tracker, raw), quality, note: note || null });
     save();
     toast('Entry saved');
     document.getElementById('logMeasurementValue').value = '';
-    document.getElementById('logSleepQuality').value = '';
+    resetChipPicker(document.getElementById('logSleepQuality'));
     document.getElementById('logMeasurementNote').value = '';
     renderRecentEntries();
     renderDashboard();
@@ -1838,6 +2109,7 @@
     const ex = exerciseById(select.value);
     if (!ex) { toast('Pick an exercise first.'); return; }
     const fields = readDynamicFields(document.getElementById('logDynamicFields'), ex);
+    if (fields && fields.error) { toast(fields.error); return; }
     if (!fields) { toast('Enter at least one value before saving.'); return; }
     const date = document.getElementById('logDate').value || todayISO();
     const note = document.getElementById('logNote').value.trim();
@@ -2013,6 +2285,7 @@
     document.getElementById('saveEntryBtn').addEventListener('click', () => {
       if (!ex) { closeModal(); return; }
       const fields = readDynamicFields(document.getElementById('editEntryFields'), ex);
+      if (fields && fields.error) { toast(fields.error); return; }
       if (!fields) { toast('Enter at least one value.'); return; }
       entry.date = document.getElementById('editEntryDate').value || entry.date;
       entry.note = document.getElementById('editEntryNote').value.trim() || null;
@@ -2363,19 +2636,20 @@
         <label class="field"><span class="field-label">Date</span><input type="date" id="editMeasurementDate" value="${m.date}" /></label>
         <label class="field"><span class="field-label">${isSleep ? 'Hours slept' : `Value${tracker ? ` (${trackerUnitLabel(tracker)})` : ''}`}</span>
           <input type="number" step="any" id="editMeasurementValue" value="${tracker ? trackerDisplayFromCanonical(tracker, m.value) : m.value}" /></label>
-        ${isSleep ? `<label class="field"><span class="field-label">Sleep quality (1-5, optional)</span>
-          <input type="number" step="1" min="1" max="5" id="editMeasurementQuality" value="${m.quality != null ? m.quality : ''}" /></label>` : ''}
+        ${isSleep ? `<div class="field"><span class="field-label">Sleep quality <span class="muted-text">(optional — tap again to clear)</span></span>
+          ${qualityChipsHtml('editMeasurementQuality', m.quality != null ? m.quality : null)}</div>` : ''}
         <label class="field"><span class="field-label">Note</span><input type="text" id="editMeasurementNote" value="${m.note ? escapeHtml(m.note) : ''}" maxlength="200" /></label>
         <div class="btn-row"><button class="btn btn-primary btn-block" id="saveMeasurementBtn">Save changes</button></div>
         <button class="btn btn-danger btn-block" id="deleteMeasurementBtn">Delete entry</button>
       </div>
     `);
+    wireChipPicker(document.getElementById('editMeasurementQuality'));
     document.getElementById('saveMeasurementBtn').addEventListener('click', () => {
       const raw = parseFloat(document.getElementById('editMeasurementValue').value);
       if (Number.isNaN(raw)) { toast('Enter a value.'); return; }
       m.date = document.getElementById('editMeasurementDate').value || m.date;
       m.value = tracker ? trackerCanonicalFromDisplay(tracker, raw) : raw;
-      if (isSleep) m.quality = clampQuality(document.getElementById('editMeasurementQuality').value);
+      if (isSleep) m.quality = clampQuality(document.getElementById('editMeasurementQuality').dataset.value);
       m.note = document.getElementById('editMeasurementNote').value.trim() || null;
       save();
       closeModal();
@@ -2416,7 +2690,8 @@
       </div>
       ${qualityLine}
       ${tracker.goal != null ? `<div class="meter"><div class="meter-fill ${achieved ? 'is-complete' : ''}" style="--fill:${Math.min(100, pct)}%"></div></div>
-      <div class="ex-card-foot"><span class="ex-card-pct ${achieved ? 'is-complete' : ''}">${achieved ? '✓ Goal reached' : `${Math.round(pct)}% to goal`}</span></div>` : ''}
+      <div class="ex-card-foot"><span class="ex-card-pct ${achieved ? 'is-complete' : ''}">${achieved ? '✓ Goal reached' : `${Math.round(pct)}% to goal`}</span></div>
+      ${!achieved && trackerProgressDeltaText(tracker, value) ? `<div class="insight-line muted-text">${trackerProgressDeltaText(tracker, value)}</div>` : ''}` : ''}
 
       <div class="pr-grid">
         <div class="pr-tile"><div class="value">${history.length}</div><div class="label">Entries logged</div></div>
@@ -2517,6 +2792,14 @@
           </div>
         </div>
 
+        <div class="field">
+          <span class="field-label">Dashboard <span class="muted-text">(as more trackers pile up, hide the ones you don't need to see every day)</span></span>
+          <div class="segmented" id="trkShowOnDashboardSegmented" role="radiogroup">
+            <button type="button" data-show="1" role="radio">Show</button>
+            <button type="button" data-show="0" role="radio">Hide</button>
+          </div>
+        </div>
+
         <button type="button" class="btn btn-primary btn-block" id="saveTrackerBtn">${editing ? 'Save changes' : 'Add tracker'}</button>
         ${editing ? `<button type="button" class="btn btn-secondary btn-block" id="archiveTrackerToggleBtn">${tracker.archived ? 'Unarchive tracker' : 'Archive tracker'}</button>` : ''}
         ${editing ? `<button type="button" class="btn-text-danger" id="deleteTrackerBtn">Delete tracker permanently</button>` : ''}
@@ -2526,6 +2809,7 @@
     let selectedUnitKind = unitKind;
     let selectedDirection = direction;
     let selectedRatingMax = tracker && tracker.ratingMax ? tracker.ratingMax : 5;
+    let selectedShowOnDashboard = tracker ? tracker.showOnDashboard !== false : true;
 
     function renderGoalField() {
       const wrap = document.getElementById('trkGoalFieldWrap');
@@ -2547,14 +2831,20 @@
       selectedDirection = d;
       document.querySelectorAll('#trkDirectionSegmented button').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.direction === d)));
     }
+    function setShowOnDashboardUI(show) {
+      selectedShowOnDashboard = show;
+      document.querySelectorAll('#trkShowOnDashboardSegmented button').forEach((b) => b.setAttribute('aria-checked', String((b.dataset.show === '1') === show)));
+    }
 
     document.querySelectorAll('#trkUnitKindSegmentedA button, #trkUnitKindSegmentedB button').forEach((b) => {
       b.addEventListener('click', () => { if (!b.disabled) setUnitKindUI(b.dataset.unitKind); });
     });
     document.querySelectorAll('#trkDirectionSegmented button').forEach((b) => b.addEventListener('click', () => setDirectionUI(b.dataset.direction)));
+    document.querySelectorAll('#trkShowOnDashboardSegmented button').forEach((b) => b.addEventListener('click', () => setShowOnDashboardUI(b.dataset.show === '1')));
     document.getElementById('trkUnitLabelField').querySelector('input').addEventListener('input', renderGoalField);
     setUnitKindUI(selectedUnitKind);
     setDirectionUI(selectedDirection);
+    setShowOnDashboardUI(selectedShowOnDashboard);
 
     document.getElementById('saveTrackerBtn').addEventListener('click', () => {
       const name = document.getElementById('trkName').value.trim();
@@ -2562,12 +2852,21 @@
       const unitLabel = selectedUnitKind === 'count' ? (document.getElementById('trkUnitLabelInput').value.trim() || null) : null;
       const rawGoal = parseFloat(document.getElementById('trkGoalInput').value);
       const hasGoal = !Number.isNaN(rawGoal) && document.getElementById('trkGoalInput').value !== '';
-      const fields = { unitKind: selectedUnitKind, unitLabel, ratingMax: selectedUnitKind === 'rating' ? selectedRatingMax : null, direction: selectedDirection };
+      const fields = { unitKind: selectedUnitKind, unitLabel, ratingMax: selectedUnitKind === 'rating' ? selectedRatingMax : null, direction: selectedDirection, showOnDashboard: selectedShowOnDashboard };
       const canonicalGoal = hasGoal ? trackerCanonicalFromDisplay(Object.assign({}, tracker, fields), rawGoal) : null;
       if (editing) {
+        // A goal newly set on a tracker that doesn't already have a
+        // baseline gets one now — the point it's starting from — so
+        // trackerProgressPct() has something to measure movement against
+        // instead of falling back to a plain (and misleading) ratio.
+        const gettingFirstGoal = tracker.goal == null && canonicalGoal != null && tracker.baseline == null;
         Object.assign(tracker, { name }, fields, { goal: canonicalGoal });
+        if (gettingFirstGoal) {
+          const latest = latestMeasurement(trackerId);
+          tracker.baseline = latest ? latest.value : null;
+        }
       } else {
-        state.trackers.push(Object.assign({ id: genId('trk'), name, archived: false, kind: 'metric', createdAt: new Date().toISOString() }, fields, { goal: canonicalGoal }));
+        state.trackers.push(Object.assign({ id: genId('trk'), name, archived: false, kind: 'metric', baseline: null, createdAt: new Date().toISOString() }, fields, { goal: canonicalGoal }));
       }
       save();
       closeModal();
@@ -2709,7 +3008,7 @@
     return `
       <div class="entry-row is-manage" data-tracker-id="${tracker.id}">
         <div class="entry-row-main">
-          <div class="entry-row-title">${escapeHtml(tracker.name)} ${tracker.archived ? '<span class="chip chip-archived">archived</span>' : ''}</div>
+          <div class="entry-row-title">${escapeHtml(tracker.name)} ${tracker.archived ? '<span class="chip chip-archived">archived</span>' : ''}${tracker.showOnDashboard === false ? '<span class="chip">hidden from dashboard</span>' : ''}</div>
           <div class="entry-row-sub">${UNIT_KIND_LABELS[tracker.unitKind] || ''}${tracker.goal != null ? ` · ${trackerGoalLabel(tracker)}` : ' · no goal set'}</div>
         </div>
         <div class="entry-row-actions">
@@ -2778,6 +3077,85 @@
     document.querySelectorAll('#showPaceLevelSegmented button').forEach((b) => b.setAttribute('aria-checked', String((b.dataset.boolChoice === 'on') === state.settings.showPaceLevel)));
   }
 
+  /* ============================== Backup validation ==============================
+     A hand-written shape/type check for an imported backup — deliberately
+     lenient about fields older schema versions won't have yet (those get
+     backfilled by runMigrations, same as a normal load()), but strict about
+     type and about the enum-like fields the rest of the app switches on
+     directly (kind, direction, ...), since a bad value there would otherwise
+     surface as a rendering bug deep in the app instead of a clear rejection
+     here. Returns an error string, or null when the shape is acceptable to
+     hand to runMigrations(). Not a full re-implementation of every rule in
+     the app (e.g. it won't catch a negative water goal) — it exists to
+     reject garbage and hostile input, not to replace normal validation. */
+  const VALID_EX_KINDS = new Set(['weight', 'reps', 'cardio']);
+  const VALID_TRACKER_KINDS = new Set(['metric', 'sleep']);
+  const VALID_DIRECTIONS = new Set(['up', 'down']);
+  const VALID_SEX = new Set(['male', 'female']);
+  const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+  function isPlainObject(v) { return v != null && typeof v === 'object' && !Array.isArray(v); }
+  function isNumOrNull(v) { return v == null || (typeof v === 'number' && Number.isFinite(v)); }
+
+  function validateBackupShape(parsed) {
+    if (!isPlainObject(parsed)) return 'This file isn’t a Fit Log backup.';
+    if (parsed.version != null && !(typeof parsed.version === 'number' && parsed.version >= 1)) return 'Unrecognized backup version.';
+    if (typeof parsed.version === 'number' && parsed.version > SCHEMA_VERSION) {
+      return `This backup is from a newer version of Fit Log (v${parsed.version}) than this app supports (v${SCHEMA_VERSION}) — update the app before importing it.`;
+    }
+
+    if (!Array.isArray(parsed.exercises)) return 'Missing or invalid exercise list.';
+    for (const ex of parsed.exercises) {
+      if (!isPlainObject(ex) || typeof ex.id !== 'string' || typeof ex.name !== 'string') return 'One of the exercises is malformed.';
+      if (ex.kind != null && !VALID_EX_KINDS.has(ex.kind)) return `Unknown exercise type “${ex.kind}”.`;
+      if (!isNumOrNull(ex.goal) || !isNumOrNull(ex.distanceGoal) || !isNumOrNull(ex.paceGoal)) return `"${ex.name}" has an invalid goal value.`;
+    }
+
+    if (!Array.isArray(parsed.entries)) return 'Missing or invalid entry list.';
+    for (const en of parsed.entries) {
+      if (!isPlainObject(en) || typeof en.id !== 'string' || typeof en.exerciseId !== 'string') return 'One of the logged entries is malformed.';
+      if (typeof en.date !== 'string' || !ISO_DATE_RE.test(en.date)) return 'One of the logged entries has an invalid date.';
+      if (en.sets != null && !Array.isArray(en.sets)) return 'One of the logged entries has an invalid sets list.';
+    }
+
+    if (parsed.trackers != null) {
+      if (!Array.isArray(parsed.trackers)) return 'Invalid tracker list.';
+      for (const t of parsed.trackers) {
+        if (!isPlainObject(t) || typeof t.id !== 'string' || typeof t.name !== 'string') return 'One of the trackers is malformed.';
+        if (t.kind != null && !VALID_TRACKER_KINDS.has(t.kind)) return `Unknown tracker type “${t.kind}”.`;
+        if (t.direction != null && !VALID_DIRECTIONS.has(t.direction)) return `Tracker "${t.name}" has an invalid direction.`;
+        if (!isNumOrNull(t.goal) || !isNumOrNull(t.baseline)) return `Tracker "${t.name}" has an invalid goal value.`;
+      }
+    }
+
+    if (parsed.measurements != null) {
+      if (!Array.isArray(parsed.measurements)) return 'Invalid tracker-entry list.';
+      for (const m of parsed.measurements) {
+        if (!isPlainObject(m) || typeof m.id !== 'string' || typeof m.trackerId !== 'string') return 'One of the tracker entries is malformed.';
+        if (typeof m.date !== 'string' || !ISO_DATE_RE.test(m.date)) return 'One of the tracker entries has an invalid date.';
+        if (!isNumOrNull(m.value)) return 'One of the tracker entries has an invalid value.';
+      }
+    }
+
+    if (parsed.water != null) {
+      if (!isPlainObject(parsed.water) || !isNumOrNull(parsed.water.goalMl)) return 'Invalid water settings.';
+      if (parsed.water.cups != null && !Array.isArray(parsed.water.cups)) return 'Invalid water cup list.';
+    }
+    if (parsed.waterEntries != null) {
+      if (!Array.isArray(parsed.waterEntries)) return 'Invalid water-entry list.';
+      for (const w of parsed.waterEntries) {
+        if (!isPlainObject(w) || !isNumOrNull(w.amountMl) || typeof w.date !== 'string' || !ISO_DATE_RE.test(w.date)) return 'One of the water entries is malformed.';
+      }
+    }
+
+    if (parsed.profile != null) {
+      if (!isPlainObject(parsed.profile) || !isNumOrNull(parsed.profile.heightCm)) return 'Invalid profile data.';
+      if (parsed.profile.sex != null && !VALID_SEX.has(parsed.profile.sex)) return 'Invalid sex value in profile.';
+    }
+
+    return null;
+  }
+
   function exportBackup() {
     const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -2796,7 +3174,12 @@
     reader.onload = () => {
       try {
         const parsed = JSON.parse(reader.result);
-        if (!Array.isArray(parsed.exercises) || !Array.isArray(parsed.entries)) throw new Error('bad shape');
+        // Imported data is untrusted — a hand-typed or corrupted file, or
+        // one from somewhere other than this app's own Export — so its
+        // shape is checked in full before it ever reaches runMigrations()
+        // or state, not just spot-checked the way load()'s catch-all is.
+        const shapeError = validateBackupShape(parsed);
+        if (shapeError) { toast(`Can't import: ${shapeError}`); return; }
         confirmDialog('Replace all data?', 'Importing will overwrite everything currently in the app with this backup file.', 'Import', () => {
           parsed.settings = Object.assign({}, DEFAULT_SETTINGS, parsed.settings || {});
           // Run the same migration pipeline load() uses — a backup exported
@@ -3105,6 +3488,7 @@
           const weightTracker = trackers.find((tr) => tr.id === 'trk_weight');
           weightTracker.goal = targetLb;
           weightTracker.direction = targetLb < weightLb ? 'down' : 'up';
+          weightTracker.baseline = weightLb; // the weight just entered above — the literal starting point
         }
       }
     }
@@ -3230,6 +3614,7 @@
     // selection changes on screen.
     document.getElementById('logTracker').addEventListener('change', renderLogMeasurementForm);
     document.getElementById('logMeasurementForm').addEventListener('submit', handleLogMeasurementSubmit);
+    wireChipPicker(document.getElementById('logSleepQuality'));
 
     document.getElementById('logWaterCustomAddBtn').addEventListener('click', () => {
       const raw = parseFloat(document.getElementById('logWaterCustomAmount').value);
@@ -3354,17 +3739,56 @@
     }
   }
 
+  /* ============================== Data recovery screen ==============================
+     Shown instead of the normal app when load() couldn't make sense of an
+     existing (non-empty) saved payload. Offers an explicit choice rather
+     than silently discarding data that might still be salvageable. */
+
+  function showRecoveryScreen() {
+    document.getElementById('topbar').hidden = true;
+    document.getElementById('tabbar').hidden = true;
+    switchTab('recover');
+    document.getElementById('recoverExportBtn').addEventListener('click', () => {
+      const blob = new Blob([rawCorrupt || ''], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `fit-log-recovery-${todayISO()}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      toast('Recovery file downloaded');
+    });
+    document.getElementById('recoverResetBtn').addEventListener('click', () => {
+      confirmDialog(
+        'Permanently delete this data?',
+        'This clears the data Fit Log couldn’t read and starts fresh. Export a recovery file first if you haven’t already — this can’t be undone.',
+        'Delete and start fresh',
+        () => { localStorage.removeItem(STORAGE_KEY); location.reload(); },
+        true
+      );
+    });
+  }
+
   /* ============================== Init ============================== */
 
   function init() {
     load();
+    // wireEvents() only ever attaches listeners (nothing here reads `state`
+    // synchronously), so it's safe to wire even in recovery mode — that's
+    // what makes the recovery screen's own confirm dialog (Cancel/✕) work.
+    wireEvents();
+    if (needsRecovery) { showRecoveryScreen(); registerServiceWorker(); return; }
     applyTheme();
     document.getElementById('logDate').value = todayISO();
     document.getElementById('logMeasurementDate').value = todayISO();
-    wireEvents();
     if (needsSetup) startSetupWizard();
     else renderAll();
+    registerServiceWorker();
+  }
 
+  function registerServiceWorker() {
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
         navigator.serviceWorker.register('sw.js').catch((e) => console.warn('Service worker registration failed', e));
