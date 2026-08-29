@@ -73,6 +73,9 @@
       <div class="section-head" id="bodySectionHead" hidden><h2>Body &amp; wellness</h2></div>
       <div id="bodyCards" class="card-grid" hidden></div>
 
+      <div class="section-head" id="foodSectionHead" hidden><h2>Today's food</h2></div>
+      <div id="foodDashboardWrap" hidden></div>
+
       <div id="dashboardEmpty" class="empty-state" hidden>
         <p>No exercises yet.</p>
         <button class="btn btn-primary" data-action="add-exercise">Add your first exercise</button>
@@ -145,6 +148,19 @@
         </label>
       </div>
 
+      <form id="logFoodForm" class="card form-card" hidden>
+        <label class="field">
+          <span class="field-label">Date</span>
+          <input type="date" id="logFoodDate" required />
+        </label>
+        <div id="logFoodDynamicFields"></div>
+        <label class="field">
+          <span class="field-label">Note (optional)</span>
+          <input type="text" id="logFoodNote" placeholder="What was it?" maxlength="200" />
+        </label>
+        <button type="submit" class="btn btn-primary btn-block">Save entry</button>
+      </form>
+
       <div class="section-head">
         <h2>Recent entries</h2>
       </div>
@@ -173,6 +189,7 @@
           <span><i class="cal-dot cal-dot-workout"></i>Workout</span>
           <span><i class="cal-dot cal-dot-water"></i>Water goal</span>
           <span><i class="cal-dot cal-dot-body"></i>Body</span>
+          <span><i class="cal-dot cal-dot-food"></i>Food</span>
         </div>
       </div>
 
@@ -182,6 +199,7 @@
           <button type="button" data-history-cat="workout" role="radio">Workouts</button>
           <button type="button" data-history-cat="measurement" role="radio">Body</button>
           <button type="button" data-history-cat="water" role="radio">Water</button>
+          <button type="button" data-history-cat="food" role="radio">Food</button>
         </div>
       </div>
       <label class="field" id="historyFilterField">
@@ -202,6 +220,7 @@
           <button type="button" data-manage-cat="exercises" role="radio">Exercises</button>
           <button type="button" data-manage-cat="measurements" role="radio">Body</button>
           <button type="button" data-manage-cat="water" role="radio">Water</button>
+          <button type="button" data-manage-cat="food" role="radio">Food</button>
         </div>
       </div>
 
@@ -236,6 +255,41 @@
           <button class="btn btn-secondary btn-sm" data-action="add-cup">+ Add cup</button>
         </div>
         <div id="cupManageList" class="entry-list"></div>
+      </div>
+
+      <div id="manageFoodPanel" hidden>
+        <div class="section-head"><h2>Nutrition tracking</h2></div>
+        <p class="muted-text">Choose which macros the Food log asks for. You can still leave any of them blank on an individual entry, and turning one off never touches values already logged for it.</p>
+        <div class="card">
+          <div class="setting-row">
+            <span>Calories</span>
+            <div class="segmented" id="trackCaloriesSegmented" role="radiogroup" aria-label="Track calories">
+              <button type="button" data-bool-choice="off" role="radio">Off</button>
+              <button type="button" data-bool-choice="on" role="radio">On</button>
+            </div>
+          </div>
+          <div class="setting-row">
+            <span>Protein</span>
+            <div class="segmented" id="trackProteinSegmented" role="radiogroup" aria-label="Track protein">
+              <button type="button" data-bool-choice="off" role="radio">Off</button>
+              <button type="button" data-bool-choice="on" role="radio">On</button>
+            </div>
+          </div>
+          <div class="setting-row">
+            <span>Carbs</span>
+            <div class="segmented" id="trackCarbsSegmented" role="radiogroup" aria-label="Track carbs">
+              <button type="button" data-bool-choice="off" role="radio">Off</button>
+              <button type="button" data-bool-choice="on" role="radio">On</button>
+            </div>
+          </div>
+          <div class="setting-row">
+            <span>Fat</span>
+            <div class="segmented" id="trackFatSegmented" role="radiogroup" aria-label="Track fat">
+              <button type="button" data-bool-choice="off" role="radio">Off</button>
+              <button type="button" data-bool-choice="on" role="radio">On</button>
+            </div>
+          </div>
+        </div>
       </div>
     </section>
 
@@ -365,7 +419,7 @@
 
       <div class="section-head"><h2>About</h2></div>
       <div class="card">
-        <p class="muted-text">Fit Log v1.1 &middot; installed as a home-screen app, all data stored on-device.</p>
+        <p class="muted-text">Fit Log v1.3 &middot; installed as a home-screen app, all data stored on-device.</p>
       </div>
     </section>
 
