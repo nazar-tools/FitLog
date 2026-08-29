@@ -98,5 +98,65 @@ const Charts = (() => {
       </svg>`;
   }
 
-  return { lineChart };
+  // A semicircular gauge for a single value classified into named zones
+  // (currently just BMI, but written generically) — colored arc segments,
+  // a needle pointing at the current value, and boundary tick labels.
+  //
+  // opts: { min, max, value (clamped to [min,max] for needle placement, but
+  // the caller's own formatValue still shows the real, unclamped number),
+  // segments: [{ from, to, className }] spanning [min,max] with no gaps,
+  // ticks: [numbers to label], width, height, formatValue }.
+  //
+  // Geometry: the arc sweeps from angle 180° (value=min, pointing left) to
+  // 0° (value=max, pointing right) over the top half of the circle, i.e.
+  // angle = 180 - ((value-min)/(max-min))*180. A point at that angle and
+  // radius r is (cx + r*cos, cy - r*sin) — the minus on y accounts for SVG's
+  // downward-growing y axis, so 90° (mid-value) lands at the top of the arc
+  // as expected. Every segment's start angle is >= its end angle (value
+  // increases as angle decreases), which is a clockwise sweep on screen, so
+  // every arc segment below uses the same fixed sweep-flag of 1.
+  function gaugeChart(value, opts = {}) {
+    const min = opts.min, max = opts.max;
+    const width = opts.width || 300;
+    const height = opts.height || 190;
+    const cx = width / 2;
+    const cy = height - 40;
+    const r = Math.min(width / 2 - 20, cy - 30);
+
+    const angleForValue = (v) => {
+      const clamped = Math.max(min, Math.min(max, v));
+      return 180 - ((clamped - min) / (max - min)) * 180;
+    };
+    const pointAt = (angleDeg, radius) => {
+      const rad = (angleDeg * Math.PI) / 180;
+      return { x: cx + radius * Math.cos(rad), y: cy - radius * Math.sin(rad) };
+    };
+
+    const segPaths = (opts.segments || []).map((seg) => {
+      const p1 = pointAt(angleForValue(seg.from), r);
+      const p2 = pointAt(angleForValue(seg.to), r);
+      return `<path d="M${p1.x.toFixed(2)},${p1.y.toFixed(2)} A${r},${r} 0 0,1 ${p2.x.toFixed(2)},${p2.y.toFixed(2)}" class="gauge-seg ${seg.className}"></path>`;
+    }).join('');
+
+    const needleTip = pointAt(angleForValue(value), r * 0.8);
+
+    const tickText = (opts.ticks || []).map((t) => {
+      const p = pointAt(angleForValue(t), r + 14);
+      const anchor = p.x < cx - 2 ? 'start' : p.x > cx + 2 ? 'end' : 'middle';
+      return `<text x="${p.x.toFixed(2)}" y="${p.y.toFixed(2)}" text-anchor="${anchor}" class="gauge-tick-text">${t}</text>`;
+    }).join('');
+
+    const fmt = opts.formatValue || ((v) => v);
+
+    return `
+      <svg viewBox="0 0 ${width} ${height}" style="width:100%;height:auto;aspect-ratio:${width}/${height};display:block" role="img" aria-label="Gauge showing ${fmt(value)}">
+        ${segPaths}
+        <line x1="${cx}" y1="${cy}" x2="${needleTip.x.toFixed(2)}" y2="${needleTip.y.toFixed(2)}" class="gauge-needle"></line>
+        <circle cx="${cx}" cy="${cy}" r="6" class="gauge-pivot"></circle>
+        ${tickText}
+        <text x="${cx}" y="${(cy - r * 0.4).toFixed(2)}" text-anchor="middle" class="gauge-value-text">${fmt(value)}</text>
+      </svg>`;
+  }
+
+  return { lineChart, gaugeChart };
 })();

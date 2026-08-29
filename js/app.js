@@ -190,7 +190,7 @@
      import path runs the exact same migrations.
      ========================================================================== */
 
-  const SCHEMA_VERSION = 10;
+  const SCHEMA_VERSION = 11;
 
   // Known "daily" exercise ids from before the Goal/Daily/Other split
   // existed (schema v1). Used only by the v1->v2 migration below.
@@ -437,7 +437,38 @@
       });
       return data;
     },
-    // Next migration goes here, keyed `10: (data) => { ...; return data; }`.
+    // v10 -> v11: three purely additive changes for this round's new
+    // features. (1) `showSleepInsights` — off by default, same as every
+    // other optional insight toggle — gates the trailing-nights sleep
+    // average/category shown on the Sleep tracker card and in its detail
+    // modal (see sleepInsights()). (2) `profile.age` — a new one-time fact
+    // alongside height/sex, needed only by the nutrition calculator's
+    // Mifflin-St Jeor calorie estimate (see computeNutritionTargets()); null
+    // until set, same treatment as height/sex before this. (3)
+    // `settings.nutritionCalc` — the activity-level/goal picker for that
+    // same calculator, off by default; turning it on computes and applies
+    // calorie/protein numbers into the *existing* `macroGoals.calories`/
+    // `.protein` fields rather than introducing a parallel goal-storage
+    // shape, the same way a lift's "Bodyweight standard" goal mode still
+    // writes into the exercise's ordinary `goal` field.
+    10: (data) => {
+      // A save file that started migrating from before v4 (see MIGRATIONS[4]
+      // above, which is the step that normally creates `profile`) but whose
+      // *starting* version was already >= 4 never runs that step at all —
+      // runMigrations() only calls MIGRATIONS[N] for N >= the save's own
+      // starting version. A hand-built old-schema test fixture (or a very
+      // old real save last touched between v4 and v9) can therefore still
+      // reach this step with no `profile` object yet, so this can't assume
+      // it already exists the way every migration after v4 normally could.
+      if (!data.profile) data.profile = { heightCm: null, sex: null };
+      if (data.settings.showSleepInsights === undefined) data.settings.showSleepInsights = false;
+      if (data.profile.age === undefined) data.profile.age = null;
+      if (!data.settings.nutritionCalc) {
+        data.settings.nutritionCalc = { enabled: false, activityLevel: 'moderate', goal: 'maintain' };
+      }
+      return data;
+    },
+    // Next migration goes here, keyed `11: (data) => { ...; return data; }`.
   };
 
   /** Walks `data` forward through MIGRATIONS until it matches SCHEMA_VERSION. */
@@ -483,11 +514,12 @@
   // A fixed fact about you rather than something with a history worth
   // charting — height doesn't change often enough to be a tracker (see the
   // v4->v5 migration above for how an existing Height tracker becomes
-  // this). Both fields are optional and used only by the insight
-  // calculators below (BMI, strength-vs-bodyweight, pace level) — the app
-  // works fully without either ever being set.
+  // this). All three fields are optional and used only by the insight
+  // calculators below (BMI, strength-vs-bodyweight, pace level) and the
+  // nutrition calculator (age, alongside height/sex, feeds its Mifflin-St
+  // Jeor calorie estimate) — the app works fully without any of them set.
   function defaultProfile() {
-    return { heightCm: null, sex: null };
+    return { heightCm: null, sex: null, age: null };
   }
 
   // Water's starter cup sizes and daily goal, canonically in milliliters
@@ -512,6 +544,12 @@
     // not something to spring on an existing install unasked.
     chartScale: 'last10', insightsWindowDays: 90,
     showWeightInsights: false, showStrengthLevel: false, showPaceLevel: false,
+    // Sleep is logged per-night rather than persisting like weight, so its
+    // dashboard card always resets to "not logged" for a fresh day (see
+    // trackerCardHtml()) regardless of this toggle — this only gates the
+    // separate, optional trailing-nights average/category insight
+    // (sleepInsights()), same off-by-default treatment as every other one.
+    showSleepInsights: false,
     // Every macro is always loggable (see the "Food / nutrition" section
     // below) — this only controls whether a DAILY GOAL is set for a given
     // macro, and what it is. All off by default, same as a water/tracker
@@ -521,6 +559,15 @@
       carbs: { enabled: false, goal: null }, fat: { enabled: false, goal: null },
       sugar: { enabled: false, goal: null }, sodium: { enabled: false, goal: null }, caffeine: { enabled: false, goal: null },
     },
+    // The nutrition calculator (Manage -> Nutrition -> Food): off by
+    // default. Turning it on computes calories/protein from activityLevel +
+    // goal (Mifflin-St Jeor + an activity multiplier + a goal adjustment —
+    // see computeNutritionTargets()) and writes the result into
+    // macroGoals.calories/.protein above, rather than storing its own
+    // separate goal numbers — so those two fields work exactly like every
+    // other macro goal (same dashboard display, same manual override if the
+    // calculator is turned back off) once applied.
+    nutritionCalc: { enabled: false, activityLevel: 'moderate', goal: 'maintain' },
   };
 
   // A brand-new install's starting Food state — always empty; there's no
@@ -1281,6 +1328,17 @@
   function bmiCategory(bmi) {
     return BMI_CATEGORIES.find((c) => bmi < c.max).label;
   }
+  // The CSS class (see .insight-badge/.gauge-seg in styles.css) matching a
+  // BMI category label — kept as an explicit map rather than derived from
+  // the label text so the two can drift in wording independently (e.g. the
+  // label says "Healthy weight" but the class is the more conventional
+  // "normal", matching how every published BMI chart names that zone).
+  const BMI_CATEGORY_CLASS = { 'Underweight': 'is-underweight', 'Healthy weight': 'is-normal', 'Overweight': 'is-overweight', 'Obese': 'is-obese' };
+  // Gauge boundaries: 15 and 40 are practical display floor/ceiling (real
+  // BMI values are clamped to this range for needle placement only — the
+  // number shown is always the real, unclamped value), matching the
+  // published category boundaries in between.
+  const BMI_GAUGE_MIN = 15, BMI_GAUGE_MAX = 40;
 
   // A short, humanized elapsed-time phrase ("12 days", "3 months", "1.4
   // years") for the weight-trend delta below — plain days under two weeks,
@@ -1328,6 +1386,39 @@
       bmi = { value: round(value, 1), category: bmiCategory(value) };
     }
     return { current: latest.value, trend, bmi };
+  }
+
+  // Sleep doesn't have one persistent "current" reading worth trending the
+  // way weight does (see the date-scoping comment on trackerCardHtml()) — so
+  // rather than a single-value trend, this looks at the last N *logged*
+  // nights (skipping gaps rather than requiring N calendar days in a row,
+  // since missing a night or two shouldn't blank out the whole insight) and
+  // summarizes how sleep has actually been: average hours, a plain-language
+  // duration category against general sleep-duration guidance, and an
+  // average quality rating across whichever of those nights had one logged.
+  const SLEEP_TRACKER_ID = 'trk_sleep';
+  const SLEEP_NIGHTS_WINDOW = 7;
+  // General adult sleep-duration guidance (e.g. CDC/NSF: ~7-9 hours) used
+  // only to label an average as short/adequate/long — not a personalized or
+  // medical assessment, same disclaimer convention as BMI/strength/pace.
+  const SLEEP_HOURS_CATEGORIES = [
+    { max: 6, label: 'Short' },
+    { max: 9, label: 'Adequate' },
+    { max: Infinity, label: 'Long' },
+  ];
+  function sleepHoursCategory(hours) {
+    return SLEEP_HOURS_CATEGORIES.find((c) => hours < c.max).label;
+  }
+  function sleepInsights() {
+    const list = measurementsFor(SLEEP_TRACKER_ID).slice().sort((a, b) => (a.date + a.id).localeCompare(b.date + b.id));
+    if (!list.length) return null;
+    const recent = list.slice(-SLEEP_NIGHTS_WINDOW);
+    const hoursLogged = recent.filter((m) => m.value != null);
+    if (!hoursLogged.length) return null;
+    const avgHours = hoursLogged.reduce((sum, m) => sum + m.value, 0) / hoursLogged.length;
+    const qualityLogged = recent.filter((m) => m.quality != null);
+    const avgQuality = qualityLogged.length ? qualityLogged.reduce((sum, m) => sum + m.quality, 0) / qualityLogged.length : null;
+    return { avgHours, nights: hoursLogged.length, category: sleepHoursCategory(avgHours), avgQuality };
   }
 
   // How a weight-based exercise's best lift compares to current
@@ -1444,6 +1535,79 @@
   // Fields that currently have a daily goal turned on, in MACRO_KEYS order.
   function macroGoalKeys() {
     return MACRO_KEYS.filter((k) => macroGoalInfo(k).enabled && macroGoalInfo(k).goal != null);
+  }
+
+  // ---- Nutrition calculator (Manage -> Nutrition -> Food) ----
+  // Estimates a daily calorie and protein target from Profile facts (height,
+  // age, sex) plus a logged body weight, an activity level, and a goal —
+  // the Food feature's counterpart to a lift's bodyweight-standard goal
+  // mode. Lives here rather than under Settings -> Insights because, like
+  // that goal mode, it's an ACTIVE configuration choice that writes into a
+  // goal field (macroGoals.calories/.protein) once applied, not a passive
+  // read-only display.
+  const ACTIVITY_LEVELS = {
+    sedentary:  { label: 'Sedentary',        hint: 'little or no exercise',        multiplier: 1.2 },
+    light:      { label: 'Light activity',   hint: 'exercise 1-3 days/week',       multiplier: 1.375 },
+    moderate:   { label: 'Moderate activity', hint: 'exercise 3-5 days/week',      multiplier: 1.55 },
+    active:     { label: 'Active',           hint: 'exercise 6-7 days/week',       multiplier: 1.725 },
+    veryActive: { label: 'Very active',      hint: 'physical job or 2x/day training', multiplier: 1.9 },
+  };
+  // Calorie adjustment from estimated maintenance (TDEE), and a protein
+  // target per pound of bodyweight, both by goal — a moderate, commonly
+  // published range (roughly a 1 lb/week pace for a cut or lean gain), with
+  // protein set higher while cutting specifically to help protect muscle
+  // mass in a deficit. General published guidance, not personalized or
+  // medical advice — same disclaimer as BMI/strength/pace above.
+  const NUTRITION_GOAL_ADJUST = {
+    lose:     { calorieDelta: -500, proteinPerLb: 1.0 },
+    maintain: { calorieDelta: 0,    proteinPerLb: 0.8 },
+    gain:     { calorieDelta: 300,  proteinPerLb: 0.9 },
+  };
+  // Mifflin-St Jeor equation for basal metabolic rate, times an
+  // activity-level multiplier for estimated maintenance calories (TDEE),
+  // then the goal-based adjustment above. Needs height, age, and sex
+  // (Profile) plus a logged body weight — same prerequisites BMI and
+  // Strength level already need — so this returns which fact(s) are still
+  // missing rather than guessing at a substitute for any of them.
+  function computeNutritionTargets(activityLevel, goal) {
+    const bw = currentBodyWeightLb();
+    const { heightCm, age, sex } = state.profile;
+    const missing = [];
+    if (!heightCm) missing.push('height');
+    if (!age) missing.push('age');
+    if (!sex) missing.push('sex');
+    if (!bw) missing.push('a logged body weight');
+    if (missing.length) return { missing };
+    const kg = bw * LB_PER_KG;
+    const bmr = sex === 'male'
+      ? 10 * kg + 6.25 * heightCm - 5 * age + 5
+      : 10 * kg + 6.25 * heightCm - 5 * age - 161;
+    const tdee = bmr * ACTIVITY_LEVELS[activityLevel].multiplier;
+    const adjust = NUTRITION_GOAL_ADJUST[goal];
+    // Calories are floored well below any deficit that would be unsafe to
+    // sustain, regardless of how the math above works out for someone
+    // small/low-activity — 1200 is a commonly published general floor.
+    const calories = Math.max(1200, Math.round(tdee + adjust.calorieDelta));
+    const protein = Math.round(bw * adjust.proteinPerLb);
+    return { calories, protein, tdee: Math.round(tdee) };
+  }
+
+  // The explicit "Apply to daily goals" action (see the Nutrition
+  // calculator's card in renderFoodManagePanel()) — writes the computed
+  // numbers into the same macroGoals.calories/.protein fields a manual goal
+  // uses, turning both on in the process. Deliberately only ever called
+  // from that one button tap, never automatically from a settings change —
+  // see the comment on saveProfileBtn's handler for why an auto-recompute
+  // binding would be the wrong call here (it would silently clobber a value
+  // the user set some other way since the calculator was last applied).
+  function applyNutritionCalcTargets(activityLevel, goal) {
+    const result = computeNutritionTargets(activityLevel, goal);
+    if (result.missing) return false;
+    macroGoalInfo('calories').enabled = true;
+    macroGoalInfo('calories').goal = result.calories;
+    macroGoalInfo('protein').enabled = true;
+    macroGoalInfo('protein').goal = result.protein;
+    return true;
   }
 
   function foodEntriesForDate(date) { return state.food.entries.filter((e) => e.date === date); }
@@ -1970,6 +2134,74 @@
       </div>`;
   }
 
+  // BMI's detail-on-demand card — the Weight tracker's counterpart to
+  // strengthStandardsDetailHtml()/paceStandardsDetailHtml() above, opened by
+  // tapping into the tracker detail modal rather than shown on the dashboard
+  // card (see the comment in trackerCardHtml()). A colored semicircular
+  // gauge (Charts.gaugeChart()) instead of the old plain text line, per the
+  // reference screenshots the user shared — needle position + zone colors
+  // make "where do I fall" legible at a glance instead of reading a number
+  // and a category name separately.
+  function bmiDetailHtml() {
+    if (!state.profile.heightCm) {
+      return `<div class="card"><div class="section-head"><h2>BMI</h2></div><p class="muted-text">Set your height in Settings → Profile to see your BMI.</p></div>`;
+    }
+    const insights = weightInsights();
+    if (!insights || !insights.bmi) {
+      return `<div class="card"><div class="section-head"><h2>BMI</h2></div><p class="muted-text">Log your body weight to see your BMI.</p></div>`;
+    }
+    const { value, category } = insights.bmi;
+    const badgeClass = BMI_CATEGORY_CLASS[category] || 'is-normal';
+    return `
+      <div class="card">
+        <div class="section-head"><h2>BMI</h2></div>
+        <div class="gauge-wrap">${Charts.gaugeChart(value, {
+          min: BMI_GAUGE_MIN, max: BMI_GAUGE_MAX,
+          segments: [
+            { from: BMI_GAUGE_MIN, to: 18.5, className: 'is-underweight' },
+            { from: 18.5, to: 25, className: 'is-normal' },
+            { from: 25, to: 30, className: 'is-overweight' },
+            { from: 30, to: BMI_GAUGE_MAX, className: 'is-obese' },
+          ],
+          ticks: [BMI_GAUGE_MIN, 18.5, 25, 30, BMI_GAUGE_MAX],
+          formatValue: (v) => round(v, 1),
+        })}</div>
+        <div class="gauge-badge-row"><span class="insight-badge ${badgeClass}">${category}</span></div>
+        <div class="gauge-legend">
+          <span class="gauge-legend-item"><span class="gauge-legend-dot is-underweight"></span>Underweight</span>
+          <span class="gauge-legend-item"><span class="gauge-legend-dot is-normal"></span>Healthy</span>
+          <span class="gauge-legend-item"><span class="gauge-legend-dot is-overweight"></span>Overweight</span>
+          <span class="gauge-legend-item"><span class="gauge-legend-dot is-obese"></span>Obese</span>
+        </div>
+        <p class="muted-text field-hint">BMI from your logged weight and Profile height. A general, published screening measure — not personalized or medical advice, and it doesn't account for muscle mass, body composition, age, or sex.</p>
+      </div>`;
+  }
+
+  // Sleep's detail-on-demand card — the trailing-window average/category
+  // this segment's dashboard badge summarizes in one line, spelled out with
+  // the same tier-bar visual language as Strength/Pace level (against the
+  // general short/adequate/long guidance in SLEEP_HOURS_CATEGORIES) plus an
+  // average-quality line when any of those nights had a quality logged.
+  const SLEEP_HOURS_ABBREV = ['Short', 'OK', 'Good'];
+  function sleepInsightDetailHtml() {
+    const insights = sleepInsights();
+    if (!insights) {
+      return `<div class="card"><div class="section-head"><h2>Sleep insights</h2></div><p class="muted-text">Log a night's sleep to see your trend.</p></div>`;
+    }
+    const currentAbbrev = SLEEP_HOURS_ABBREV[SLEEP_HOURS_CATEGORIES.findIndex((c) => c.label === insights.category)];
+    const caption = SLEEP_HOURS_CATEGORIES
+      .map((c, i) => c.max === Infinity ? `${c.label} &ge; 9h` : `${c.label} ${i === 0 ? '&lt;' : `${SLEEP_HOURS_CATEGORIES[i - 1].max}–`}${c.max}h`)
+      .join(' &middot; ');
+    return `
+      <div class="card">
+        <div class="section-head"><h2>Sleep insights</h2></div>
+        <div class="insight-line">Avg ${round(insights.avgHours, 1)}h over last ${insights.nights} logged night${insights.nights === 1 ? '' : 's'} &middot; <strong>${insights.category}</strong></div>
+        ${insights.avgQuality != null ? `<div class="insight-line muted-text">Avg quality ${fmtQuality(round(insights.avgQuality, 1))}</div>` : ''}
+        ${tierBarHtml(SLEEP_HOURS_ABBREV, currentAbbrev, caption)}
+        <p class="muted-text field-hint">Against general adult sleep-duration guidance (e.g. CDC/NSF: ~7-9 hours). A general benchmark — not personalized or medical advice.</p>
+      </div>`;
+  }
+
   function goalCardHtml(ex) {
     const entries = entriesFor(ex.id).slice().sort((a, c) => a.date.localeCompare(c.date));
     const cardioMetrics = ex.kind === 'cardio' ? cardioMetricsOf(ex) : null;
@@ -2053,7 +2285,21 @@
   // weight tracker additionally carries the optional "Body weight
   // insights" toggle's payload: a trend-delta badge and a BMI line.
   function trackerCardHtml(tracker) {
-    const latest = latestMeasurement(tracker.id);
+    const isSleep = tracker.kind === 'sleep';
+    // Weight (and any other plain metric tracker) reflects a persistent
+    // current state — showing the most recently logged value as "current"
+    // until it's replaced is exactly right, the same way a bathroom scale
+    // app assumes yesterday's weigh-in is still roughly your weight today.
+    // Sleep is a per-night reading, not a persistent state, so that same
+    // "keep showing the latest ever logged" behavior reads as broken for it
+    // specifically: log 8 hours last night, and the card would keep saying
+    // "8 hours" indefinitely until the next time sleep is logged, even
+    // several days later. Scoping sleep's headline value to *today's*
+    // entry only (falling back to "—", the same way a never-logged tracker
+    // already renders) fixes that — the trend below (sleepInsights()) still
+    // looks across all recent nights regardless of whether today has one.
+    const todayEntry = isSleep ? state.measurements.find((m) => m.trackerId === tracker.id && m.date === todayISO()) : null;
+    const latest = isSleep ? todayEntry : latestMeasurement(tracker.id);
     const value = latest ? latest.value : null;
     const { pct, achieved } = trackerProgressPct(tracker, value);
     const fillPct = Math.min(100, pct);
@@ -2063,17 +2309,21 @@
     const deltaBadge = insights && insights.trend
       ? `<div class="ex-card-delta is-${deltaSentiment(tracker, insights.trend.delta)}">${insights.trend.delta > 0 ? '+' : ''}${round(insights.trend.delta, 1)} ${Units.weightUnitLabel()} in ${humanizeDays(insights.trend.days)}</div>`
       : '';
-    const bmiLine = insights && insights.bmi
-      ? `<div class="insight-line">BMI ${insights.bmi.value} &middot; <strong>${insights.bmi.category}</strong></div>`
-      : (insights && !insights.bmi && state.settings.showWeightInsights && tracker.id === BODY_WEIGHT_TRACKER_ID
-          ? `<div class="insight-line muted-text">Set your height in Settings → Profile to see your BMI.</div>` : '');
-    const qualityLine = tracker.kind === 'sleep' && latest && latest.quality != null
+    // BMI itself moved off this card into the tracker detail modal's own
+    // visual gauge (see bmiDetailHtml()) — same "keep the dashboard plain,
+    // put the deeper breakdown one tap in" move already made for a lift's
+    // Strength level. A concise sleep average (also detail-on-demand for
+    // the fuller breakdown — see sleepInsightDetailHtml()) takes its old
+    // badge slot instead, next to the tracker name like weight's trend.
+    const sleep = (isSleep && state.settings.showSleepInsights) ? sleepInsights() : null;
+    const sleepBadge = sleep ? `<div class="ex-card-delta">Avg ${round(sleep.avgHours, 1)}h &middot; ${sleep.nights}n</div>` : '';
+    const qualityLine = isSleep && latest && latest.quality != null
       ? `<div class="insight-line">Quality ${fmtQuality(latest.quality)}</div>` : '';
     return `
       <div class="card ex-card" data-tracker-id="${tracker.id}">
         <div class="ex-card-top">
           <div class="ex-card-name">${escapeHtml(tracker.name)}</div>
-          ${deltaBadge}
+          ${deltaBadge}${sleepBadge}
         </div>
         <div class="ex-card-values">
           <div class="ex-card-current">${fmtTrackerValue(tracker, value)}</div>
@@ -2085,7 +2335,6 @@
           ${!achieved && trackerProgressDeltaText(tracker, value) ? `<div class="insight-line muted-text">${trackerProgressDeltaText(tracker, value)}</div>` : ''}` : ''}
         ${chartPoints.length >= 2 ? `<div class="ex-card-chart">${Charts.lineChart(chartPoints, { goal: tracker.goal, width: 300, height: 96, formatValue: (v) => fmtTrackerValue(tracker, v) })}</div>` : ''}
         ${qualityLine}
-        ${bmiLine}
       </div>`;
   }
 
@@ -3363,6 +3612,14 @@
 
     const qualityLine = tracker.kind === 'sleep' && latest && latest.quality != null
       ? `<div class="insight-line">Last quality ${fmtQuality(latest.quality)}</div>` : '';
+    // BMI (Weight tracker) and the fuller sleep breakdown (Sleep tracker)
+    // each get their own detail-on-demand card here, same "tap in for the
+    // deeper insight" placement already used for a lift's Strength/Pace
+    // level — gated behind the same Settings → Insights toggles that used
+    // to gate their old, plainer dashboard-card lines.
+    const insightDetailHtml = tracker.id === BODY_WEIGHT_TRACKER_ID && state.settings.showWeightInsights ? bmiDetailHtml()
+      : tracker.kind === 'sleep' && state.settings.showSleepInsights ? sleepInsightDetailHtml()
+      : '';
     openModal(`
       <div class="modal-title-row"><h2>${escapeHtml(tracker.name)}</h2><button class="modal-close" data-action="close-modal">✕</button></div>
       <!-- Wrapped in a .card (matching the exercise detail modal's own fix
@@ -3380,6 +3637,8 @@
         <div class="ex-card-foot"><span class="ex-card-pct ${achieved ? 'is-complete' : ''}">${achieved ? '✓ Goal reached' : `${Math.round(pct)}% to goal`}</span></div>
         ${!achieved && trackerProgressDeltaText(tracker, value) ? `<div class="insight-line muted-text">${trackerProgressDeltaText(tracker, value)}</div>` : ''}` : ''}
       </div>
+
+      ${insightDetailHtml}
 
       <div class="pr-grid">
         <div class="pr-tile"><div class="value">${history.length}</div><div class="label">Entries logged</div></div>
@@ -3689,7 +3948,48 @@
   // wired once via delegation on the container instead of per-field
   // getElementById calls, so this never throws no matter how many (or few)
   // fields MACRO_KEYS lists.
+  // The Nutrition calculator card just above the daily-goals list — options
+  // list built once (same one-time-build reasoning as macroGoalRows below),
+  // everything else refreshed every render since the live preview needs to
+  // track whatever Profile/body-weight facts currently exist.
+  function renderNutritionCalcCard() {
+    const select = document.getElementById('nutritionActivityLevel');
+    if (!select.dataset.built) {
+      select.innerHTML = Object.keys(ACTIVITY_LEVELS)
+        .map((k) => `<option value="${k}">${ACTIVITY_LEVELS[k].label} — ${ACTIVITY_LEVELS[k].hint}</option>`)
+        .join('');
+      select.dataset.built = '1';
+    }
+    const calc = state.settings.nutritionCalc;
+    document.querySelectorAll('#nutritionCalcEnabledSegmented button').forEach((b) => b.setAttribute('aria-checked', String((b.dataset.boolChoice === 'on') === calc.enabled)));
+    document.getElementById('nutritionCalcFields').hidden = !calc.enabled;
+    if (!calc.enabled) return;
+    select.value = calc.activityLevel;
+    document.querySelectorAll('#nutritionGoalSegmented button').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.goalChoice === calc.goal)));
+
+    const result = computeNutritionTargets(calc.activityLevel, calc.goal);
+    const missingEl = document.getElementById('nutritionCalcMissing');
+    const previewEl = document.getElementById('nutritionCalcPreview');
+    const applyBtn = document.getElementById('applyNutritionCalcBtn');
+    if (result.missing) {
+      const list = result.missing.length > 1
+        ? `${result.missing.slice(0, -1).join(', ')} and ${result.missing[result.missing.length - 1]}`
+        : result.missing[0];
+      missingEl.hidden = false;
+      missingEl.textContent = `Set your ${list} (Settings → Profile, or log a body weight) to calculate this.`;
+      previewEl.hidden = true;
+      applyBtn.disabled = true;
+    } else {
+      missingEl.hidden = true;
+      previewEl.hidden = false;
+      document.getElementById('nutritionCalcCalories').textContent = `${result.calories}`;
+      document.getElementById('nutritionCalcProtein').textContent = `${result.protein}g`;
+      applyBtn.disabled = false;
+    }
+  }
+
   function renderFoodManagePanel() {
+    renderNutritionCalcCard();
     const wrap = document.getElementById('macroGoalRows');
     if (!wrap.dataset.built) {
       wrap.innerHTML = MACRO_KEYS.map((k) => `
@@ -3836,6 +4136,7 @@
     document.querySelectorAll('#showWeightInsightsSegmented button').forEach((b) => b.setAttribute('aria-checked', String((b.dataset.boolChoice === 'on') === state.settings.showWeightInsights)));
     document.querySelectorAll('#showStrengthLevelSegmented button').forEach((b) => b.setAttribute('aria-checked', String((b.dataset.boolChoice === 'on') === state.settings.showStrengthLevel)));
     document.querySelectorAll('#showPaceLevelSegmented button').forEach((b) => b.setAttribute('aria-checked', String((b.dataset.boolChoice === 'on') === state.settings.showPaceLevel)));
+    document.querySelectorAll('#showSleepInsightsSegmented button').forEach((b) => b.setAttribute('aria-checked', String((b.dataset.boolChoice === 'on') === state.settings.showSleepInsights)));
   }
 
   /* ============================== Backup validation ==============================
@@ -3912,6 +4213,7 @@
     if (parsed.profile != null) {
       if (!isPlainObject(parsed.profile) || !isNumOrNull(parsed.profile.heightCm)) return 'Invalid profile data.';
       if (parsed.profile.sex != null && !VALID_SEX.has(parsed.profile.sex)) return 'Invalid sex value in profile.';
+      if (parsed.profile.age != null && !isNumOrNull(parsed.profile.age)) return 'Invalid age value in profile.';
     }
 
     return null;
@@ -4331,12 +4633,13 @@
   // so it needs to remember which tab was active in order to return there
   // on close instead of always landing back on Dashboard.
   let lastTabBeforeSettings = 'dashboard';
-  // One-time value sync for the Profile height field(s), on entry only —
-  // see the comment in renderSettings() for why this can't live in the
-  // general re-render path. Also re-run whenever the length unit itself is
-  // switched (see wireEvents' lengthUnitSegmented handler), since that
-  // changes which fields are shown and what they should contain — unlike
-  // every other settings control, that one *has* to resync the value.
+  // One-time value sync for the Profile height field(s) (and, for the same
+  // reason, Age), on entry only — see the comment in renderSettings() for
+  // why this can't live in the general re-render path. Height is also
+  // re-run whenever the length unit itself is switched (see wireEvents'
+  // lengthUnitSegmented handler), since that changes which fields are shown
+  // and what they should contain — unlike every other settings control,
+  // that one *has* to resync the value.
   function syncProfileHeightInputs() {
     if (state.settings.lengthUnit === 'cm') {
       document.getElementById('profileHeightCm').value = state.profile.heightCm ? round(state.profile.heightCm, 1) : '';
@@ -4345,6 +4648,7 @@
       document.getElementById('profileHeightFt').value = ft;
       document.getElementById('profileHeightIn').value = inch;
     }
+    document.getElementById('profileAge').value = state.profile.age != null ? state.profile.age : '';
   }
 
   function openSettings() {
@@ -4455,6 +4759,37 @@
       renderDashboard();
     });
 
+    // Nutrition calculator (Manage -> Nutrition -> Food) — "Use calculator"
+    // only shows/updates the live preview below; nothing is written into
+    // macroGoals until "Apply to daily goals" is tapped (see the comment on
+    // applyNutritionCalcTargets()).
+    document.getElementById('nutritionCalcEnabledSegmented').addEventListener('click', (ev) => {
+      const btn = ev.target.closest('button'); if (!btn) return;
+      state.settings.nutritionCalc.enabled = btn.dataset.boolChoice === 'on';
+      save();
+      renderManage();
+    });
+    document.getElementById('nutritionActivityLevel').addEventListener('change', (ev) => {
+      state.settings.nutritionCalc.activityLevel = ev.target.value;
+      save();
+      renderManage();
+    });
+    document.getElementById('nutritionGoalSegmented').addEventListener('click', (ev) => {
+      const btn = ev.target.closest('button'); if (!btn) return;
+      state.settings.nutritionCalc.goal = btn.dataset.goalChoice;
+      save();
+      renderManage();
+    });
+    document.getElementById('applyNutritionCalcBtn').addEventListener('click', () => {
+      const calc = state.settings.nutritionCalc;
+      const applied = applyNutritionCalcTargets(calc.activityLevel, calc.goal);
+      if (!applied) { toast('Set your height, age, sex, and a logged body weight first.'); return; }
+      save();
+      toast('Calorie and protein goals applied');
+      renderManage();
+      renderDashboard();
+    });
+
     document.getElementById('themeSegmented').addEventListener('click', (ev) => {
       const btn = ev.target.closest('button'); if (!btn) return;
       state.settings.theme = btn.dataset.themeChoice; save(); applyTheme(); renderSettings();
@@ -4495,8 +4830,17 @@
         heightCm = totalIn > 0 ? Units.displayToCm(totalIn) : null;
       }
       state.profile.heightCm = heightCm;
+      const rawAge = parseInt(document.getElementById('profileAge').value, 10);
+      state.profile.age = (!Number.isNaN(rawAge) && rawAge > 0) ? rawAge : null;
       save();
       toast('Profile saved');
+      // Height/age both feed the nutrition calculator's live preview (see
+      // computeNutritionTargets()) — renderAll() re-renders Manage -> Food's
+      // panel too, so the preview reflects the new numbers immediately. It
+      // does NOT re-apply them into macroGoals on its own: applying is
+      // always the explicit "Apply to daily goals" button, so a Profile
+      // edit never silently overwrites a goal the user has set (or since
+      // hand-edited) via the calculator.
       renderAll();
     });
 
@@ -4519,6 +4863,10 @@
     document.getElementById('showPaceLevelSegmented').addEventListener('click', (ev) => {
       const btn = ev.target.closest('button'); if (!btn) return;
       state.settings.showPaceLevel = btn.dataset.boolChoice === 'on'; save(); renderAll();
+    });
+    document.getElementById('showSleepInsightsSegmented').addEventListener('click', (ev) => {
+      const btn = ev.target.closest('button'); if (!btn) return;
+      state.settings.showSleepInsights = btn.dataset.boolChoice === 'on'; save(); renderAll();
     });
 
     document.getElementById('exportBtn').addEventListener('click', exportBackup);

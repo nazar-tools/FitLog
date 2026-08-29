@@ -301,6 +301,38 @@
         </div>
 
         <div id="manageFoodPanel" hidden>
+          <div class="section-head"><h2>Nutrition calculator</h2></div>
+          <p class="muted-text">Estimate a daily calorie and protein target from your Profile (height, age, sex), current body weight, activity level, and goal — then apply it below. Uses the Mifflin-St Jeor formula; a general estimate, not personalized or medical advice.</p>
+          <div class="card" id="nutritionCalcCard">
+            <div class="setting-row">
+              <span>Use calculator</span>
+              <div class="segmented" id="nutritionCalcEnabledSegmented" role="radiogroup" aria-label="Use nutrition calculator">
+                <button type="button" data-bool-choice="off" role="radio">Off</button>
+                <button type="button" data-bool-choice="on" role="radio">On</button>
+              </div>
+            </div>
+            <div id="nutritionCalcFields" hidden>
+              <div class="field">
+                <span class="field-label">Activity level</span>
+                <select id="nutritionActivityLevel"></select>
+              </div>
+              <div class="field">
+                <span class="field-label">Goal</span>
+                <div class="segmented" id="nutritionGoalSegmented" role="radiogroup" aria-label="Nutrition goal">
+                  <button type="button" data-goal-choice="lose" role="radio">Lose weight</button>
+                  <button type="button" data-goal-choice="maintain" role="radio">Maintain</button>
+                  <button type="button" data-goal-choice="gain" role="radio">Gain weight</button>
+                </div>
+              </div>
+              <p class="muted-text field-hint" id="nutritionCalcMissing" hidden></p>
+              <div class="pr-grid" id="nutritionCalcPreview" hidden>
+                <div class="pr-tile"><div class="value" id="nutritionCalcCalories">—</div><div class="label">Calories/day</div></div>
+                <div class="pr-tile"><div class="value" id="nutritionCalcProtein">—</div><div class="label">Protein/day</div></div>
+              </div>
+              <button type="button" class="btn btn-primary btn-block" id="applyNutritionCalcBtn">Apply to daily goals</button>
+            </div>
+          </div>
+
           <div class="section-head"><h2>Daily goals</h2></div>
           <p class="muted-text">Every field below is always available to log from Log &rarr; Nutrition &rarr; Food. Turn on a daily goal for any of them here — one, several, or all — to see progress against it on the dashboard.</p>
           <!-- Populated by renderFoodManagePanel() — one toggle+amount row
@@ -331,7 +363,7 @@
 
       <div class="section-head"><h2>Profile</h2></div>
       <div class="card form-card">
-        <p class="muted-text">Used only by the optional insight calculators below (BMI, strength level, pace level) — never required, and nothing here is used anywhere else in the app.</p>
+        <p class="muted-text">Used only by the optional insight calculators below (BMI, strength level, pace level, nutrition calculator) — never required, and nothing here is used anywhere else in the app.</p>
         <div class="field" id="profileHeightFieldCm">
           <span class="field-label">Height (cm)</span>
           <input type="number" step="any" min="0" id="profileHeightCm" placeholder="Not set" />
@@ -343,8 +375,12 @@
             <input type="number" step="1" min="0" max="11" inputmode="numeric" id="profileHeightIn" placeholder="in" />
           </div>
         </div>
+        <div class="field" id="profileAgeField">
+          <span class="field-label">Age <span class="muted-text">(for the nutrition calculator)</span></span>
+          <input type="number" step="1" min="0" max="120" inputmode="numeric" id="profileAge" placeholder="Not set" />
+        </div>
         <div class="setting-row">
-          <span>Sex <span class="muted-text">(for strength/pace benchmarks)</span></span>
+          <span>Sex <span class="muted-text">(for strength/pace benchmarks + nutrition calculator)</span></span>
           <div class="segmented" id="profileSexSegmented" role="radiogroup" aria-label="Sex">
             <button type="button" data-sex-choice="" role="radio">Not set</button>
             <button type="button" data-sex-choice="male" role="radio">Male</button>
@@ -424,6 +460,13 @@
             <button type="button" data-bool-choice="on" role="radio">On</button>
           </div>
         </div>
+        <div class="setting-row">
+          <span>Sleep insights <span class="muted-text">(trend over last 7 nights)</span></span>
+          <div class="segmented" id="showSleepInsightsSegmented" role="radiogroup" aria-label="Sleep insights">
+            <button type="button" data-bool-choice="off" role="radio">Off</button>
+            <button type="button" data-bool-choice="on" role="radio">On</button>
+          </div>
+        </div>
         <p class="muted-text field-hint">Strength and pace levels use general published benchmarks, split by sex (set in Profile above) — a rough comparison, not a personalized or medical assessment.</p>
       </div>
 
@@ -439,7 +482,7 @@
 
       <div class="section-head"><h2>About</h2></div>
       <div class="card">
-        <p class="muted-text">Fit Log v1.6 &middot; installed as a home-screen app, all data stored on-device.</p>
+        <p class="muted-text">Fit Log v1.7 &middot; installed as a home-screen app, all data stored on-device.</p>
       </div>
     </section>
 

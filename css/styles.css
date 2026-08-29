@@ -30,7 +30,8 @@
   --accent-strong:   #184f95;   /* a darker step of --accent, currently unused but kept for contrast needs */
   --good:            #0ca30c;   /* "goal reached" green */
   --good-bg:         #e4f5e4;   /* unused background tint for --good, kept for future use */
-  --warning:         #fab219;   /* reserved status color — not yet used, kept for a future caution state */
+  --warning:         #fab219;   /* the BMI gauge's "Overweight" zone + badge text */
+  --warning-bg:      #fdecc8;   /* soft tint behind a --warning badge, same pairing as --good/--good-bg */
   --critical:        #d03b3b;   /* delete/danger buttons */
   --critical-bg:     #fbe7e6;   /* the soft red background behind a danger button */
   --dot-body:        #8b5cf6;   /* History calendar's "body measurement logged" dot (workout reuses --good, water reuses --accent) */
@@ -63,6 +64,7 @@
     --good:            #0ca30c;
     --good-bg:         rgba(12,163,12,0.16);
     --warning:         #fab219;
+    --warning-bg:      rgba(250,178,25,0.16);
     --critical:        #e66767;
     --critical-bg:     rgba(224,90,90,0.16);
     --dot-body:        #a78bfa;
@@ -87,6 +89,7 @@
   --good:            #0ca30c;
   --good-bg:         rgba(12,163,12,0.16);
   --warning:         #fab219;
+  --warning-bg:      rgba(250,178,25,0.16);
   --critical:        #e66767;
   --critical-bg:     rgba(224,90,90,0.16);
   --dot-body:        #a78bfa;
@@ -387,6 +390,57 @@ button { font-family: inherit; }
 }
 .tier-seg.is-current { background: var(--accent); color: #fff; }
 .tier-bar-caption { font-size: 11px; margin-top: 6px; line-height: 1.5; }
+
+/* ============ Insight badge (BMI category pill) ============
+   A colored pill naming which category a value falls in — same "colored
+   status, not just a word" idea as the tier bar above, but for a single
+   category name rather than a 5-6 way scale, so a pill reads better than a
+   bar with one segment lit up. Category->color mapping lives in app.js
+   (bmiCategoryClass()) so the class names here stay generic. */
+.insight-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 700;
+  margin-top: 10px;
+}
+.insight-badge.is-underweight { background: var(--accent-track); color: var(--accent-strong); }
+.insight-badge.is-normal { background: var(--good-bg); color: var(--good); }
+.insight-badge.is-overweight { background: var(--warning-bg); color: var(--warning); }
+.insight-badge.is-obese { background: var(--critical-bg); color: var(--critical); }
+
+/* ============ Gauge (BMI detail chart) ============
+   A semicircular SVG gauge — colored zones for each category, a needle
+   pointing at the current value, and boundary tick labels — rendered by
+   Charts.gaugeChart() in js/charts.js. Colors are CSS classes passed in by
+   the caller (same "chart code never picks a color" rule as the line
+   chart above), not literal values in the SVG markup. */
+.gauge-wrap { display: flex; justify-content: center; }
+/* Centers the category .insight-badge under the gauge — a flex row rather
+   than text-align, so it works for the badge's own inline-flex layout. */
+.gauge-badge-row { display: flex; justify-content: center; }
+.gauge-seg { fill: none; stroke-width: 20; stroke-linecap: butt; }
+.gauge-seg.is-underweight { stroke: var(--accent); }
+.gauge-seg.is-normal { stroke: var(--good); }
+.gauge-seg.is-overweight { stroke: var(--warning); }
+.gauge-seg.is-obese { stroke: var(--critical); }
+.gauge-needle { stroke: var(--text-primary); stroke-width: 3; stroke-linecap: round; }
+.gauge-pivot { fill: var(--text-primary); }
+.gauge-tick-text { fill: var(--muted); font-size: 10.5px; }
+.gauge-value-text { fill: var(--text-primary); font-size: 26px; font-weight: 700; }
+/* A dot-plus-label legend row under the gauge, spelling out what each
+   colored zone means (the gauge itself has no room for full category
+   names, only short boundary numbers). */
+.gauge-legend { display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; margin-top: 4px; }
+.gauge-legend-item { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; color: var(--text-secondary); }
+.gauge-legend-dot { width: 8px; height: 8px; border-radius: 999px; display: inline-block; }
+.gauge-legend-dot.is-underweight { background: var(--accent); }
+.gauge-legend-dot.is-normal { background: var(--good); }
+.gauge-legend-dot.is-overweight { background: var(--warning); }
+.gauge-legend-dot.is-obese { background: var(--critical); }
 
 /* A small breadcrumb-style link back to the previous modal screen — used
    where a modal has drilled one level deeper (e.g. exercise detail ->
