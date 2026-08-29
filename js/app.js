@@ -2873,8 +2873,16 @@
 
     openModal(`
       <div class="modal-title-row"><h2>${escapeHtml(ex.name)}</h2><button class="modal-close" data-action="close-modal">✕</button></div>
-      <div class="ex-card-badge badge-standalone">${kindBadge(ex)}</div>
-      ${progressHtml}
+      <!-- Wrapped in the same .card the dashboard's own goal card uses (see
+           goalCardHtml()) rather than left as bare top-level modal content —
+           without this, the badge and progress meter had no container of
+           their own, so they picked up none of the spacing every other
+           block in this modal gets from .modal-sheet's gap, and sat jammed
+           against the suggestion card right below with zero space between. -->
+      <div class="card">
+        <div class="ex-card-badge badge-standalone">${kindBadge(ex)}</div>
+        ${progressHtml}
+      </div>
 
       <!-- Concise "at a glance" headline only — the detail sentence and the
            method note (and the well-researched general explanation) now
@@ -3357,14 +3365,21 @@
       ? `<div class="insight-line">Last quality ${fmtQuality(latest.quality)}</div>` : '';
     openModal(`
       <div class="modal-title-row"><h2>${escapeHtml(tracker.name)}</h2><button class="modal-close" data-action="close-modal">✕</button></div>
-      <div class="ex-card-values">
-        <div class="ex-card-current">${fmtTrackerValue(tracker, value)}</div>
-        ${tracker.goal != null ? `<div class="ex-card-goal">/ ${trackerGoalLabel(tracker).replace('Goal ', '')}</div>` : ''}
+      <!-- Wrapped in a .card (matching the exercise detail modal's own fix
+           and how a tracker's dashboard card already wraps this same
+           content) rather than left as bare top-level modal content, which
+           had no spacing of its own and sat jammed against the pr-grid
+           right below it. -->
+      <div class="card">
+        <div class="ex-card-values">
+          <div class="ex-card-current">${fmtTrackerValue(tracker, value)}</div>
+          ${tracker.goal != null ? `<div class="ex-card-goal">/ ${trackerGoalLabel(tracker).replace('Goal ', '')}</div>` : ''}
+        </div>
+        ${qualityLine}
+        ${tracker.goal != null ? `<div class="meter"><div class="meter-fill ${achieved ? 'is-complete' : ''}" style="--fill:${Math.min(100, pct)}%"></div></div>
+        <div class="ex-card-foot"><span class="ex-card-pct ${achieved ? 'is-complete' : ''}">${achieved ? '✓ Goal reached' : `${Math.round(pct)}% to goal`}</span></div>
+        ${!achieved && trackerProgressDeltaText(tracker, value) ? `<div class="insight-line muted-text">${trackerProgressDeltaText(tracker, value)}</div>` : ''}` : ''}
       </div>
-      ${qualityLine}
-      ${tracker.goal != null ? `<div class="meter"><div class="meter-fill ${achieved ? 'is-complete' : ''}" style="--fill:${Math.min(100, pct)}%"></div></div>
-      <div class="ex-card-foot"><span class="ex-card-pct ${achieved ? 'is-complete' : ''}">${achieved ? '✓ Goal reached' : `${Math.round(pct)}% to goal`}</span></div>
-      ${!achieved && trackerProgressDeltaText(tracker, value) ? `<div class="insight-line muted-text">${trackerProgressDeltaText(tracker, value)}</div>` : ''}` : ''}
 
       <div class="pr-grid">
         <div class="pr-tile"><div class="value">${history.length}</div><div class="label">Entries logged</div></div>

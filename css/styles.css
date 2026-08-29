@@ -167,12 +167,45 @@ button { font-family: inherit; }
 #app.no-topbar #main { padding-top: calc(16px + env(safe-area-inset-top)); }
 .view { display: flex; flex-direction: column; gap: 16px; }
 
+/* Manage/Log sub-panel rhythm — the same fixed 16px `gap` as `.view` and
+   `.modal-sheet`, applied to every plain <div> that groups a handful of
+   blocks (a section-head, a description paragraph, a card, an entry list)
+   one level below a `.view`: Log's Water/Food switcher panel, and Manage's
+   per-domain panels and their own Water/Food switcher panel one level
+   further in. These used to be plain, non-flex <div>s with no gap of their
+   own, so their contents (e.g. "Exercises" header sitting directly on top
+   of the exercise list, or Manage → Nutrition → Food's description
+   paragraph touching the card right below it) were cramped compared to
+   everything at the `.view` level — the exact opposite problem from the
+   double-margins fixed elsewhere on this page, but the same root cause:
+   spacing left to chance instead of one shared rule. */
+#logNutritionPanel,
+#manageExercisesPanel,
+#manageMeasurementsPanel,
+#manageNutritionPanel,
+#manageWaterPanel,
+#manageFoodPanel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
 .section-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   margin-top: 8px;
 }
+/* A section-head that's the first child of whatever holds it (a `.view`, a
+   `.modal-sheet`, a Manage sub-panel, or a standalone `.card`) has nothing
+   above it to separate from — the 8px above is only meant to set a new
+   section apart from the content of the one before it, so the very first
+   header in any container should sit flush instead of getting that offset
+   too. Without this, every screen whose first child happened to be a
+   section-head (Log/History/Manage) started 8px lower than one whose first
+   child was something else (Dashboard) — a purely incidental, inconsistent
+   difference in top spacing that had nothing to do with content. */
+.section-head:first-child { margin-top: 0; }
 .section-head h2 { font-size: 15px; color: var(--text-secondary); font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
 
 /* ============ Domain tabs (Workout / Measurements / Nutrition) ============
@@ -406,6 +439,17 @@ button { font-family: inherit; }
 
 /* ============ Forms ============ */
 .form-card { display: flex; flex-direction: column; gap: 14px; }
+/* `.setting-row` (see "Segmented control" below) is designed for a plain,
+   non-flex `.card` — a divider-list where each row's own 8px top/bottom
+   padding IS the spacing, no parent gap involved. Settings → Profile mixes
+   one `.setting-row` (Sex) in among ordinary `.field`s inside a `.form-card`
+   — there, the padding stacks with the form-card's own 14px `gap` on both
+   sides (14+8=22px) instead of matching the flat 14px between every other
+   pair of fields, so that one row sits visibly further from its neighbors
+   than everything else in the same card for no reason tied to its content.
+   Zeroing the padding here means the surrounding `gap` alone governs its
+   spacing, same as any other field. */
+.form-card .setting-row { padding: 0; }
 .field { display: flex; flex-direction: column; gap: 6px; }
 .field-label { font-size: 13px; color: var(--text-secondary); font-weight: 500; }
 /* A short explainer line under a field's control, e.g. the Section picker's
@@ -488,9 +532,15 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 1p
 .btn-block { width: 100%; }
 .btn-sm { padding: 6px 12px; font-size: 13px; }
 .btn-row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
-/* Confirm-dialog's Cancel/Confirm row sits under a paragraph rather than a
-   form field, so it wants a bit more breathing room above it. */
-.confirm-actions { margin-top: 18px; }
+/* confirmDialog's Cancel/Confirm row is a direct `.modal-sheet` child (the
+   only place this class is used), so its spacing above already comes from
+   the sheet's own `gap` — this used to ALSO add 18px on its own, stacking
+   on top of a `.btn-row` margin-top that was itself about to be replaced by
+   the same gap, so the two together produced far more space above this one
+   button row than any other pair of blocks in the app got. No margin here
+   now; `.confirm-actions` is kept as a class purely so this row is still
+   distinguishable in markup from every other `.btn-row`. */
+.confirm-actions { margin-top: 0; }
 .btn-ghost { background: transparent; color: var(--accent); border: none; padding: 4px 6px; font-weight: 600; font-size: 13px; }
 .btn[disabled] { opacity: 0.5; cursor: default; }
 /* A permanent, irreversible action rendered as plain text rather than a
@@ -511,7 +561,23 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 1p
 
 /* ============ Segmented control ============ */
 .setting-row { display: flex; align-items: center; justify-content: space-between; padding: 8px 0; }
+/* The adjacent-sibling combinator only draws a divider between two rows
+   that are literally next to each other in the DOM — correct for a plain
+   list (Units, Insights) and also correct for Settings → Profile, where
+   one lone `.setting-row` (Sex) sits among ordinary `.field`s rather than
+   in a list of its own, so it should never get a stray divider above it. */
 .setting-row + .setting-row { border-top: 1px solid var(--gridline); }
+/* Manage → Nutrition → Food's per-macro goal list (#macroGoalRows) is the
+   one place that IS a plain list but doesn't satisfy the rule above: it
+   interleaves a hidden `.field` (the goal-amount input) between every pair
+   of `.setting-row`s, so each row's immediately-preceding sibling is
+   always that `.field`, never another `.setting-row` — the `+` rule above
+   never matched here, and the list silently rendered with no dividers at
+   all, unlike Units/Insights right next to it in the same screen. Scoped
+   to this one list, matching by position rather than by the preceding
+   sibling's class gets it the same divider without affecting Profile's
+   lone row above. */
+#macroGoalRows .setting-row:not(:first-child) { border-top: 1px solid var(--gridline); }
 .segmented { display: inline-flex; background: var(--surface-2); border-radius: 999px; padding: 3px; gap: 2px; }
 .segmented button {
   border: none; background: transparent; color: var(--text-secondary);
@@ -520,8 +586,12 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 1p
 .segmented button[aria-checked="true"] { background: var(--surface-1); color: var(--text-primary); box-shadow: var(--shadow-1); }
 
 /* Nutrition's nested Water/Food sub-control, one level below the outer
-   Workout/Measurements/Nutrition segmented control on Log/History/Manage. */
-#logNutritionSubSegmented, #manageNutritionSubSegmented { margin-bottom: 12px; }
+   Workout/Measurements/Nutrition segmented control on Log/History/Manage.
+   Spacing to what follows now comes from #logNutritionPanel/
+   #manageNutritionPanel's own gap (see "Manage/Log sub-panel rhythm"
+   below) — this used to carry its own margin-bottom:12px, which, now that
+   those panels lay out with a gap of their own, would have stacked with it
+   instead of being replaced by it. */
 
 /* Chip picker — a row of discrete-choice tap targets (e.g. a 1-5 rating)
    in place of a number input, sized like the other touch targets on this
@@ -644,6 +714,22 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 1p
   border-radius: 20px 20px 0 0;
   padding: 20px 20px calc(24px + env(safe-area-inset-bottom));
   box-shadow: 0 -4px 24px rgba(11,11,11,0.2);
+  /* Every modal's content is one flat list of top-level blocks (title row,
+     optional subtitle, cards, section-heads, charts, button rows, entry
+     lists) injected as a single HTML string by openModal() — there used to
+     be no shared rhythm between them at all, so spacing between any two
+     blocks depended entirely on whichever one-off margin (or lack of one)
+     that specific pair of classes happened to carry: 0px between two
+     directly-adjacent `.card`s, ~8px between a header and its list, ~16-24px
+     elsewhere. This `gap` is the same fixed-rhythm mechanism `.view` already
+     uses for every top-level screen, applied here too so modal content
+     reads with the identical, predictable spacing regardless of which
+     specific elements happen to be next to each other. See the comments on
+     `.modal-title-row`, `.modal-subtitle`, `.confirm-actions`, `.pr-grid`,
+     and `.chart-wrap` below for the individual margins this superseded. */
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
   /* Animates the spring-back / dismiss slide app.js drives via `transform`
      while dragging the handle below; suppressed during an active drag
      (`.is-dragging`) so the sheet tracks the pointer with no lag. */
@@ -659,17 +745,33 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 1p
   background: var(--gridline);
   background-clip: content-box;
   border-radius: 999px;
-  margin: -10px auto 10px;
+  /* Bottom margin is 0, not a positive gap of its own, because
+     `.modal-sheet`'s `gap: 16px` already supplies the space down to
+     whatever comes next (always `.modal-title-row`) — adding a margin here
+     too would stack on top of that gap instead of replacing it. The
+     negative top margin stays: it pulls the handle up to sit just under the
+     sheet's rounded top edge, offsetting the touch-target padding below. */
+  margin: -10px auto 0;
   padding: 12px 28px;
   touch-action: none;
   cursor: grab;
 }
 .modal-handle:active { cursor: grabbing; }
-.modal-title-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+/* Spacing below the title row (and below `.modal-subtitle` just after it)
+   now comes entirely from the parent's `gap` — `.modal-sheet`'s 16px when
+   this is a modal, `.view`'s own 16px gap when this is the Settings screen
+   title (the one non-modal user of this class). A margin here too would
+   have stacked with that gap rather than replacing it — which is exactly
+   what made Settings' title-to-"Appearance" spacing roughly double every
+   other section gap in the app before this fix. */
+.modal-title-row { display: flex; align-items: center; justify-content: space-between; }
 .modal-title-row h2 { font-size: 18px; }
 /* A muted line of context right under a modal's title (e.g. which exercise
-   an entry belongs to, in the edit-entry sheet). */
-.modal-subtitle { margin-bottom: 12px; }
+   an entry belongs to, in the edit-entry sheet). This class carries no
+   rules of its own — it exists as a marker `<p>` between `.modal-title-row`
+   and whatever follows, spaced by `.modal-sheet`'s gap on both sides like
+   everything else there — kept as a class rather than removed so call
+   sites stay self-documenting about what that line is. */
 .modal-close { border: none; background: var(--surface-2); width: 44px; height: 44px; border-radius: 999px; color: var(--text-primary); cursor: pointer; }
 
 /* ============ Toast ============ */
@@ -688,11 +790,15 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 1p
 }
 
 /* ============ Charts (SVG, per dataviz mark specs) ============ */
-/* Wrapper around an injected Charts.lineChart() SVG — just spacing, so the
-   chart drawing code in charts.js never has to think about its own margins.
-   The SVG itself is sized to fill this wrapper's full width (see
-   charts.js) rather than a fixed pixel size. */
-.chart-wrap { margin: 4px 0 12px; }
+/* Wrapper around an injected Charts.lineChart() SVG — the chart drawing code
+   in charts.js never has to think about its own margins. Only ever used as
+   a direct `.modal-sheet` child (exercise/tracker detail), so spacing above
+   and below it is the sheet's own `gap` now, not a margin here — this used
+   to carry `margin: 4px 0 12px`, which (once the sheet had a real gap of
+   its own) would have added on top of it rather than replacing it. The SVG
+   itself is sized to fill this wrapper's full width (see charts.js) rather
+   than a fixed pixel size. */
+.chart-wrap {}
 .chart-line { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .chart-area { fill: var(--accent); opacity: 0.10; }
 .chart-dot { fill: var(--accent); stroke: var(--surface-1); stroke-width: 2; }
@@ -701,7 +807,13 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 1p
 .chart-empty { color: var(--muted); font-size: 13px; text-align: center; padding: 24px 0; }
 
 /* ============ Misc ============ */
-.pr-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin: 14px 0; }
+/* Only ever used as a direct `.modal-sheet` child (exercise/tracker detail)
+   — like `.chart-wrap` above, its vertical spacing is the sheet's own
+   `gap` now, not the `margin: 14px 0` this used to carry, which would have
+   stacked with that gap instead of being replaced by it. The `gap: 10px`
+   here is unrelated — it's the internal, horizontal spacing between the
+   two tiles inside this grid, not spacing to what's outside it. */
+.pr-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
 .pr-tile { background: var(--surface-2); border-radius: var(--radius-md); padding: 10px 12px; }
 .pr-tile .value { font-size: 18px; font-weight: 600; }
 .pr-tile .label { font-size: 11px; color: var(--text-secondary); }
