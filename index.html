@@ -136,30 +136,34 @@
         <button type="submit" class="btn btn-primary btn-block">Save entry</button>
       </form>
 
-      <div id="logWaterPanel" class="card form-card" hidden>
-        <span class="field-label">Tap a cup to log it for today</span>
-        <div id="waterCupButtons" class="cup-button-row"></div>
-        <label class="field">
-          <span class="field-label">Custom amount (<span id="logWaterUnitLabel"></span>)</span>
-          <div class="inline-time-fields">
-            <input type="number" step="any" min="0" id="logWaterCustomAmount" placeholder="e.g. 12" />
-            <button type="button" class="btn btn-secondary" id="logWaterCustomAddBtn">Add</button>
-          </div>
-        </label>
-      </div>
+      <div id="logNutritionPanel" hidden>
+        <div class="segmented" id="logNutritionSubSegmented" role="radiogroup" aria-label="Nutrition type"></div>
 
-      <form id="logFoodForm" class="card form-card" hidden>
-        <label class="field">
-          <span class="field-label">Date</span>
-          <input type="date" id="logFoodDate" required />
-        </label>
-        <div id="logFoodDynamicFields"></div>
-        <label class="field">
-          <span class="field-label">Note (optional)</span>
-          <input type="text" id="logFoodNote" placeholder="What was it?" maxlength="200" />
-        </label>
-        <button type="submit" class="btn btn-primary btn-block">Save entry</button>
-      </form>
+        <div id="logWaterPanel" class="card form-card" hidden>
+          <span class="field-label">Tap a cup to log it for today</span>
+          <div id="waterCupButtons" class="cup-button-row"></div>
+          <label class="field">
+            <span class="field-label">Custom amount (<span id="logWaterUnitLabel"></span>)</span>
+            <div class="inline-time-fields">
+              <input type="number" step="any" min="0" id="logWaterCustomAmount" placeholder="e.g. 12" />
+              <button type="button" class="btn btn-secondary" id="logWaterCustomAddBtn">Add</button>
+            </div>
+          </label>
+        </div>
+
+        <form id="logFoodForm" class="card form-card" hidden>
+          <label class="field">
+            <span class="field-label">Date</span>
+            <input type="date" id="logFoodDate" required />
+          </label>
+          <div id="logFoodDynamicFields"></div>
+          <label class="field">
+            <span class="field-label">Note (optional)</span>
+            <input type="text" id="logFoodNote" placeholder="What was it?" maxlength="200" />
+          </label>
+          <button type="submit" class="btn btn-primary btn-block">Save entry</button>
+        </form>
+      </div>
 
       <div class="section-head">
         <h2>Recent entries</h2>
@@ -188,7 +192,7 @@
         <div class="calendar-legend">
           <span><i class="cal-dot cal-dot-workout"></i>Workout</span>
           <span><i class="cal-dot cal-dot-water"></i>Water goal</span>
-          <span><i class="cal-dot cal-dot-body"></i>Body</span>
+          <span><i class="cal-dot cal-dot-body"></i>Measurements</span>
           <span><i class="cal-dot cal-dot-food"></i>Food</span>
         </div>
       </div>
@@ -197,15 +201,21 @@
         <h2>All entries</h2>
         <div class="segmented" id="historyCategorySegmented" role="radiogroup" aria-label="History category">
           <button type="button" data-history-cat="workout" role="radio">Workouts</button>
-          <button type="button" data-history-cat="measurement" role="radio">Body</button>
-          <button type="button" data-history-cat="water" role="radio">Water</button>
-          <button type="button" data-history-cat="food" role="radio">Food</button>
+          <button type="button" data-history-cat="measurement" role="radio">Measurements</button>
+          <button type="button" data-history-cat="nutrition" role="radio">Nutrition</button>
         </div>
       </div>
       <label class="field" id="historyFilterField">
         <span class="field-label">Filter by exercise</span>
         <select id="historyFilter"></select>
       </label>
+      <div class="field" id="historyNutritionSubField" hidden>
+        <span class="field-label">Nutrition type</span>
+        <div class="segmented" id="historyNutritionSubSegmented" role="radiogroup" aria-label="Nutrition type">
+          <button type="button" data-nutrition-sub="water" role="radio">Water</button>
+          <button type="button" data-nutrition-sub="food" role="radio">Food</button>
+        </div>
+      </div>
       <div id="historyList" class="entry-list"></div>
       <div id="historyEmpty" class="empty-state" hidden>
         <p>No entries logged yet.</p>
@@ -218,9 +228,8 @@
         <h2>Manage</h2>
         <div class="segmented" id="manageCategorySegmented" role="radiogroup" aria-label="Manage category">
           <button type="button" data-manage-cat="exercises" role="radio">Exercises</button>
-          <button type="button" data-manage-cat="measurements" role="radio">Body</button>
-          <button type="button" data-manage-cat="water" role="radio">Water</button>
-          <button type="button" data-manage-cat="food" role="radio">Food</button>
+          <button type="button" data-manage-cat="measurements" role="radio">Measurements</button>
+          <button type="button" data-manage-cat="nutrition" role="radio">Nutrition</button>
         </div>
       </div>
 
@@ -241,53 +250,79 @@
         <div id="trackerManageList" class="entry-list"></div>
       </div>
 
-      <div id="manageWaterPanel" hidden>
-        <div class="section-head"><h2>Daily water goal</h2></div>
-        <div class="card form-card">
-          <label class="field">
-            <span class="field-label">Goal (<span id="waterGoalUnitLabel"></span>)</span>
-            <input type="number" step="any" min="0" id="waterGoalInput" />
-          </label>
-          <button class="btn btn-secondary btn-sm" id="saveWaterGoalBtn">Save goal</button>
+      <div id="manageNutritionPanel" hidden>
+        <div class="segmented" id="manageNutritionSubSegmented" role="radiogroup" aria-label="Nutrition type">
+          <button type="button" data-nutrition-sub="water" role="radio">Water</button>
+          <button type="button" data-nutrition-sub="food" role="radio">Food</button>
         </div>
-        <div class="section-head">
-          <h2>Cup sizes</h2>
-          <button class="btn btn-secondary btn-sm" data-action="add-cup">+ Add cup</button>
-        </div>
-        <div id="cupManageList" class="entry-list"></div>
-      </div>
 
-      <div id="manageFoodPanel" hidden>
-        <div class="section-head"><h2>Nutrition tracking</h2></div>
-        <p class="muted-text">Choose which macros the Food log asks for. You can still leave any of them blank on an individual entry, and turning one off never touches values already logged for it.</p>
-        <div class="card">
-          <div class="setting-row">
-            <span>Calories</span>
-            <div class="segmented" id="trackCaloriesSegmented" role="radiogroup" aria-label="Track calories">
-              <button type="button" data-bool-choice="off" role="radio">Off</button>
-              <button type="button" data-bool-choice="on" role="radio">On</button>
-            </div>
+        <div id="manageWaterPanel" hidden>
+          <div class="section-head"><h2>Daily water goal</h2></div>
+          <div class="card form-card">
+            <label class="field">
+              <span class="field-label">Goal (<span id="waterGoalUnitLabel"></span>)</span>
+              <input type="number" step="any" min="0" id="waterGoalInput" />
+            </label>
+            <button class="btn btn-secondary btn-sm" id="saveWaterGoalBtn">Save goal</button>
           </div>
-          <div class="setting-row">
-            <span>Protein</span>
-            <div class="segmented" id="trackProteinSegmented" role="radiogroup" aria-label="Track protein">
-              <button type="button" data-bool-choice="off" role="radio">Off</button>
-              <button type="button" data-bool-choice="on" role="radio">On</button>
-            </div>
+          <div class="section-head">
+            <h2>Cup sizes</h2>
+            <button class="btn btn-secondary btn-sm" data-action="add-cup">+ Add cup</button>
           </div>
-          <div class="setting-row">
-            <span>Carbs</span>
-            <div class="segmented" id="trackCarbsSegmented" role="radiogroup" aria-label="Track carbs">
-              <button type="button" data-bool-choice="off" role="radio">Off</button>
-              <button type="button" data-bool-choice="on" role="radio">On</button>
+          <div id="cupManageList" class="entry-list"></div>
+        </div>
+
+        <div id="manageFoodPanel" hidden>
+          <div class="section-head"><h2>Daily macro goals</h2></div>
+          <p class="muted-text">Calories, protein, carbs, and fat are always available to log from Log &rarr; Nutrition &rarr; Food. Turn on a daily goal for any of them here — one, several, or all four — to see progress against it on the dashboard.</p>
+          <div class="card">
+            <div class="setting-row">
+              <span>Calories</span>
+              <div class="segmented" id="macroGoalToggle_calories" role="radiogroup" aria-label="Calories goal">
+                <button type="button" data-bool-choice="off" role="radio">Off</button>
+                <button type="button" data-bool-choice="on" role="radio">On</button>
+              </div>
             </div>
-          </div>
-          <div class="setting-row">
-            <span>Fat</span>
-            <div class="segmented" id="trackFatSegmented" role="radiogroup" aria-label="Track fat">
-              <button type="button" data-bool-choice="off" role="radio">Off</button>
-              <button type="button" data-bool-choice="on" role="radio">On</button>
+            <label class="field" id="macroGoalField_calories" hidden>
+              <span class="field-label">Daily goal (cal)</span>
+              <input type="number" step="any" min="0" id="macroGoalInput_calories" />
+            </label>
+
+            <div class="setting-row">
+              <span>Protein</span>
+              <div class="segmented" id="macroGoalToggle_protein" role="radiogroup" aria-label="Protein goal">
+                <button type="button" data-bool-choice="off" role="radio">Off</button>
+                <button type="button" data-bool-choice="on" role="radio">On</button>
+              </div>
             </div>
+            <label class="field" id="macroGoalField_protein" hidden>
+              <span class="field-label">Daily goal (g)</span>
+              <input type="number" step="any" min="0" id="macroGoalInput_protein" />
+            </label>
+
+            <div class="setting-row">
+              <span>Carbs</span>
+              <div class="segmented" id="macroGoalToggle_carbs" role="radiogroup" aria-label="Carbs goal">
+                <button type="button" data-bool-choice="off" role="radio">Off</button>
+                <button type="button" data-bool-choice="on" role="radio">On</button>
+              </div>
+            </div>
+            <label class="field" id="macroGoalField_carbs" hidden>
+              <span class="field-label">Daily goal (g)</span>
+              <input type="number" step="any" min="0" id="macroGoalInput_carbs" />
+            </label>
+
+            <div class="setting-row">
+              <span>Fat</span>
+              <div class="segmented" id="macroGoalToggle_fat" role="radiogroup" aria-label="Fat goal">
+                <button type="button" data-bool-choice="off" role="radio">Off</button>
+                <button type="button" data-bool-choice="on" role="radio">On</button>
+              </div>
+            </div>
+            <label class="field" id="macroGoalField_fat" hidden>
+              <span class="field-label">Daily goal (g)</span>
+              <input type="number" step="any" min="0" id="macroGoalInput_fat" />
+            </label>
           </div>
         </div>
       </div>
@@ -419,7 +454,7 @@
 
       <div class="section-head"><h2>About</h2></div>
       <div class="card">
-        <p class="muted-text">Fit Log v1.3 &middot; installed as a home-screen app, all data stored on-device.</p>
+        <p class="muted-text">Fit Log v1.4 &middot; installed as a home-screen app, all data stored on-device.</p>
       </div>
     </section>
 

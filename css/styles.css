@@ -330,6 +330,7 @@ button { font-family: inherit; }
 .food-totals-row { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
 .food-total-item { text-align: center; flex: 1 1 0; }
 .food-total-value { font-size: 20px; font-weight: 600; }
+.food-total-goal { font-size: 11px; color: var(--text-secondary); }
 .food-total-label { font-size: 12px; color: var(--text-secondary); margin-top: 2px; }
 
 .empty-state {
@@ -446,6 +447,10 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 1p
   padding: 6px 12px; border-radius: 999px; font-size: 13px; font-weight: 600; cursor: pointer;
 }
 .segmented button[aria-checked="true"] { background: var(--surface-1); color: var(--text-primary); box-shadow: var(--shadow-1); }
+
+/* Nutrition's nested Water/Food sub-control, one level below the outer
+   Workout/Measurements/Nutrition segmented control on Log/History/Manage. */
+#logNutritionSubSegmented, #manageNutritionSubSegmented { margin-bottom: 12px; }
 
 /* Chip picker — a row of discrete-choice tap targets (e.g. a 1-5 rating)
    in place of a number input, sized like the other touch targets on this

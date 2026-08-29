@@ -190,7 +190,7 @@
      import path runs the exact same migrations.
      ========================================================================== */
 
-  const SCHEMA_VERSION = 8;
+  const SCHEMA_VERSION = 9;
 
   // Known "daily" exercise ids from before the Goal/Daily/Other split
   // existed (schema v1). Used only by the v1->v2 migration below.
@@ -385,7 +385,42 @@
       }
       return data;
     },
-    // Next migration goes here, keyed `8: (data) => { ...; return data; }`.
+    // v8 -> v9: two fixes.
+    // (1) `liftType` backfill for the three seeded lifts (Bench/Squat/
+    // Deadlift). The v4->v5 migration (long before Lift Type existed as a
+    // field anyone could deliberately choose) set `liftType: null`
+    // unconditionally on every pre-existing weight exercise as a safe
+    // default — which means an install that predates that migration has
+    // had `liftType: null` on these three ever since, with no way for the
+    // Strength Level insight to ever work for them even after turning the
+    // Settings toggle on, since it requires a matching liftType. Since
+    // "null" here overwhelmingly means "never touched," not "deliberately
+    // set to None," these three specific ids are backfilled to their
+    // obvious lift type. This is reversible in seconds from Manage ->
+    // Exercises (set Lift Type back to None) for the rare case where
+    // someone genuinely had opted out.
+    // (2) Food's per-macro settings move from `trackedMacros` (an on/off
+    // switch for whether the Log form even asked for that macro) to
+    // `macroGoals` (all four macros are now always loggable; this instead
+    // tracks whether a DAILY GOAL is set for a given macro, and what it
+    // is) — seeded fully off, matching how a water/tracker goal starts
+    // unset until deliberately given one. `trackedMacros` is left in place
+    // per the migration policy above rather than deleted; nothing reads it
+    // anymore.
+    8: (data) => {
+      const KNOWN_LIFT_IDS = { ex_bench: 'bench', ex_squat: 'squat', ex_deadlift: 'deadlift' };
+      data.exercises.forEach((ex) => {
+        if (ex.kind === 'weight' && ex.liftType == null && KNOWN_LIFT_IDS[ex.id]) ex.liftType = KNOWN_LIFT_IDS[ex.id];
+      });
+      if (!data.settings.macroGoals) {
+        data.settings.macroGoals = {
+          calories: { enabled: false, goal: null }, protein: { enabled: false, goal: null },
+          carbs: { enabled: false, goal: null }, fat: { enabled: false, goal: null },
+        };
+      }
+      return data;
+    },
+    // Next migration goes here, keyed `9: (data) => { ...; return data; }`.
   };
 
   /** Walks `data` forward through MIGRATIONS until it matches SCHEMA_VERSION. */
@@ -460,12 +495,14 @@
     // not something to spring on an existing install unasked.
     chartScale: 'last10', insightsWindowDays: 90,
     showWeightInsights: false, showStrengthLevel: false, showPaceLevel: false,
-    // Which macros the Food log asks for (see the "Food / nutrition"
-    // section below) — calories + protein on by default since those are
-    // the two most commonly tracked; carbs/fat opt-in. Managed from
-    // Manage -> Food, not here, but lives in settings alongside the other
-    // "what does this app show me" toggles.
-    trackedMacros: { calories: true, protein: true, carbs: false, fat: false },
+    // Every macro is always loggable (see the "Food / nutrition" section
+    // below) — this only controls whether a DAILY GOAL is set for a given
+    // macro, and what it is. All off by default, same as a water/tracker
+    // goal starting unset. Managed from Manage -> Food.
+    macroGoals: {
+      calories: { enabled: false, goal: null }, protein: { enabled: false, goal: null },
+      carbs: { enabled: false, goal: null }, fat: { enabled: false, goal: null },
+    },
   };
 
   // A brand-new install's starting Food state — always empty; there's no
@@ -1354,21 +1391,23 @@
      or `water`/`waterEntries`. One entry is one thing eaten, with up to
      four optional numbers (calories/protein/carbs/fat — any or all may be
      left blank, since not everyone knows every macro for everything they
-     eat) plus an optional note, on a date. Which of the four macros the
-     Log form even asks for is a per-install choice
-     (`state.settings.trackedMacros`, managed from Manage -> Food) — a
-     macro being off there only hides it from the ADD form; an entry that
-     already has a value for it (logged before it was turned off, or from
-     a backup taken on a different setting) is never touched and still
-     shows and edits fine. */
+     eat) plus an optional note, on a date. All four macros are ALWAYS
+     loggable — there's no visibility toggle. What IS a per-install choice
+     (`state.settings.macroGoals`, managed from Manage -> Nutrition -> Food)
+     is which macros have a daily GOAL set, mirroring how a water/tracker
+     goal is opt-in: a macro with no goal just totals for the day with no
+     progress comparison; one with a goal shows "1850 / 2600 kcal" style
+     progress the same way Water shows progress toward its daily goal. */
 
   const MACRO_KEYS = ['calories', 'protein', 'carbs', 'fat'];
   const MACRO_LABELS = { calories: 'Calories', protein: 'Protein', carbs: 'Carbs', fat: 'Fat' };
 
-  // Which macros the Log -> Food form currently asks for, in a fixed
-  // display order — calories first, then the three grams-based macros.
-  function trackedMacroKeys() {
-    return MACRO_KEYS.filter((k) => state.settings.trackedMacros[k]);
+  function macroGoalInfo(key) { return state.settings.macroGoals[key]; }
+
+  // Macros that currently have a daily goal turned on, in a fixed display
+  // order — calories first, then the three grams-based macros.
+  function macroGoalKeys() {
+    return MACRO_KEYS.filter((k) => macroGoalInfo(k).enabled && macroGoalInfo(k).goal != null);
   }
 
   function foodEntriesForDate(date) { return state.food.entries.filter((e) => e.date === date); }
@@ -2046,26 +2085,32 @@
     renderFoodDashboardSection();
   }
 
-  // A read-only "today so far" summary of whichever macros are tracked —
-  // Food doesn't get quick-tap logging buttons on the dashboard the way
-  // Water does (typed macro numbers don't reduce to one tap), but seeing
-  // today's running total without a trip to Log or History is still worth
-  // having front and center.
+  // A read-only "today so far" summary of all four macros — Food doesn't
+  // get quick-tap logging buttons on the dashboard the way Water does
+  // (typed macro numbers don't reduce to one tap), but seeing today's
+  // running total without a trip to Log or History is still worth having
+  // front and center. Every macro always shows a total; one with a daily
+  // goal enabled (Manage -> Nutrition -> Food) additionally shows "/ goal"
+  // underneath, the same way Water shows progress toward its daily goal.
   function renderFoodDashboardSection() {
-    const keys = trackedMacroKeys();
-    document.getElementById('foodSectionHead').hidden = keys.length === 0;
+    document.getElementById('foodSectionHead').hidden = false;
     const wrap = document.getElementById('foodDashboardWrap');
-    wrap.hidden = keys.length === 0;
-    if (!keys.length) { wrap.innerHTML = ''; return; }
+    wrap.hidden = false;
     const totals = foodTotalsForDate(todayISO());
     wrap.innerHTML = `
       <div class="card">
         <div class="food-totals-row">
-          ${keys.map((k) => `
-            <div class="food-total-item">
-              <div class="food-total-value">${fmtMacroValue(k, totals[k])}</div>
-              <div class="food-total-label">${MACRO_LABELS[k]}</div>
-            </div>`).join('')}
+          ${MACRO_KEYS.map((k) => {
+            const goalInfo = macroGoalInfo(k);
+            const goalLine = (goalInfo.enabled && goalInfo.goal != null)
+              ? `<div class="food-total-goal">/ ${fmtMacroValue(k, goalInfo.goal)}</div>` : '';
+            return `
+              <div class="food-total-item">
+                <div class="food-total-value">${fmtMacroValue(k, totals[k])}</div>
+                ${goalLine}
+                <div class="food-total-label">${MACRO_LABELS[k]}</div>
+              </div>`;
+          }).join('')}
         </div>
       </div>`;
   }
@@ -2092,21 +2137,23 @@
     select.innerHTML = html;
   }
 
-  // The Log tab covers three kinds of entry now — a workout set, a body
-  // measurement, water, or food — switched by a segmented control at the
-  // top rather than separate tabs, since they're all "add one thing" forms
-  // sharing the same "Recent entries" list below. A category is only
-  // offered once there's something to log for it: Measurement needs at
-  // least one tracker, Water needs at least one cup, Food needs at least
-  // one tracked macro — all ship pre-seeded/on, but stay hidden if the
-  // user deletes/turns off down to zero.
+  // The Log tab is grouped by domain — Workout, Measurements, Nutrition —
+  // switched by a segmented control at the top rather than separate tabs,
+  // since they're all "add one thing" forms sharing the same "Recent
+  // entries" list below. Nutrition itself covers two very different
+  // logging interactions (tap-a-cup water, typed-number food), so it gets
+  // its own nested segmented control (see availableNutritionSubs()/
+  // renderLogNutritionPanel()) rather than being split back into two
+  // top-level categories. Measurements is only offered once there's at
+  // least one tracker (it ships pre-seeded, but stays hidden if the user
+  // deletes down to zero); Nutrition is always offered since Food has no
+  // "delete down to zero" concept anymore.
   let logCategory = 'workout';
 
   function availableLogCategories() {
     const cats = [{ id: 'workout', label: 'Workout' }];
-    if (activeTrackers().length) cats.push({ id: 'measurement', label: 'Body' });
-    if (state.water.cups.length) cats.push({ id: 'water', label: 'Water' });
-    if (trackedMacroKeys().length) cats.push({ id: 'food', label: 'Food' });
+    if (activeTrackers().length) cats.push({ id: 'measurement', label: 'Measurements' });
+    cats.push({ id: 'nutrition', label: 'Nutrition' });
     return cats;
   }
 
@@ -2190,30 +2237,22 @@
     }));
   }
 
-  // One optional number input per macro currently turned on in Manage ->
-  // Food — never all four unconditionally, since the whole point of
-  // trackedMacros is letting someone who only cares about calories skip
-  // typing three fields they don't track.
+  // All four macros, always — there's no visibility toggle (see the "Food
+  // / nutrition" section for why); every field is independently optional
+  // at the point of logging regardless of whether it has a daily goal set.
   function renderLogFoodForm() {
     document.getElementById('logFoodDate').value = document.getElementById('logFoodDate').value || todayISO();
-    const keys = trackedMacroKeys();
     const wrap = document.getElementById('logFoodDynamicFields');
-    if (!keys.length) {
-      wrap.innerHTML = `<p class="muted-text">Turn on at least one macro in Manage → Food to start logging.</p>`;
-      return;
-    }
-    wrap.innerHTML = keys.map((k) => `
+    wrap.innerHTML = MACRO_KEYS.map((k) => `
       <label class="field"><span class="field-label">${MACRO_LABELS[k]}${k !== 'calories' ? ' (g)' : ''} <span class="muted-text">(optional)</span></span>
         <input type="number" step="any" min="0" id="logFood_${k}" placeholder="e.g. ${k === 'calories' ? '520' : '30'}" /></label>`).join('');
   }
 
   function handleLogFoodSubmit(ev) {
     ev.preventDefault();
-    const keys = trackedMacroKeys();
-    if (!keys.length) { toast('Turn on at least one macro in Manage → Food first.'); return; }
     const values = { calories: null, protein: null, carbs: null, fat: null };
     let any = false;
-    keys.forEach((k) => {
+    MACRO_KEYS.forEach((k) => {
       const el = document.getElementById(`logFood_${k}`);
       const raw = el ? parseFloat(el.value) : NaN;
       if (!Number.isNaN(raw) && raw >= 0) { values[k] = raw; any = true; }
@@ -2224,31 +2263,58 @@
     state.food.entries.push({ id: genId('food'), date, calories: values.calories, protein: values.protein, carbs: values.carbs, fat: values.fat, note: note || null });
     save();
     toast('Food logged');
-    keys.forEach((k) => { const el = document.getElementById(`logFood_${k}`); if (el) el.value = ''; });
+    MACRO_KEYS.forEach((k) => { const el = document.getElementById(`logFood_${k}`); if (el) el.value = ''; });
     document.getElementById('logFoodNote').value = '';
     renderRecentEntries();
     renderDashboard();
     renderHistory();
   }
 
-  // Redraws whichever of the four Log sub-forms is currently selected,
-  // plus the shared "Recent entries" list below it.
+  // Nutrition's own nested segmented control — Water and Food are too
+  // different an interaction (tap-a-cup vs. typed numbers) to share one
+  // form the way Workout/Measurements/Nutrition share the outer one. Water
+  // is only offered while at least one cup exists; Food is always offered.
+  let logNutritionSub = 'water';
+
+  function availableNutritionSubs() {
+    const subs = [];
+    if (state.water.cups.length) subs.push({ id: 'water', label: 'Water' });
+    subs.push({ id: 'food', label: 'Food' });
+    return subs;
+  }
+
+  function renderLogNutritionPanel() {
+    const subs = availableNutritionSubs();
+    if (!subs.some((s) => s.id === logNutritionSub)) logNutritionSub = subs[0].id;
+    const seg = document.getElementById('logNutritionSubSegmented');
+    seg.innerHTML = subs.map((s) => `<button type="button" data-nutrition-sub="${s.id}" role="radio">${s.label}</button>`).join('');
+    seg.querySelectorAll('button').forEach((b) => {
+      b.setAttribute('aria-checked', String(b.dataset.nutritionSub === logNutritionSub));
+      b.addEventListener('click', () => { logNutritionSub = b.dataset.nutritionSub; renderLogNutritionPanel(); renderRecentEntries(); });
+    });
+    document.getElementById('logWaterPanel').hidden = logNutritionSub !== 'water';
+    document.getElementById('logFoodForm').hidden = logNutritionSub !== 'food';
+    if (logNutritionSub === 'water') renderLogWaterPanel();
+    if (logNutritionSub === 'food') renderLogFoodForm();
+  }
+
+  // Redraws whichever Log sub-form is currently selected, plus the shared
+  // "Recent entries" list below it.
   function renderLogView() {
     renderLogCategorySegmented();
     document.getElementById('logForm').hidden = logCategory !== 'workout';
     document.getElementById('logMeasurementForm').hidden = logCategory !== 'measurement';
-    document.getElementById('logWaterPanel').hidden = logCategory !== 'water';
-    document.getElementById('logFoodForm').hidden = logCategory !== 'food';
+    document.getElementById('logNutritionPanel').hidden = logCategory !== 'nutrition';
     if (logCategory === 'workout') renderLogForm();
     if (logCategory === 'measurement') renderLogMeasurementForm();
-    if (logCategory === 'water') renderLogWaterPanel();
-    if (logCategory === 'food') renderLogFoodForm();
+    if (logCategory === 'nutrition') renderLogNutritionPanel();
     renderRecentEntries();
   }
 
-  // "Recent entries" always reflects whichever Log category is active,
-  // rather than always showing workouts — otherwise it would look broken
-  // while logging water, a measurement, or food.
+  // "Recent entries" always reflects whichever Log category (and, for
+  // Nutrition, sub-category) is active, rather than always showing
+  // workouts — otherwise it would look broken while logging water, a
+  // measurement, or food.
   function renderRecentEntries() {
     const wrap = document.getElementById('recentEntries');
     if (logCategory === 'measurement') {
@@ -2257,13 +2323,13 @@
       wireMeasurementRowClicks(wrap);
       return;
     }
-    if (logCategory === 'water') {
+    if (logCategory === 'nutrition' && logNutritionSub === 'water') {
       const recent = state.waterEntries.slice().sort((a, b) => (b.date + b.id).localeCompare(a.date + a.id)).slice(0, 8);
       wrap.innerHTML = recent.length ? recent.map((e) => waterEntryRowHtml(e)).join('') : `<p class="muted-text">Nothing logged yet.</p>`;
       wireWaterEntryRowClicks(wrap);
       return;
     }
-    if (logCategory === 'food') {
+    if (logCategory === 'nutrition' && logNutritionSub === 'food') {
       const recent = state.food.entries.slice().sort((a, b) => (b.date + b.id).localeCompare(a.date + a.id)).slice(0, 8);
       wrap.innerHTML = recent.length ? recent.map((e) => foodEntryRowHtml(e)).join('') : `<p class="muted-text">Nothing logged yet.</p>`;
       wireFoodEntryRowClicks(wrap);
@@ -2377,12 +2443,10 @@
     });
   }
 
-  // Edit modal always shows all four macro fields regardless of the
-  // current trackedMacros setting — an entry can carry a value for a macro
-  // that's since been turned off (logged before it was turned off, or
-  // imported from a backup with different settings), and this is the one
-  // place that value stays visible and editable rather than silently
-  // hidden.
+  // Edit modal always shows all four macro fields — every macro is always
+  // loggable regardless of which ones currently have a daily goal set (see
+  // the "Food / nutrition" section), so there's nothing to conditionally
+  // hide here in the first place.
   function openFoodEntryModal(entryId) {
     const e = state.food.entries.find((x) => x.id === entryId);
     if (!e) return;
@@ -2559,12 +2623,20 @@
   }
 
   let historyCategory = 'workout';
+  // Nutrition's nested sub-choice within History, mirroring Log's.
+  let historyNutritionSub = 'water';
 
   function renderHistoryCategorySegmented() {
     document.querySelectorAll('#historyCategorySegmented button').forEach((b) => {
       b.setAttribute('aria-checked', String(b.dataset.historyCat === historyCategory));
     });
     document.getElementById('historyFilterField').hidden = historyCategory !== 'workout';
+    document.getElementById('historyNutritionSubField').hidden = historyCategory !== 'nutrition';
+    if (historyCategory === 'nutrition') {
+      document.querySelectorAll('#historyNutritionSubSegmented button').forEach((b) => {
+        b.setAttribute('aria-checked', String(b.dataset.nutritionSub === historyNutritionSub));
+      });
+    }
   }
 
   function renderHistory() {
@@ -2579,14 +2651,14 @@
       wireMeasurementRowClicks(wrap);
       return;
     }
-    if (historyCategory === 'water') {
+    if (historyCategory === 'nutrition' && historyNutritionSub === 'water') {
       const list = state.waterEntries.slice().sort((a, b) => (b.date + b.id).localeCompare(a.date + a.id));
       document.getElementById('historyEmpty').hidden = list.length > 0;
       wrap.innerHTML = list.map((e) => waterEntryRowHtml(e)).join('');
       wireWaterEntryRowClicks(wrap);
       return;
     }
-    if (historyCategory === 'food') {
+    if (historyCategory === 'nutrition' && historyNutritionSub === 'food') {
       // Grouped by date with each day's totals as a header, rather than one
       // flat list — "total everything by day" is the whole point of the
       // feature, so History is where those totals actually live, not just
@@ -3399,31 +3471,46 @@
   }
 
   /* ============================== Manage ==============================
-     One tab with three sub-panels, switched by manageCategorySegmented:
-     Exercises (the lift/reps/cardio definitions, previously listed in
-     Settings), Body (the metric trackers from the section above), and
-     Water (daily goal + cup sizes). All configuration lives here now;
-     Settings (reached from the header) is app-wide preferences only. */
+     One tab with three top-level sub-panels, switched by
+     manageCategorySegmented: Exercises (the lift/reps/cardio definitions,
+     previously listed in Settings), Measurements (the metric trackers from
+     the section above), and Nutrition (Water's daily goal + cup sizes, and
+     Food's per-macro daily-goal toggles), which itself nests a second
+     Water/Food segmented control mirroring Log and History. All
+     configuration lives here now; Settings (reached from the header) is
+     app-wide preferences only. */
 
   let manageCategory = 'exercises';
+  // Nutrition's nested sub-choice within Manage, mirroring Log/History's.
+  let manageNutritionSub = 'water';
 
   function setManageCategory(cat) {
     manageCategory = cat;
     document.querySelectorAll('#manageCategorySegmented button').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.manageCat === cat)));
     document.getElementById('manageExercisesPanel').hidden = cat !== 'exercises';
     document.getElementById('manageMeasurementsPanel').hidden = cat !== 'measurements';
-    document.getElementById('manageWaterPanel').hidden = cat !== 'water';
-    document.getElementById('manageFoodPanel').hidden = cat !== 'food';
+    document.getElementById('manageNutritionPanel').hidden = cat !== 'nutrition';
   }
 
-  // Food's one piece of configuration: which macros the Log -> Food form
-  // asks for. Turning one off only hides it from the ADD form going
-  // forward — see the "Food / nutrition" section for why existing entries
-  // with a value for it are never touched.
+  function setManageNutritionSub(sub) {
+    manageNutritionSub = sub;
+    document.querySelectorAll('#manageNutritionSubSegmented button').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.nutritionSub === sub)));
+    document.getElementById('manageWaterPanel').hidden = sub !== 'water';
+    document.getElementById('manageFoodPanel').hidden = sub !== 'food';
+  }
+
+  // Food's one piece of configuration: whether each macro has a daily
+  // goal, and what it is — every macro is always loggable regardless (see
+  // the "Food / nutrition" section). Mirrors Water's own goal input right
+  // next to it under the same Nutrition category.
   function renderFoodManagePanel() {
-    const tm = state.settings.trackedMacros;
-    [['trackCaloriesSegmented', 'calories'], ['trackProteinSegmented', 'protein'], ['trackCarbsSegmented', 'carbs'], ['trackFatSegmented', 'fat']].forEach(([id, key]) => {
-      document.querySelectorAll(`#${id} button`).forEach((b) => b.setAttribute('aria-checked', String((b.dataset.boolChoice === 'on') === tm[key])));
+    MACRO_KEYS.forEach((k) => {
+      const info = macroGoalInfo(k);
+      document.querySelectorAll(`#macroGoalToggle_${k} button`).forEach((b) => b.setAttribute('aria-checked', String((b.dataset.boolChoice === 'on') === info.enabled)));
+      const field = document.getElementById(`macroGoalField_${k}`);
+      if (field) field.hidden = !info.enabled;
+      const input = document.getElementById(`macroGoalInput_${k}`);
+      if (input && document.activeElement !== input) input.value = info.goal != null ? info.goal : '';
     });
   }
 
@@ -3497,6 +3584,7 @@
 
   function renderManage() {
     setManageCategory(manageCategory);
+    setManageNutritionSub(manageNutritionSub);
     renderExerciseManageList();
     renderTrackerManageList();
     renderWaterManagePanel();
@@ -4105,6 +4193,11 @@
       historyCategory = btn.dataset.historyCat;
       renderHistory();
     });
+    document.getElementById('historyNutritionSubSegmented').addEventListener('click', (ev) => {
+      const btn = ev.target.closest('button'); if (!btn) return;
+      historyNutritionSub = btn.dataset.nutritionSub;
+      renderHistory();
+    });
     document.getElementById('calPrevBtn').addEventListener('click', () => {
       calendarMonth.setMonth(calendarMonth.getMonth() - 1);
       renderHistoryCalendar();
@@ -4122,13 +4215,24 @@
     document.querySelectorAll('[data-action="add-tracker"]').forEach((btn) => btn.addEventListener('click', () => openTrackerForm(null)));
     document.querySelectorAll('[data-action="add-cup"]').forEach((btn) => btn.addEventListener('click', () => openCupForm(null)));
 
-    [['trackCaloriesSegmented', 'calories'], ['trackProteinSegmented', 'protein'], ['trackCarbsSegmented', 'carbs'], ['trackFatSegmented', 'fat']].forEach(([id, key]) => {
-      document.getElementById(id).addEventListener('click', (ev) => {
+    document.getElementById('manageNutritionSubSegmented').addEventListener('click', (ev) => {
+      const btn = ev.target.closest('button'); if (!btn) return;
+      setManageNutritionSub(btn.dataset.nutritionSub);
+    });
+
+    MACRO_KEYS.forEach((key) => {
+      document.getElementById(`macroGoalToggle_${key}`).addEventListener('click', (ev) => {
         const btn = ev.target.closest('button'); if (!btn) return;
-        state.settings.trackedMacros[key] = btn.dataset.boolChoice === 'on';
+        macroGoalInfo(key).enabled = btn.dataset.boolChoice === 'on';
         save();
         renderFoodManagePanel();
-        renderLogView();
+        renderDashboard();
+      });
+      document.getElementById(`macroGoalInput_${key}`).addEventListener('change', (ev) => {
+        const raw = parseFloat(ev.target.value);
+        macroGoalInfo(key).goal = (!Number.isNaN(raw) && raw > 0) ? raw : null;
+        save();
+        renderDashboard();
       });
     });
     document.getElementById('saveWaterGoalBtn').addEventListener('click', () => {
