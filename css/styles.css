@@ -1,18 +1,3 @@
-/* ============================================================================
-   FIT LOG — styles.css
-
-   Every color, corner radius, and shadow used anywhere in the app is declared
-   exactly once, below, as a CSS custom property. Every rule elsewhere in this
-   file references one of these names rather than a literal value, and
-   neither index.html nor app.js hardcodes a color at all — visual design is
-   fully centralized here by construction, not by convention.
-
-   The ":root { ... }" block immediately below holds the light theme's
-   values. The "@media (prefers-color-scheme: dark)" and
-   ":root[data-theme='dark']" blocks that follow override the same set of
-   names for dark mode; the two are kept in sync deliberately, since a token
-   changed in one and not the other would only be correct in a single theme.
-   ============================================================================ */
 :root {
   color-scheme: light;
   --page:            #f9f9f7;   /* the page background behind every card */
@@ -157,6 +142,7 @@ button { font-family: inherit; }
 
 /* ============ Main / views ============ */
 #main { flex: 1; padding: 4px 20px 24px; }
+#app.no-topbar #main { padding-top: calc(16px + env(safe-area-inset-top)); }
 .view { display: flex; flex-direction: column; gap: 16px; }
 
 .section-head {
