@@ -190,7 +190,7 @@
      import path runs the exact same migrations.
      ========================================================================== */
 
-  const SCHEMA_VERSION = 9;
+  const SCHEMA_VERSION = 10;
 
   // Known "daily" exercise ids from before the Goal/Daily/Other split
   // existed (schema v1). Used only by the v1->v2 migration below.
@@ -420,7 +420,24 @@
       }
       return data;
     },
-    // Next migration goes here, keyed `9: (data) => { ...; return data; }`.
+    // v9 -> v10: purely additive — three new optional food fields (sugar,
+    // sodium, caffeine) alongside the original four macros, added the same
+    // way the four macros work rather than as a separate feature (see the
+    // "Food / nutrition" section for the reasoning). Every existing food
+    // entry already omits fields it has no value for (they're only ever
+    // set when logged), so no entry needs touching — a food entry from
+    // before this migration simply has no sugar/sodium/caffeine value yet,
+    // same as it would if those fields just hadn't been logged. The only
+    // real backfill needed is `settings.macroGoals`, which — like every
+    // other settings object here — only had keys for the fields that
+    // existed when it was created.
+    9: (data) => {
+      ['sugar', 'sodium', 'caffeine'].forEach((k) => {
+        if (!data.settings.macroGoals[k]) data.settings.macroGoals[k] = { enabled: false, goal: null };
+      });
+      return data;
+    },
+    // Next migration goes here, keyed `10: (data) => { ...; return data; }`.
   };
 
   /** Walks `data` forward through MIGRATIONS until it matches SCHEMA_VERSION. */
@@ -502,6 +519,7 @@
     macroGoals: {
       calories: { enabled: false, goal: null }, protein: { enabled: false, goal: null },
       carbs: { enabled: false, goal: null }, fat: { enabled: false, goal: null },
+      sugar: { enabled: false, goal: null }, sodium: { enabled: false, goal: null }, caffeine: { enabled: false, goal: null },
     },
   };
 
@@ -1388,33 +1406,51 @@
      A fourth, deliberately separate top-level data area (`state.food`) —
      same rationale as Water above: this is additive, and specifically
      built to never touch `exercises`/`entries`, `trackers`/`measurements`,
-     or `water`/`waterEntries`. One entry is one thing eaten, with up to
-     four optional numbers (calories/protein/carbs/fat — any or all may be
-     left blank, since not everyone knows every macro for everything they
-     eat) plus an optional note, on a date. All four macros are ALWAYS
-     loggable — there's no visibility toggle. What IS a per-install choice
+     or `water`/`waterEntries`. One entry is one thing eaten OR drunk, with
+     up to seven optional numbers (any or all may be left blank, since not
+     everyone knows every value for everything they consume) plus an
+     optional note, on a date. Every field in MACRO_KEYS is ALWAYS loggable
+     — there's no visibility toggle. What IS a per-install choice
      (`state.settings.macroGoals`, managed from Manage -> Nutrition -> Food)
-     is which macros have a daily GOAL set, mirroring how a water/tracker
-     goal is opt-in: a macro with no goal just totals for the day with no
+     is which fields have a daily GOAL set, mirroring how a water/tracker
+     goal is opt-in: a field with no goal just totals for the day with no
      progress comparison; one with a goal shows "1850 / 2600 kcal" style
-     progress the same way Water shows progress toward its daily goal. */
+     progress the same way Water shows progress toward its daily goal.
 
-  const MACRO_KEYS = ['calories', 'protein', 'carbs', 'fat'];
-  const MACRO_LABELS = { calories: 'Calories', protein: 'Protein', carbs: 'Carbs', fat: 'Fat' };
+     Sodium, sugar, and caffeine were added the same way as the original
+     four macros — new keys in this same list, nothing structurally new —
+     rather than as a separate "Drinks" feature. A drink is just a food
+     entry with different numbers filled in (a latte has both calories AND
+     caffeine; a black coffee has caffeine but no calories), so splitting
+     "food" and "drinks" into two features would force every drink with
+     calories into an awkward choice between the two, for no real benefit:
+     every mainstream nutrition tracker treats caffeine as one more optional
+     number on the same entry, not a separate log. */
+
+  const MACRO_KEYS = ['calories', 'protein', 'carbs', 'fat', 'sugar', 'sodium', 'caffeine'];
+  const MACRO_LABELS = { calories: 'Calories', protein: 'Protein', carbs: 'Carbs', fat: 'Fat', sugar: 'Sugar', sodium: 'Sodium', caffeine: 'Caffeine' };
+  // The unit each field is logged/displayed in — '' for calories (a bare
+  // count, no suffix), grams for the macros and sugar, milligrams for
+  // sodium and caffeine. Single source of truth for every place that needs
+  // to print or label a value (fmtMacroValue, the Log form, Manage's goal
+  // inputs).
+  const MACRO_UNITS = { calories: '', protein: 'g', carbs: 'g', fat: 'g', sugar: 'g', sodium: 'mg', caffeine: 'mg' };
+  // Realistic example values shown as input placeholders, roughly what a
+  // single typical serving/meal looks like for that field.
+  const MACRO_PLACEHOLDERS = { calories: '520', protein: '30', carbs: '30', fat: '15', sugar: '10', sodium: '400', caffeine: '95' };
 
   function macroGoalInfo(key) { return state.settings.macroGoals[key]; }
 
-  // Macros that currently have a daily goal turned on, in a fixed display
-  // order — calories first, then the three grams-based macros.
+  // Fields that currently have a daily goal turned on, in MACRO_KEYS order.
   function macroGoalKeys() {
     return MACRO_KEYS.filter((k) => macroGoalInfo(k).enabled && macroGoalInfo(k).goal != null);
   }
 
   function foodEntriesForDate(date) { return state.food.entries.filter((e) => e.date === date); }
 
-  // One day's totals, per macro — null (not 0) for a macro nothing was
-  // logged for that day, so the dashboard/history can show "—" instead of
-  // a misleading zero.
+  // One day's totals, per field — null (not 0) for one nothing was logged
+  // for that day, so the dashboard/history can show "—" instead of a
+  // misleading zero.
   function foodTotalsForDate(date) {
     const dayEntries = foodEntriesForDate(date);
     const totals = {};
@@ -1427,7 +1463,7 @@
 
   function fmtMacroValue(key, v) {
     if (v == null) return '—';
-    return key === 'calories' ? `${Math.round(v)}` : `${Math.round(v)}g`;
+    return `${Math.round(v)}${MACRO_UNITS[key] || ''}`;
   }
 
   // A short "520 cal, 40g protein" style summary for one entry or one
@@ -1636,6 +1672,18 @@
 
   /* ============================== Dynamic set fields (shared by Log tab + edit modal) ============================== */
 
+  // Column labels (Weight/Reps/RPE, or Reps/Added wt/RPE) only ever render
+  // visibly above the FIRST set row in the list — repeating "Weight (lb)" /
+  // "Reps" / "RPE" above every single set in a multi-set entry added nothing
+  // (the columns never change row to row) and pushed the actual inputs
+  // further down the longer the list got. Every row still carries the same
+  // markup regardless of its position (see the CSS rule for
+  // `.set-row:not(:first-child) .field-label`, which visually hides it via
+  // the standard clip-based sr-only technique rather than a JS-computed
+  // per-row class) so a screen reader still hears "Weight, Reps, RPE" for
+  // each row, and removing/reordering rows never leaves a stale hidden
+  // label behind the way baking the decision into a fixed index at creation
+  // time would have.
   function setRowHtml(kind, idx, set) {
     set = set || {};
     if (kind === 'weight') {
@@ -1859,20 +1907,67 @@
     return scaled.map((item) => ({ date: item.date, value: valueFn(item) })).filter((p) => p.value != null);
   }
 
-  // A muted one-line readout for an optional insight calculator — either
-  // the result, or (when it needs a Profile fact that isn't set yet) a
-  // short prompt telling you exactly what to add and where.
-  function strengthLevelLineHtml(info) {
-    if (!info) return '';
-    if (info.needsBodyWeight) return `<div class="insight-line muted-text">Log your body weight to see your strength level.</div>`;
-    if (info.needsSex) return `<div class="insight-line muted-text">Set your sex in Settings → Profile to see your strength level.</div>`;
-    return `<div class="insight-line">Est. 1RM ${fmtWeight(info.oneRepMax)} &middot; ${round(info.ratio, 2)}&times; bodyweight &middot; <strong>${info.tier}</strong></div>
-      <div class="insight-line muted-text">Heaviest logged: ${fmtWeight(info.heaviestLoad)}</div>`;
+  // A compact "which tier am I in" bar shared by the Strength level (lift
+  // bodyweight-multiple tiers) and Pace level (running pace tiers) detail
+  // sections below — same visual language, different units. `abbrevLabels`
+  // are short enough (4-5 chars) to fit as their own segment in a 5-6
+  // column row; the full tier names plus their concrete unit thresholds go
+  // in the wrapped caption underneath instead, where there's room for them.
+  function tierBarHtml(abbrevLabels, currentAbbrev, captionText) {
+    return `
+      <div class="tier-bar">${abbrevLabels.map((l) => `<div class="tier-seg ${l === currentAbbrev ? 'is-current' : ''}">${l}</div>`).join('')}</div>
+      ${captionText ? `<div class="tier-bar-caption muted-text">${captionText}</div>` : ''}`;
   }
-  function paceLevelLineHtml(info) {
+
+  const STRENGTH_TIER_ABBREV = ['Untr', 'Beg', 'Nov', 'Int', 'Adv', 'Elite'];
+  const PACE_TIER_ABBREV = ['Elite', 'Adv', 'Good', 'Rec', 'Base'];
+
+  // The full "Strength level" detail block — moved here from the dashboard
+  // goal card (which now only shows a plain progress meter, no insight
+  // math) into the exercise detail modal instead, alongside a proper "where
+  // does this sit among the published tiers" bar rather than just the tier
+  // name in text. Every concrete number a curious person could want (the
+  // weight-equivalent of every tier at their current bodyweight, not just
+  // their own) is in the caption below the bar.
+  function strengthStandardsDetailHtml(ex) {
+    const info = strengthLevelInfo(ex);
     if (!info) return '';
-    if (info.needsSex) return `<div class="insight-line muted-text">Set your sex in Settings → Profile to see your pace level.</div>`;
-    return `<div class="insight-line">${fmtPace(info.pace)} &middot; <strong>${info.tier}</strong></div>`;
+    if (info.needsBodyWeight) return `<div class="card"><div class="section-head"><h2>Strength level</h2></div><p class="muted-text">Log your body weight to see your strength level.</p></div>`;
+    if (info.needsSex) return `<div class="card"><div class="section-head"><h2>Strength level</h2></div><p class="muted-text">Set your sex in Settings → Profile to see your strength level.</p></div>`;
+    const bw = currentBodyWeightLb();
+    const table = LIFT_STANDARDS[ex.liftType][state.profile.sex];
+    const currentAbbrev = STRENGTH_TIER_ABBREV[INSIGHT_TIER_LABELS.indexOf(info.tier)];
+    const caption = INSIGHT_TIER_LABELS.slice(1)
+      .map((label, i) => `${label} ${fmtWeight(Math.round((bw * table[i]) / 5) * 5)}+`)
+      .join(' &middot; ');
+    return `
+      <div class="card">
+        <div class="section-head"><h2>Strength level</h2></div>
+        <div class="insight-line">Est. 1RM ${fmtWeight(info.oneRepMax)} &middot; ${round(info.ratio, 2)}&times; bodyweight &middot; <strong>${info.tier}</strong></div>
+        <div class="insight-line muted-text">Heaviest logged: ${fmtWeight(info.heaviestLoad)}</div>
+        ${tierBarHtml(STRENGTH_TIER_ABBREV, currentAbbrev, caption)}
+        <p class="muted-text field-hint">Est. 1RM via the Epley formula from your best logged set, classified against published bodyweight-multiple strength standards for your sex. A general, published benchmark — not personalized or medical advice.</p>
+      </div>`;
+  }
+
+  // The "Pace level" counterpart, same layout, moved off the dashboard the
+  // same way and for the same reason.
+  function paceStandardsDetailHtml(ex) {
+    const info = paceLevelInfo(ex);
+    if (!info) return '';
+    if (info.needsSex) return `<div class="card"><div class="section-head"><h2>Pace level</h2></div><p class="muted-text">Set your sex in Settings → Profile to see your pace level.</p></div>`;
+    const ceilings = PACE_TIERS[state.profile.sex];
+    const currentAbbrev = PACE_TIER_ABBREV[PACE_TIER_LABELS.indexOf(info.tier)];
+    const caption = PACE_TIER_LABELS
+      .map((label, i) => i < ceilings.length ? `${label} &le; ${fmtPace(ceilings[i])}/mi` : label)
+      .join(' &middot; ');
+    return `
+      <div class="card">
+        <div class="section-head"><h2>Pace level</h2></div>
+        <div class="insight-line">${fmtPace(info.pace)} &middot; <strong>${info.tier}</strong></div>
+        ${tierBarHtml(PACE_TIER_ABBREV, currentAbbrev, caption)}
+        <p class="muted-text field-hint">Classified against general recreational pace-per-mile tiers for your sex. A general, published benchmark — not personalized or medical advice.</p>
+      </div>`;
   }
 
   function goalCardHtml(ex) {
@@ -1886,9 +1981,12 @@
       : progressBlockHtml(ex);
     const chartPoints = chartPointsFor(entries, (e) => entryValue(ex, e, trendMetric));
     const chartGoal = cardioMetrics ? (trendMetric ? cardioGoalFor(ex, trendMetric) : null) : ex.goal;
-    const insightHtml = ex.kind === 'weight' && state.settings.showStrengthLevel ? strengthLevelLineHtml(strengthLevelInfo(ex))
-      : ex.kind === 'cardio' && state.settings.showPaceLevel ? paceLevelLineHtml(paceLevelInfo(ex))
-      : '';
+    // Strength/Pace level — the estimated-1RM/tier math and the "which
+    // published tier am I in" breakdown — used to render right here on the
+    // dashboard card. It's now detail-on-demand instead: tap into the card
+    // (openExerciseDetail) for strengthStandardsDetailHtml()/
+    // paceStandardsDetailHtml(), keeping this card to a plain progress
+    // meter + chart regardless of whether either Insights toggle is on.
     return `
       <div class="card ex-card" data-exercise-id="${ex.id}">
         <div class="ex-card-top">
@@ -1897,7 +1995,6 @@
         </div>
         ${progressHtml}
         ${chartPoints.length >= 2 ? `<div class="ex-card-chart">${Charts.lineChart(chartPoints, { goal: chartGoal, width: 300, height: 96, formatValue: (v) => formatValueForExercise(ex, v, trendMetric) })}</div>` : ''}
-        ${insightHtml}
       </div>`;
   }
 
@@ -2150,6 +2247,19 @@
   // "delete down to zero" concept anymore.
   let logCategory = 'workout';
 
+  // The three domain-tab icons, shared by Log (built here), and duplicated
+  // byte-for-byte in index.html for History and Manage, whose outer
+  // category buttons are static markup rather than JS-rendered (History and
+  // Manage always offer all three domains; only Log's can disappear). Keep
+  // all three copies identical — same glyph for the same domain everywhere
+  // it appears is the whole point of giving these their own bigger,
+  // consistent design family instead of the old cramped inline pill.
+  const DOMAIN_TAB_ICONS = {
+    workout: '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="10" width="3" height="4" rx="1"/><rect x="5" y="8" width="2" height="8" rx="1"/><rect x="17" y="8" width="2" height="8" rx="1"/><rect x="20" y="10" width="3" height="4" rx="1"/><path d="M7 12h10"/></svg>',
+    measurement: '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17 17 3l4 4L7 21 3 17Z"/><path d="M7.5 16.5l1.5-1.5M11 13l1.5-1.5M14.5 9.5 16 8"/></svg>',
+    nutrition: '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2v4a2 2 0 0 0 4 0V2M8 2v20"/><path d="M16 2c-1.6 1-2.3 2.8-2.3 4.6 0 1.8.9 3 2.3 3.4V22"/></svg>',
+  };
+
   function availableLogCategories() {
     const cats = [{ id: 'workout', label: 'Workout' }];
     if (activeTrackers().length) cats.push({ id: 'measurement', label: 'Measurements' });
@@ -2161,7 +2271,11 @@
     const cats = availableLogCategories();
     if (!cats.some((c) => c.id === logCategory)) logCategory = cats[0].id;
     const seg = document.getElementById('logCategorySegmented');
-    seg.innerHTML = cats.map((c) => `<button type="button" data-log-cat="${c.id}" role="radio">${c.label}</button>`).join('');
+    seg.innerHTML = cats.map((c) => `
+      <button type="button" class="domain-tab" data-log-cat="${c.id}" role="radio">
+        ${DOMAIN_TAB_ICONS[c.id] || ''}
+        <span>${c.label}</span>
+      </button>`).join('');
     seg.querySelectorAll('button').forEach((b) => {
       b.setAttribute('aria-checked', String(b.dataset.logCat === logCategory));
       b.addEventListener('click', () => { logCategory = b.dataset.logCat; renderLogView(); });
@@ -2244,23 +2358,24 @@
     document.getElementById('logFoodDate').value = document.getElementById('logFoodDate').value || todayISO();
     const wrap = document.getElementById('logFoodDynamicFields');
     wrap.innerHTML = MACRO_KEYS.map((k) => `
-      <label class="field"><span class="field-label">${MACRO_LABELS[k]}${k !== 'calories' ? ' (g)' : ''} <span class="muted-text">(optional)</span></span>
-        <input type="number" step="any" min="0" id="logFood_${k}" placeholder="e.g. ${k === 'calories' ? '520' : '30'}" /></label>`).join('');
+      <label class="field"><span class="field-label">${MACRO_LABELS[k]}${MACRO_UNITS[k] ? ` (${MACRO_UNITS[k]})` : ''} <span class="muted-text">(optional)</span></span>
+        <input type="number" step="any" min="0" id="logFood_${k}" placeholder="e.g. ${MACRO_PLACEHOLDERS[k]}" /></label>`).join('');
   }
 
   function handleLogFoodSubmit(ev) {
     ev.preventDefault();
-    const values = { calories: null, protein: null, carbs: null, fat: null };
+    const values = {};
     let any = false;
     MACRO_KEYS.forEach((k) => {
       const el = document.getElementById(`logFood_${k}`);
       const raw = el ? parseFloat(el.value) : NaN;
-      if (!Number.isNaN(raw) && raw >= 0) { values[k] = raw; any = true; }
+      values[k] = (!Number.isNaN(raw) && raw >= 0) ? raw : null;
+      if (values[k] != null) any = true;
     });
     if (!any) { toast('Enter at least one value before saving.'); return; }
     const date = document.getElementById('logFoodDate').value || todayISO();
     const note = document.getElementById('logFoodNote').value.trim();
-    state.food.entries.push({ id: genId('food'), date, calories: values.calories, protein: values.protein, carbs: values.carbs, fat: values.fat, note: note || null });
+    state.food.entries.push({ id: genId('food'), date, ...values, note: note || null });
     save();
     toast('Food logged');
     MACRO_KEYS.forEach((k) => { const el = document.getElementById(`logFood_${k}`); if (el) el.value = ''; });
@@ -2454,14 +2569,9 @@
       <div class="modal-title-row"><h2>Edit food entry</h2><button class="modal-close" data-action="close-modal">✕</button></div>
       <div class="form-card">
         <label class="field"><span class="field-label">Date</span><input type="date" id="editFoodDate" value="${e.date}" /></label>
-        <label class="field"><span class="field-label">Calories <span class="muted-text">(optional)</span></span>
-          <input type="number" step="any" min="0" id="editFoodCalories" value="${e.calories != null ? e.calories : ''}" /></label>
-        <label class="field"><span class="field-label">Protein (g) <span class="muted-text">(optional)</span></span>
-          <input type="number" step="any" min="0" id="editFoodProtein" value="${e.protein != null ? e.protein : ''}" /></label>
-        <label class="field"><span class="field-label">Carbs (g) <span class="muted-text">(optional)</span></span>
-          <input type="number" step="any" min="0" id="editFoodCarbs" value="${e.carbs != null ? e.carbs : ''}" /></label>
-        <label class="field"><span class="field-label">Fat (g) <span class="muted-text">(optional)</span></span>
-          <input type="number" step="any" min="0" id="editFoodFat" value="${e.fat != null ? e.fat : ''}" /></label>
+        ${MACRO_KEYS.map((k) => `
+        <label class="field"><span class="field-label">${MACRO_LABELS[k]}${MACRO_UNITS[k] ? ` (${MACRO_UNITS[k]})` : ''} <span class="muted-text">(optional)</span></span>
+          <input type="number" step="any" min="0" id="editFood_${k}" value="${e[k] != null ? e[k] : ''}" /></label>`).join('')}
         <label class="field"><span class="field-label">Note</span><input type="text" id="editFoodNote" value="${e.note ? escapeHtml(e.note) : ''}" maxlength="200" /></label>
         <div class="btn-row"><button class="btn btn-primary btn-block" id="saveFoodEntryBtn">Save changes</button></div>
         <button class="btn btn-danger btn-block" id="deleteFoodEntryBtn">Delete entry</button>
@@ -2472,13 +2582,11 @@
       return (!Number.isNaN(raw) && raw >= 0) ? raw : null;
     };
     document.getElementById('saveFoodEntryBtn').addEventListener('click', () => {
-      const calories = readMacro('editFoodCalories');
-      const protein = readMacro('editFoodProtein');
-      const carbs = readMacro('editFoodCarbs');
-      const fat = readMacro('editFoodFat');
-      if (calories == null && protein == null && carbs == null && fat == null) { toast('Enter at least one value.'); return; }
+      const values = {};
+      MACRO_KEYS.forEach((k) => { values[k] = readMacro(`editFood_${k}`); });
+      if (MACRO_KEYS.every((k) => values[k] == null)) { toast('Enter at least one value.'); return; }
       e.date = document.getElementById('editFoodDate').value || e.date;
-      e.calories = calories; e.protein = protein; e.carbs = carbs; e.fat = fat;
+      Object.assign(e, values);
       e.note = document.getElementById('editFoodNote').value.trim() || null;
       save();
       closeModal();
@@ -2759,18 +2867,29 @@
     else if (ex.kind === 'reps') totalStat = `${entries.reduce((n, e) => n + (e.sets || []).reduce((m, s) => m + (s.reps || 0), 0), 0)} total reps`;
     else totalStat = `${fmtDistance(entries.reduce((n, e) => n + (e.distance || 0), 0))} total`;
 
+    const standardsHtml = ex.kind === 'weight' && state.settings.showStrengthLevel ? strengthStandardsDetailHtml(ex)
+      : ex.kind === 'cardio' && state.settings.showPaceLevel ? paceStandardsDetailHtml(ex)
+      : '';
+
     openModal(`
       <div class="modal-title-row"><h2>${escapeHtml(ex.name)}</h2><button class="modal-close" data-action="close-modal">✕</button></div>
       <div class="ex-card-badge badge-standalone">${kindBadge(ex)}</div>
       ${progressHtml}
 
-      ${suggestions.map((sugg) => `
-        <div class="card suggestion-card">
+      <!-- Concise "at a glance" headline only — the detail sentence and the
+           method note (and the well-researched general explanation) now
+           live one tap away in openSuggestionInfoModal(), rather than
+           always being visible here. A suggestion with nothing further to
+           say (e.g. "Log a session to get a suggestion") isn't made
+           tappable at all — see the wiring below. -->
+      ${suggestions.map((sugg, i) => `
+        <div class="card suggestion-card" data-sugg-idx="${i}">
           <div class="suggestion-label">Next session${sugg.metric ? ` · ${sugg.metric === 'pace' ? 'Pace' : 'Distance'}` : ''}</div>
           <div class="suggestion-headline">${escapeHtml(sugg.headline)}</div>
-          ${sugg.detail ? `<div class="suggestion-detail">${escapeHtml(sugg.detail)}</div>` : ''}
-          ${sugg.method ? `<div class="suggestion-method">${SUGGESTION_METHOD_NOTE[sugg.method]} General heuristic, not personalized coaching — adjust for soreness, sleep, and stress.</div>` : ''}
+          ${sugg.detail || sugg.method ? `<div class="suggestion-tap-hint">Why? &rsaquo;</div>` : ''}
         </div>`).join('')}
+
+      ${standardsHtml}
 
       <div class="pr-grid">
         <div class="pr-tile"><div class="value">${entries.length}</div><div class="label">Sessions logged</div></div>
@@ -2811,6 +2930,11 @@
       });
     }
     wireEntryRowClicks(document.getElementById('exerciseEntryList'));
+    document.querySelectorAll('.suggestion-card[data-sugg-idx]').forEach((card) => {
+      const sugg = suggestions[Number(card.dataset.suggIdx)];
+      if (!sugg || (!sugg.detail && !sugg.method)) return; // nothing further to show for a bare placeholder suggestion
+      wireOpenable(card, () => openSuggestionInfoModal(exId, scale, activeMetric, sugg));
+    });
     document.getElementById('editExerciseBtn').addEventListener('click', () => openExerciseForm(ex.id));
     document.getElementById('archiveExerciseBtn').addEventListener('click', () => {
       ex.archived = !ex.archived;
@@ -2823,6 +2947,44 @@
 
   function openExerciseDetail(exId) {
     renderExerciseDetail(exId, state.settings.chartScale);
+  }
+
+  // The "Why?" tap target on a suggestion card — the specific detail/method
+  // note for THIS suggestion, followed by a general, always-the-same
+  // explanation of the progression logic behind every suggestion the app
+  // makes (see suggestWeightOrReps()/suggestCardioMetric() above). Keeping
+  // this as its own screen (rather than an inline expand) is what lets the
+  // card itself stay a one-line "at a glance" headline. "‹ Back" returns to
+  // the exercise detail rather than closing outright — this app's modal is
+  // a single sheet with no stack, so going back means re-rendering the
+  // previous screen from scratch, the same trick confirmDialog() etc. use.
+  function openSuggestionInfoModal(exId, scale, activeMetric, sugg) {
+    const ex = exerciseById(exId);
+    openModal(`
+      <button type="button" class="modal-back-link" data-action="back-to-exercise">&lsaquo; ${ex ? escapeHtml(ex.name) : 'Back'}</button>
+      <div class="modal-title-row"><h2>Next session</h2><button class="modal-close" data-action="close-modal">✕</button></div>
+
+      ${sugg.detail || sugg.method ? `
+        <div class="card suggestion-card">
+          <div class="suggestion-label">This suggestion${sugg.metric ? ` · ${sugg.metric === 'pace' ? 'Pace' : 'Distance'}` : ''}</div>
+          <div class="suggestion-headline">${escapeHtml(sugg.headline)}</div>
+          ${sugg.detail ? `<div class="suggestion-detail">${escapeHtml(sugg.detail)}</div>` : ''}
+          ${sugg.method ? `<div class="suggestion-method">${SUGGESTION_METHOD_NOTE[sugg.method]}</div>` : ''}
+        </div>` : ''}
+
+      <div class="section-head"><h2>How progression decisions work</h2></div>
+      <div class="info-block">
+        <p>Each suggestion comes from two signals in what you've logged: how hard your last top set or run felt (RPE, if you log it — 1 easy, 10 all-out) and how you trended at the same weight, reps, or pace from one session to the next.</p>
+        <h3>When to increase weight (or reps, or pace)</h3>
+        <p>An RPE of 6–6.5 or lower on your last top set means you likely had 3 or more reps left in the tank — the current load isn't challenging anymore, so a bigger jump is suggested. Around RPE 7, a smaller bump is reasonable instead. With no RPE logged, matching or beating your rep count at the same weight for two sessions in a row is also a reliable "ready to add load" signal — a simple form of double progression: build reps at a weight, then add load and let reps reset lower for the next cycle.</p>
+        <h3>When to repeat</h3>
+        <p>RPE 7.5–9 is a genuine, on-target working effort — the current load is doing its job. The suggestion is to hold there and squeeze out another rep or two before adding weight, rather than piling on load before you've actually consolidated at it.</p>
+        <h3>When to back off (and aim for more reps instead)</h3>
+        <p>An RPE of 9–10 — at or near failure — or reps/pace dropping two sessions in a row at the same load both point to fatigue outpacing recovery. The suggestion holds or trims the load slightly while nudging reps up: enough of a deload to protect the stimulus without digging a deeper hole.</p>
+        <p class="muted-text">These are general heuristics — RPE/RIR-based autoregulation plus simple session-to-session trends — not personalized coaching. They don't know about a rough night's sleep, an old injury, or how the bar actually felt today. Treat them as a sensible default and adjust for how you're actually feeling. Logging an RPE after your top set or run is what unlocks the sharper version of this.</p>
+      </div>
+    `);
+    document.querySelector('[data-action="back-to-exercise"]').addEventListener('click', () => renderExerciseDetail(exId, scale, activeMetric));
   }
 
   /* ============================== Add / edit exercise modal ============================== */
@@ -3503,13 +3665,57 @@
   // goal, and what it is — every macro is always loggable regardless (see
   // the "Food / nutrition" section). Mirrors Water's own goal input right
   // next to it under the same Nutrition category.
+  // The row markup is built once (guarded by wrap.dataset.built) rather
+  // than on every render, for two reasons: MACRO_KEYS can grow (it already
+  // has, from 4 to 7 fields) so this can't be hand-written static HTML the
+  // way Water's fixed cup list can be, and rebuilding via innerHTML on
+  // every single toggle click would blow away focus/in-progress typing in
+  // any OTHER field's goal-amount input at the same time. Click/change are
+  // wired once via delegation on the container instead of per-field
+  // getElementById calls, so this never throws no matter how many (or few)
+  // fields MACRO_KEYS lists.
   function renderFoodManagePanel() {
+    const wrap = document.getElementById('macroGoalRows');
+    if (!wrap.dataset.built) {
+      wrap.innerHTML = MACRO_KEYS.map((k) => `
+        <div class="setting-row">
+          <span>${MACRO_LABELS[k]}</span>
+          <div class="segmented" data-macro-goal-toggle="${k}" role="radiogroup" aria-label="${MACRO_LABELS[k]} goal">
+            <button type="button" data-bool-choice="off" role="radio">Off</button>
+            <button type="button" data-bool-choice="on" role="radio">On</button>
+          </div>
+        </div>
+        <label class="field" data-macro-goal-field="${k}" hidden>
+          <span class="field-label">Daily goal (${MACRO_UNITS[k] || 'cal'})</span>
+          <input type="number" step="any" min="0" data-macro-goal-input="${k}" />
+        </label>`).join('');
+      wrap.dataset.built = '1';
+      wrap.addEventListener('click', (ev) => {
+        const btn = ev.target.closest('[data-bool-choice]');
+        const toggle = btn && btn.closest('[data-macro-goal-toggle]');
+        if (!toggle) return;
+        const k = toggle.dataset.macroGoalToggle;
+        macroGoalInfo(k).enabled = btn.dataset.boolChoice === 'on';
+        save();
+        renderFoodManagePanel();
+        renderDashboard();
+      });
+      wrap.addEventListener('change', (ev) => {
+        const input = ev.target.closest('[data-macro-goal-input]');
+        if (!input) return;
+        const k = input.dataset.macroGoalInput;
+        const raw = parseFloat(input.value);
+        macroGoalInfo(k).goal = (!Number.isNaN(raw) && raw > 0) ? raw : null;
+        save();
+        renderDashboard();
+      });
+    }
     MACRO_KEYS.forEach((k) => {
       const info = macroGoalInfo(k);
-      document.querySelectorAll(`#macroGoalToggle_${k} button`).forEach((b) => b.setAttribute('aria-checked', String((b.dataset.boolChoice === 'on') === info.enabled)));
-      const field = document.getElementById(`macroGoalField_${k}`);
+      wrap.querySelectorAll(`[data-macro-goal-toggle="${k}"] button`).forEach((b) => b.setAttribute('aria-checked', String((b.dataset.boolChoice === 'on') === info.enabled)));
+      const field = wrap.querySelector(`[data-macro-goal-field="${k}"]`);
       if (field) field.hidden = !info.enabled;
-      const input = document.getElementById(`macroGoalInput_${k}`);
+      const input = wrap.querySelector(`[data-macro-goal-input="${k}"]`);
       if (input && document.activeElement !== input) input.value = info.goal != null ? info.goal : '';
     });
   }
@@ -4220,21 +4426,11 @@
       setManageNutritionSub(btn.dataset.nutritionSub);
     });
 
-    MACRO_KEYS.forEach((key) => {
-      document.getElementById(`macroGoalToggle_${key}`).addEventListener('click', (ev) => {
-        const btn = ev.target.closest('button'); if (!btn) return;
-        macroGoalInfo(key).enabled = btn.dataset.boolChoice === 'on';
-        save();
-        renderFoodManagePanel();
-        renderDashboard();
-      });
-      document.getElementById(`macroGoalInput_${key}`).addEventListener('change', (ev) => {
-        const raw = parseFloat(ev.target.value);
-        macroGoalInfo(key).goal = (!Number.isNaN(raw) && raw > 0) ? raw : null;
-        save();
-        renderDashboard();
-      });
-    });
+    // Macro/goal toggle + amount rows are wired inside renderFoodManagePanel()
+    // itself (event delegation on #macroGoalRows, built once) rather than
+    // here, since that list of fields can grow (it already has — see
+    // MACRO_KEYS) and per-field getElementById wiring here would throw the
+    // moment a field's static markup stopped existing.
     document.getElementById('saveWaterGoalBtn').addEventListener('click', () => {
       const raw = parseFloat(document.getElementById('waterGoalInput').value);
       state.water.goalMl = (!Number.isNaN(raw) && raw > 0) ? Units.displayToMl(raw) : null;

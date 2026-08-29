@@ -86,8 +86,8 @@
     <section id="view-log" class="view" data-view="log" hidden>
       <div class="section-head">
         <h2>Log</h2>
-        <div class="segmented" id="logCategorySegmented" role="radiogroup" aria-label="What to log"></div>
       </div>
+      <div class="domain-tabs" id="logCategorySegmented" role="radiogroup" aria-label="What to log"></div>
 
       <form id="logForm" class="card form-card">
         <label class="field">
@@ -199,11 +199,25 @@
 
       <div class="section-head">
         <h2>All entries</h2>
-        <div class="segmented" id="historyCategorySegmented" role="radiogroup" aria-label="History category">
-          <button type="button" data-history-cat="workout" role="radio">Workouts</button>
-          <button type="button" data-history-cat="measurement" role="radio">Measurements</button>
-          <button type="button" data-history-cat="nutrition" role="radio">Nutrition</button>
-        </div>
+      </div>
+      <!-- Kept as static markup (unlike Log's, which is rebuilt in JS since
+           its categories can appear/disappear) since History always offers
+           all three — but the icon markup must stay byte-for-byte identical
+           to Log's DOMAIN_TAB_ICONS and Manage's copy below it, so the same
+           domain always shows the same glyph everywhere it appears. -->
+      <div class="domain-tabs" id="historyCategorySegmented" role="radiogroup" aria-label="History category">
+        <button type="button" class="domain-tab" data-history-cat="workout" role="radio">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="10" width="3" height="4" rx="1"/><rect x="5" y="8" width="2" height="8" rx="1"/><rect x="17" y="8" width="2" height="8" rx="1"/><rect x="20" y="10" width="3" height="4" rx="1"/><path d="M7 12h10"/></svg>
+          <span>Workout</span>
+        </button>
+        <button type="button" class="domain-tab" data-history-cat="measurement" role="radio">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17 17 3l4 4L7 21 3 17Z"/><path d="M7.5 16.5l1.5-1.5M11 13l1.5-1.5M14.5 9.5 16 8"/></svg>
+          <span>Measurements</span>
+        </button>
+        <button type="button" class="domain-tab" data-history-cat="nutrition" role="radio">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2v4a2 2 0 0 0 4 0V2M8 2v20"/><path d="M16 2c-1.6 1-2.3 2.8-2.3 4.6 0 1.8.9 3 2.3 3.4V22"/></svg>
+          <span>Nutrition</span>
+        </button>
       </div>
       <label class="field" id="historyFilterField">
         <span class="field-label">Filter by exercise</span>
@@ -226,11 +240,25 @@
     <section id="view-manage" class="view" data-view="manage" hidden>
       <div class="section-head">
         <h2>Manage</h2>
-        <div class="segmented" id="manageCategorySegmented" role="radiogroup" aria-label="Manage category">
-          <button type="button" data-manage-cat="exercises" role="radio">Exercises</button>
-          <button type="button" data-manage-cat="measurements" role="radio">Measurements</button>
-          <button type="button" data-manage-cat="nutrition" role="radio">Nutrition</button>
-        </div>
+      </div>
+      <!-- Same domain-tabs component as Log/History, same icons — see the
+           note above historyCategorySegmented. Underlying category id stays
+           "exercises" (nothing else keys off a rename), only the visible
+           label reads "Workout" now, matching the other two tabs; the panel
+           itself still opens with its own "Exercises" heading. -->
+      <div class="domain-tabs" id="manageCategorySegmented" role="radiogroup" aria-label="Manage category">
+        <button type="button" class="domain-tab" data-manage-cat="exercises" role="radio">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="10" width="3" height="4" rx="1"/><rect x="5" y="8" width="2" height="8" rx="1"/><rect x="17" y="8" width="2" height="8" rx="1"/><rect x="20" y="10" width="3" height="4" rx="1"/><path d="M7 12h10"/></svg>
+          <span>Workout</span>
+        </button>
+        <button type="button" class="domain-tab" data-manage-cat="measurements" role="radio">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17 17 3l4 4L7 21 3 17Z"/><path d="M7.5 16.5l1.5-1.5M11 13l1.5-1.5M14.5 9.5 16 8"/></svg>
+          <span>Measurements</span>
+        </button>
+        <button type="button" class="domain-tab" data-manage-cat="nutrition" role="radio">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2v4a2 2 0 0 0 4 0V2M8 2v20"/><path d="M16 2c-1.6 1-2.3 2.8-2.3 4.6 0 1.8.9 3 2.3 3.4V22"/></svg>
+          <span>Nutrition</span>
+        </button>
       </div>
 
       <div id="manageExercisesPanel">
@@ -273,57 +301,14 @@
         </div>
 
         <div id="manageFoodPanel" hidden>
-          <div class="section-head"><h2>Daily macro goals</h2></div>
-          <p class="muted-text">Calories, protein, carbs, and fat are always available to log from Log &rarr; Nutrition &rarr; Food. Turn on a daily goal for any of them here — one, several, or all four — to see progress against it on the dashboard.</p>
-          <div class="card">
-            <div class="setting-row">
-              <span>Calories</span>
-              <div class="segmented" id="macroGoalToggle_calories" role="radiogroup" aria-label="Calories goal">
-                <button type="button" data-bool-choice="off" role="radio">Off</button>
-                <button type="button" data-bool-choice="on" role="radio">On</button>
-              </div>
-            </div>
-            <label class="field" id="macroGoalField_calories" hidden>
-              <span class="field-label">Daily goal (cal)</span>
-              <input type="number" step="any" min="0" id="macroGoalInput_calories" />
-            </label>
-
-            <div class="setting-row">
-              <span>Protein</span>
-              <div class="segmented" id="macroGoalToggle_protein" role="radiogroup" aria-label="Protein goal">
-                <button type="button" data-bool-choice="off" role="radio">Off</button>
-                <button type="button" data-bool-choice="on" role="radio">On</button>
-              </div>
-            </div>
-            <label class="field" id="macroGoalField_protein" hidden>
-              <span class="field-label">Daily goal (g)</span>
-              <input type="number" step="any" min="0" id="macroGoalInput_protein" />
-            </label>
-
-            <div class="setting-row">
-              <span>Carbs</span>
-              <div class="segmented" id="macroGoalToggle_carbs" role="radiogroup" aria-label="Carbs goal">
-                <button type="button" data-bool-choice="off" role="radio">Off</button>
-                <button type="button" data-bool-choice="on" role="radio">On</button>
-              </div>
-            </div>
-            <label class="field" id="macroGoalField_carbs" hidden>
-              <span class="field-label">Daily goal (g)</span>
-              <input type="number" step="any" min="0" id="macroGoalInput_carbs" />
-            </label>
-
-            <div class="setting-row">
-              <span>Fat</span>
-              <div class="segmented" id="macroGoalToggle_fat" role="radiogroup" aria-label="Fat goal">
-                <button type="button" data-bool-choice="off" role="radio">Off</button>
-                <button type="button" data-bool-choice="on" role="radio">On</button>
-              </div>
-            </div>
-            <label class="field" id="macroGoalField_fat" hidden>
-              <span class="field-label">Daily goal (g)</span>
-              <input type="number" step="any" min="0" id="macroGoalInput_fat" />
-            </label>
-          </div>
+          <div class="section-head"><h2>Daily goals</h2></div>
+          <p class="muted-text">Every field below is always available to log from Log &rarr; Nutrition &rarr; Food. Turn on a daily goal for any of them here — one, several, or all — to see progress against it on the dashboard.</p>
+          <!-- Populated by renderFoodManagePanel() — one toggle+amount row
+               per MACRO_KEYS entry, rather than one hardcoded row per field
+               in markup, since that list has grown from 4 to 7 fields
+               (sugar/sodium/caffeine) and is more likely to grow again than
+               Water's fixed cup-size list is. -->
+          <div class="card" id="macroGoalRows"></div>
         </div>
       </div>
     </section>
@@ -454,7 +439,7 @@
 
       <div class="section-head"><h2>About</h2></div>
       <div class="card">
-        <p class="muted-text">Fit Log v1.4 &middot; installed as a home-screen app, all data stored on-device.</p>
+        <p class="muted-text">Fit Log v1.5 &middot; installed as a home-screen app, all data stored on-device.</p>
       </div>
     </section>
 

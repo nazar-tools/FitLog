@@ -175,6 +175,28 @@ button { font-family: inherit; }
 }
 .section-head h2 { font-size: 15px; color: var(--text-secondary); font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
 
+/* ============ Domain tabs (Workout / Measurements / Nutrition) ============
+   Log/History/Manage's top-level category switcher used to be a small
+   inline pill row squeezed next to the section title — on a narrow phone
+   three buttons plus "Measurements"/"Nutrition" text simply didn't fit,
+   and the last one ran off the edge of the screen instead of wrapping.
+   A fixed 3-column grid, on its own full-width row below the title, can't
+   overflow regardless of screen width, and the larger icon+label buttons
+   are both easier to hit and easier to tell apart at a glance than three
+   small text-only pills. Used identically (same 3 ids, same icons) across
+   all three tabs — see DOMAIN_TAB_ICONS in js/app.js. */
+.domain-tabs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.domain-tab {
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  padding: 10px 2px 9px; min-width: 0;
+  border: 1px solid var(--border); border-radius: var(--radius-md);
+  background: var(--surface-1); color: var(--text-secondary);
+  font-size: 11px; font-weight: 600; cursor: pointer;
+}
+.domain-tab .icon { width: 20px; height: 20px; }
+.domain-tab span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.domain-tab[aria-checked="true"] { background: var(--accent-track); border-color: var(--accent); color: var(--accent); }
+
 /* ============ Summary row ============ */
 .summary-row {
   display: grid;
@@ -309,11 +331,47 @@ button { font-family: inherit; }
 .daily-row-goal .muted-text { font-size: 12px; font-weight: 500; }
 
 /* ============ Suggestion card (progressive overload) ============ */
-.suggestion-card { background: var(--surface-2); border: none; }
+.suggestion-card { background: var(--surface-2); border: none; cursor: pointer; }
 .suggestion-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--accent); margin-bottom: 4px; }
 .suggestion-headline { font-size: 16px; font-weight: 600; }
 .suggestion-detail { font-size: 13px; color: var(--text-secondary); margin-top: 4px; }
 .suggestion-method { font-size: 11px; color: var(--muted); margin-top: 8px; line-height: 1.5; }
+/* The one-tap "at a glance headline only" affordance — the full detail
+   sentence, method note, and general explanation live in
+   openSuggestionInfoModal() instead of always being visible here. */
+.suggestion-tap-hint { font-size: 12px; font-weight: 600; color: var(--accent); margin-top: 6px; }
+
+/* ============ Tier bar (Strength level / Pace level detail) ============
+   A compact "which published tier am I in" bar — one equal-width segment
+   per tier, the current one highlighted — with a wrapped caption
+   underneath spelling out each tier's concrete threshold, since 5-6
+   columns is too narrow to fit full names and numbers in the bar itself. */
+.tier-bar { display: flex; gap: 3px; margin-top: 10px; }
+.tier-seg {
+  flex: 1; text-align: center; padding: 6px 2px; border-radius: var(--radius-sm);
+  background: var(--surface-2); color: var(--text-secondary);
+  font-size: 10px; font-weight: 700;
+}
+.tier-seg.is-current { background: var(--accent); color: #fff; }
+.tier-bar-caption { font-size: 11px; margin-top: 6px; line-height: 1.5; }
+
+/* A small breadcrumb-style link back to the previous modal screen — used
+   where a modal has drilled one level deeper (e.g. exercise detail ->
+   "Why?" on a suggestion) via re-rendering rather than a real nav stack
+   (see the comment above openSuggestionInfoModal in js/app.js). The ✕ close
+   button next to the title always still means "close the whole modal",
+   consistently with every other modal in the app — this is a second,
+   additional way back, not a replacement for it. */
+.modal-back-link {
+  display: inline-flex; align-items: center; gap: 2px;
+  background: none; border: none; padding: 0 0 10px; margin: 0;
+  color: var(--accent); font-size: 13px; font-weight: 600; cursor: pointer;
+}
+
+/* Plain-language reference content (e.g. "how progression decisions work")
+   inside a modal — ordinary prose with small subheadings, not a card. */
+.info-block h3 { font-size: 14px; margin: 14px 0 4px; }
+.info-block p { font-size: 13px; color: var(--text-secondary); line-height: 1.5; margin: 0 0 4px; }
 
 .manage-group-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin: 14px 0 2px; }
 .manage-group-label:first-child { margin-top: 0; }
@@ -325,11 +383,14 @@ button { font-family: inherit; }
 .standards-preview-row + .standards-preview-row { border-top: 1px solid var(--gridline); }
 .standards-preview-row.is-selected { background: var(--surface-2); font-weight: 700; }
 
-/* Today's food dashboard card — a row of macro totals, each with its
-   value stacked over its label, mirroring how ex-card-current/goal read. */
-.food-totals-row { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
-.food-total-item { text-align: center; flex: 1 1 0; }
-.food-total-value { font-size: 20px; font-weight: 600; }
+/* Today's food dashboard card — a grid of macro totals, each with its
+   value stacked over its label, mirroring how ex-card-current/goal read.
+   Grid (not flex-wrap) so a partial last row (e.g. 7 items -> 4 + 3)
+   still aligns to the same column widths instead of one orphan item
+   stretching to fill the whole row. */
+.food-totals-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px 4px; }
+.food-total-item { text-align: center; }
+.food-total-value { font-size: 18px; font-weight: 600; }
 .food-total-goal { font-size: 11px; color: var(--text-secondary); }
 .food-total-label { font-size: 12px; color: var(--text-secondary); margin-top: 2px; }
 
@@ -389,6 +450,16 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 1p
 .set-row.set-row-3 { grid-template-columns: 1fr 1fr 1fr auto; }
 .set-row.set-row-3[data-primary] { grid-template-columns: 1fr 1fr 1fr auto auto; }
 .set-row .field { gap: 4px; }
+/* Only the first set row in a multi-set entry shows its column labels
+   (Weight/Reps/RPE, etc.) — see the comment above setRowHtml() in
+   js/app.js. The label is still in the DOM for every row (screen readers
+   still get it), just visually collapsed via the standard clip-based
+   sr-only technique instead of `display:none`, which would remove it from
+   the accessibility tree entirely. */
+.sets-container .set-row:not(:first-child) .field-label {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+}
 .set-row-remove, .set-row-star {
   background: var(--surface-2);
   border: 1px solid var(--border);
