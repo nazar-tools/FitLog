@@ -1652,16 +1652,44 @@
     syncThemeColorMeta();
   }
 
-  // The OS status bar / address bar tint (the <meta name="theme-color"> tag)
-  // is read by the browser chrome, not by CSS, so it can't reference a CSS
-  // custom property directly. Rather than keeping a second hand-synced copy
-  // of a color, this reads the resolved --page value straight off the page
-  // — once the attributes above are set — so the status bar always matches
-  // the app's actual background instead of a fixed accent color.
+  // Keep these two in sync with --page's light/dark values in
+  // css/styles.css, and with the two <meta name="theme-color" media="...">
+  // tags in index.html below.
+  const PAGE_COLOR_LIGHT = '#f9f9f7';
+  const PAGE_COLOR_DARK = '#0d0d0d';
+
+  // The OS status bar / nav bar tint comes from <meta name="theme-color">,
+  // read by the browser/OS chrome rather than CSS, so it can't reference a
+  // CSS custom property directly — and, on Android especially, mutating a
+  // single such tag's `content` in place is not reliably repainted live by
+  // the system-UI compositor (this is what caused "switching light/dark on
+  // my phone doesn't update the top and bottom [bars]" — a device that
+  // happened to launch already in the OS's current theme never needed a
+  // live repaint, so it looked fine there). index.html instead ships TWO
+  // theme-color tags, each gated by its own `media="(prefers-color-scheme:
+  // ...)"`, so the OS/browser can pick the right one itself from a live
+  // media-query match with no JS involved — the standard, more reliable
+  // fix for this exact class of bug.
+  //
+  // Those two tags are only left alone here while Settings -> Appearance is
+  // "System" — the whole point of the dual-tag approach is to let the OS
+  // drive it without JS in that case. When Appearance explicitly overrides
+  // the system default (Light or Dark), only ONE tag can be "correct" and
+  // we can't know for certain which one this device's browser is actually
+  // honoring, so both are forced to the same resolved color; switching back
+  // to "System" restores each tag's own natural color so the declarative
+  // behavior resumes.
   function syncThemeColorMeta() {
+    const lightMeta = document.querySelector('meta[name="theme-color"][media*="light"]');
+    const darkMeta = document.querySelector('meta[name="theme-color"][media*="dark"]');
+    if (!lightMeta || !darkMeta) return;
+    if (state.settings.theme === 'system') {
+      lightMeta.setAttribute('content', PAGE_COLOR_LIGHT);
+      darkMeta.setAttribute('content', PAGE_COLOR_DARK);
+      return;
+    }
     const page = getComputedStyle(document.documentElement).getPropertyValue('--page').trim();
-    const meta = document.querySelector('meta[name="theme-color"]');
-    if (page && meta) meta.setAttribute('content', page);
+    if (page) { lightMeta.setAttribute('content', page); darkMeta.setAttribute('content', page); }
   }
 
   /* ============================== Toast ============================== */
@@ -1699,10 +1727,15 @@
     else if (!ev.shiftKey && document.activeElement === last) { ev.preventDefault(); first.focus(); }
   }
 
-  function openModal(html) {
+  // `tall: true` is for the handful of modals that are really full detail
+  // screens (exercise/tracker/food detail) rather than a quick action or
+  // form — see the `.is-detail-sheet` comment in styles.css for why a
+  // fixed height instead of the usual shrink-to-content matters there.
+  function openModal(html, { tall = false } = {}) {
     const sheet = modalSheet();
     sheet.style.transform = '';
     sheet.classList.remove('is-dragging');
+    sheet.classList.toggle('is-detail-sheet', tall);
     sheet.innerHTML = `<div class="modal-handle"></div>${html}`;
     // A dialog needs an accessible name; every modal here starts with an
     // <h2> title, so point at it rather than requiring each call site to
@@ -2532,7 +2565,7 @@
       <div class="btn-row">
         <button class="btn btn-secondary" id="adjustFoodGoalsBtn">Adjust goals</button>
       </div>
-    `);
+    `, { tall: true });
     document.getElementById('logFoodFromDetailBtn').addEventListener('click', logFoodFromDetail);
     document.getElementById('adjustFoodGoalsBtn').addEventListener('click', openFoodGoalsFromDetail);
   }
@@ -3299,7 +3332,7 @@
 
       <div class="section-head"><h2>All entries</h2></div>
       <div class="entry-list" id="exerciseEntryList">${entries.slice().reverse().map((e) => entryRowHtml(e)).join('') || '<p class="muted-text">No entries yet.</p>'}</div>
-    `);
+    `, { tall: true });
     document.querySelectorAll('#chartScaleSegmented button').forEach((btn) => {
       btn.setAttribute('aria-checked', String(btn.dataset.scale === scale));
       btn.addEventListener('click', () => renderExerciseDetail(exId, btn.dataset.scale, activeMetric));
@@ -3796,7 +3829,7 @@
 
       <div class="section-head"><h2>All entries</h2></div>
       <div class="entry-list" id="trackerEntryList">${history.slice().reverse().map((m) => measurementRowHtml(m)).join('') || '<p class="muted-text">No entries yet.</p>'}</div>
-    `);
+    `, { tall: true });
     document.querySelectorAll('#trkChartScaleSegmented button').forEach((btn) => {
       btn.setAttribute('aria-checked', String(btn.dataset.scale === scale));
       btn.addEventListener('click', () => renderTrackerDetail(trackerId, btn.dataset.scale));

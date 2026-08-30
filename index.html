@@ -3,13 +3,24 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<!-- theme-color tints the phone's browser chrome (status bar / address bar).
-     Its value is kept live by app.js (see syncThemeColorMeta), matching
-     --page in css/styles.css, so the status bar reads as part of the app's
-     background rather than a fixed accent stripe — light background, light
-     status bar; dark background, dark status bar; switches with the theme.
-     The value below is only the pre-JS fallback for the first paint. -->
-<meta name="theme-color" content="#f9f9f7" />
+<!-- theme-color tints the phone's browser chrome (status bar / nav bar).
+     Two tags, gated by `media`, rather than one tag app.js mutates in
+     place — Android's system-UI compositor doesn't reliably repaint the
+     status/nav bar from a JS-driven content change alone (this is what
+     caused "switching light->dark on my phone doesn't update the top and
+     bottom" — a device that launched already in dark mode picked the right
+     color at cold start and then never had to live-switch, which is why it
+     looked fine there). Two conditional tags let the OS/browser itself pick
+     the right one purely from its own live media-query evaluation, with no
+     JS involved and nothing to miss while backgrounded — the same pattern
+     recommended for this exact issue. app.js's syncThemeColorMeta() only
+     touches these when Settings -> Appearance is explicitly Light/Dark
+     (overriding the system default below), forcing both to match; on
+     "System" it leaves them alone so the browser drives it declaratively.
+     Keep these two colors in sync with --page's light/dark values in
+     css/styles.css. -->
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#f9f9f7" />
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0d0d0d" />
 <title>Fit Log</title>
 <link rel="manifest" href="manifest.json" />
 <link rel="icon" href="icons/icon-192.png" />
@@ -482,7 +493,7 @@
 
       <div class="section-head"><h2>About</h2></div>
       <div class="card">
-        <p class="muted-text">Fit Log v1.9 &middot; installed as a home-screen app, all data stored on-device.</p>
+        <p class="muted-text">Fit Log v1.10 &middot; installed as a home-screen app, all data stored on-device.</p>
       </div>
     </section>
 

@@ -763,6 +763,19 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 1p
   transition: transform 0.2s ease;
 }
 .modal-sheet.is-dragging { transition: none; }
+/* A plain `.modal-sheet` shrinks to fit its content (up to max-height above)
+   — right for a quick form or confirm prompt, but exercise/tracker/food
+   detail are full screens someone deliberately tapped into, and a sparsely-
+   logged one (a brand-new exercise, a tracker with one entry) has short
+   enough content to leave a large, dimmed gap of whatever's behind the
+   modal showing above it — reading as "too much margin on top" even though
+   nothing is actually mis-spaced; the sheet itself just never grew to fill
+   the screen. openModal(html, { tall: true }) adds this class for those
+   three modals so they consistently open near their max-height regardless
+   of how much they have to show — short content just leaves blank space at
+   the *bottom* of the sheet instead, which reads as a normal, settled
+   screen rather than a mostly-empty popup. */
+.modal-sheet.is-detail-sheet { min-height: 88vh; }
 .modal-handle {
   /* The visible bar stays a slim 36x4px; `background-clip: content-box`
      keeps color off the padding, which exists purely to give the drag
