@@ -1328,17 +1328,12 @@
   function bmiCategory(bmi) {
     return BMI_CATEGORIES.find((c) => bmi < c.max).label;
   }
-  // The CSS class (see .insight-badge/.gauge-seg in styles.css) matching a
-  // BMI category label — kept as an explicit map rather than derived from
-  // the label text so the two can drift in wording independently (e.g. the
-  // label says "Healthy weight" but the class is the more conventional
-  // "normal", matching how every published BMI chart names that zone).
+  // The CSS class (see .category-dot in styles.css) matching a BMI category
+  // label — kept as an explicit map rather than derived from the label text
+  // so the two can drift in wording independently (e.g. the label says
+  // "Healthy weight" but the class is the more conventional "normal",
+  // matching how every published BMI chart names that zone).
   const BMI_CATEGORY_CLASS = { 'Underweight': 'is-underweight', 'Healthy weight': 'is-normal', 'Overweight': 'is-overweight', 'Obese': 'is-obese' };
-  // Gauge boundaries: 15 and 40 are practical display floor/ceiling (real
-  // BMI values are clamped to this range for needle placement only — the
-  // number shown is always the real, unclamped value), matching the
-  // published category boundaries in between.
-  const BMI_GAUGE_MIN = 15, BMI_GAUGE_MAX = 40;
 
   // A short, humanized elapsed-time phrase ("12 days", "3 months", "1.4
   // years") for the weight-trend delta below — plain days under two weeks,
@@ -1556,8 +1551,7 @@
   // target per pound of bodyweight, both by goal — a moderate, commonly
   // published range (roughly a 1 lb/week pace for a cut or lean gain), with
   // protein set higher while cutting specifically to help protect muscle
-  // mass in a deficit. General published guidance, not personalized or
-  // medical advice — same disclaimer as BMI/strength/pace above.
+  // mass in a deficit — a moderate, commonly published range.
   const NUTRITION_GOAL_ADJUST = {
     lose:     { calorieDelta: -500, proteinPerLb: 1.0 },
     maintain: { calorieDelta: 0,    proteinPerLb: 0.8 },
@@ -2110,7 +2104,7 @@
         <div class="insight-line">Est. 1RM ${fmtWeight(info.oneRepMax)} &middot; ${round(info.ratio, 2)}&times; bodyweight &middot; <strong>${info.tier}</strong></div>
         <div class="insight-line muted-text">Heaviest logged: ${fmtWeight(info.heaviestLoad)}</div>
         ${tierBarHtml(STRENGTH_TIER_ABBREV, currentAbbrev, caption)}
-        <p class="muted-text field-hint">Est. 1RM via the Epley formula from your best logged set, classified against published bodyweight-multiple strength standards for your sex. A general, published benchmark — not personalized or medical advice.</p>
+        <p class="muted-text field-hint">Est. 1RM via the Epley formula, classified against published bodyweight-multiple strength standards for your sex.</p>
       </div>`;
   }
 
@@ -2130,18 +2124,19 @@
         <div class="section-head"><h2>Pace level</h2></div>
         <div class="insight-line">${fmtPace(info.pace)} &middot; <strong>${info.tier}</strong></div>
         ${tierBarHtml(PACE_TIER_ABBREV, currentAbbrev, caption)}
-        <p class="muted-text field-hint">Classified against general recreational pace-per-mile tiers for your sex. A general, published benchmark — not personalized or medical advice.</p>
+        <p class="muted-text field-hint">Classified against general pace-per-mile tiers for your sex.</p>
       </div>`;
   }
 
   // BMI's detail-on-demand card — the Weight tracker's counterpart to
   // strengthStandardsDetailHtml()/paceStandardsDetailHtml() above, opened by
   // tapping into the tracker detail modal rather than shown on the dashboard
-  // card (see the comment in trackerCardHtml()). A colored semicircular
-  // gauge (Charts.gaugeChart()) instead of the old plain text line, per the
-  // reference screenshots the user shared — needle position + zone colors
-  // make "where do I fall" legible at a glance instead of reading a number
-  // and a category name separately.
+  // card (see the comment in trackerCardHtml()). Same `.standards-preview`
+  // table component the bodyweight-standard goal picker uses (Manage ->
+  // Exercises), one row per category with a colored dot and its range,
+  // current one highlighted via `.is-selected` — rather than a bespoke
+  // gauge, so this reads as the same visual language as the rest of the
+  // app's "which tier/category am I in" displays instead of a one-off.
   function bmiDetailHtml() {
     if (!state.profile.heightCm) {
       return `<div class="card"><div class="section-head"><h2>BMI</h2></div><p class="muted-text">Set your height in Settings → Profile to see your BMI.</p></div>`;
@@ -2151,29 +2146,20 @@
       return `<div class="card"><div class="section-head"><h2>BMI</h2></div><p class="muted-text">Log your body weight to see your BMI.</p></div>`;
     }
     const { value, category } = insights.bmi;
-    const badgeClass = BMI_CATEGORY_CLASS[category] || 'is-normal';
+    const rows = BMI_CATEGORIES.map((c, i) => ({
+      label: c.label,
+      range: c.max === Infinity ? `${BMI_CATEGORIES[i - 1].max}+` : (i === 0 ? `Under ${c.max}` : `${BMI_CATEGORIES[i - 1].max}–${c.max}`),
+      className: BMI_CATEGORY_CLASS[c.label],
+      isCurrent: c.label === category,
+    }));
     return `
       <div class="card">
         <div class="section-head"><h2>BMI</h2></div>
-        <div class="gauge-wrap">${Charts.gaugeChart(value, {
-          min: BMI_GAUGE_MIN, max: BMI_GAUGE_MAX,
-          segments: [
-            { from: BMI_GAUGE_MIN, to: 18.5, className: 'is-underweight' },
-            { from: 18.5, to: 25, className: 'is-normal' },
-            { from: 25, to: 30, className: 'is-overweight' },
-            { from: 30, to: BMI_GAUGE_MAX, className: 'is-obese' },
-          ],
-          ticks: [BMI_GAUGE_MIN, 18.5, 25, 30, BMI_GAUGE_MAX],
-          formatValue: (v) => round(v, 1),
-        })}</div>
-        <div class="gauge-badge-row"><span class="insight-badge ${badgeClass}">${category}</span></div>
-        <div class="gauge-legend">
-          <span class="gauge-legend-item"><span class="gauge-legend-dot is-underweight"></span>Underweight</span>
-          <span class="gauge-legend-item"><span class="gauge-legend-dot is-normal"></span>Healthy</span>
-          <span class="gauge-legend-item"><span class="gauge-legend-dot is-overweight"></span>Overweight</span>
-          <span class="gauge-legend-item"><span class="gauge-legend-dot is-obese"></span>Obese</span>
+        <div class="insight-line"><strong>${value}</strong> &middot; ${category}</div>
+        <div class="standards-preview">
+          ${rows.map((r) => `<div class="standards-preview-row${r.isCurrent ? ' is-selected' : ''}"><span><span class="category-dot ${r.className}"></span>${r.label}</span><span>${r.range}</span></div>`).join('')}
         </div>
-        <p class="muted-text field-hint">BMI from your logged weight and Profile height. A general, published screening measure — not personalized or medical advice, and it doesn't account for muscle mass, body composition, age, or sex.</p>
+        <p class="muted-text field-hint">From your logged weight and height. Doesn't account for muscle mass or body composition.</p>
       </div>`;
   }
 
@@ -2198,7 +2184,7 @@
         <div class="insight-line">Avg ${round(insights.avgHours, 1)}h over last ${insights.nights} logged night${insights.nights === 1 ? '' : 's'} &middot; <strong>${insights.category}</strong></div>
         ${insights.avgQuality != null ? `<div class="insight-line muted-text">Avg quality ${fmtQuality(round(insights.avgQuality, 1))}</div>` : ''}
         ${tierBarHtml(SLEEP_HOURS_ABBREV, currentAbbrev, caption)}
-        <p class="muted-text field-hint">Against general adult sleep-duration guidance (e.g. CDC/NSF: ~7-9 hours). A general benchmark — not personalized or medical advice.</p>
+        <p class="muted-text field-hint">Against general adult sleep guidance (~7-9 hours).</p>
       </div>`;
   }
 
@@ -4469,7 +4455,7 @@
           <input type="number" step="any" min="0" id="setupWeightGoal" value="${escapeHtml(setupAnswers.weightGoalValue)}" /></label>
       </div>` : ''}
       ${setupBoolRowHtml('setupInsightsToggle', 'Insight calculators (BMI, strength level, pace level)', setupAnswers.insightsEnabled)}
-      <p class="muted-text">General published benchmarks, not personalized or medical advice — each can be turned off individually later in Settings → Insights.</p>`;
+      <p class="muted-text">General published benchmarks — each can be turned off individually later in Settings → Insights.</p>`;
     wireSetupBoolRow('setupWaterToggle', (v) => { captureSetupStep(); setupAnswers.waterEnabled = v; renderSetupStep4(); });
     wireSetupBoolRow('setupWeightGoalToggle', (v) => { captureSetupStep(); setupAnswers.weightGoalEnabled = v; renderSetupStep4(); });
     wireSetupBoolRow('setupInsightsToggle', (v) => { captureSetupStep(); setupAnswers.insightsEnabled = v; renderSetupStep4(); });
