@@ -739,7 +739,7 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 1p
   overflow-y: auto;
   background: var(--surface-1);
   border-radius: 20px 20px 0 0;
-  padding: 20px 20px calc(24px + env(safe-area-inset-bottom));
+  padding: 8px 20px calc(24px + env(safe-area-inset-bottom));
   box-shadow: 0 -4px 24px rgba(11,11,11,0.2);
   /* Every modal's content is one flat list of top-level blocks (title row,
      optional subtitle, cards, section-heads, charts, button rows, entry
@@ -779,20 +779,26 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 1p
 .modal-handle {
   /* The visible bar stays a slim 36x4px; `background-clip: content-box`
      keeps color off the padding, which exists purely to give the drag
-     gesture below a comfortable touch target well beyond that thin bar. */
+     gesture below a comfortable touch target somewhat beyond that thin bar
+     (kept modest — 6px top/bottom rather than the 12px this used to carry
+     — specifically because every extra pixel here is one more pixel
+     between the sheet's rounded top edge and the title/✕/Edit row people
+     actually look at first; see the `.modal-sheet` padding-top comment
+     above for the matching half of this same "the popup top is too big"
+     complaint). */
   width: 36px;
   height: 4px;
   background: var(--gridline);
   background-clip: content-box;
   border-radius: 999px;
-  /* Bottom margin is 0, not a positive gap of its own, because
-     `.modal-sheet`'s `gap: 16px` already supplies the space down to
-     whatever comes next (always `.modal-title-row`) — adding a margin here
-     too would stack on top of that gap instead of replacing it. The
-     negative top margin stays: it pulls the handle up to sit just under the
-     sheet's rounded top edge, offsetting the touch-target padding below. */
-  margin: -10px auto 0;
-  padding: 12px 28px;
+  margin: 0 auto -8px;
+  /* The negative bottom margin trims `.modal-sheet`'s standard 16px `gap`
+     down to 8px specifically for this one handle-to-title transition —
+     everywhere else in a modal keeps the full 16px rhythm (see the `gap`
+     comment on `.modal-sheet`), but a drag handle sitting right at the top
+     edge reads as much less "in the way" with a tighter gap below it than
+     a stack of two content cards does. */
+  padding: 6px 28px;
   touch-action: none;
   cursor: grab;
 }
