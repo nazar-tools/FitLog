@@ -1557,6 +1557,10 @@
     maintain: { calorieDelta: 0,    proteinPerLb: 0.8 },
     gain:     { calorieDelta: 300,  proteinPerLb: 0.9 },
   };
+  // Matches the button labels in #nutritionGoalSegmented (index.html) —
+  // kept as its own map (rather than derived) so the Food detail modal can
+  // name the active goal in a sentence without reaching into the DOM.
+  const NUTRITION_GOAL_LABELS = { lose: 'losing weight', maintain: 'maintaining', gain: 'gaining weight' };
   // Mifflin-St Jeor equation for basal metabolic rate, times an
   // activity-level multiplier for estimated maintenance calories (TDEE),
   // then the goal-based adjustment above. Needs height, age, and sex
@@ -1712,11 +1716,21 @@
     document.addEventListener('keydown', handleModalKeydown);
     // Land focus on the first real control past the ✕ (so a form's first
     // field is ready to type into), falling back to the ✕ itself, or the
-    // sheet, if that's all there is.
+    // sheet, if that's all there is. This runs before any call-site wiring
+    // (e.g. wireOpenable on a suggestion card) has added tabindex to
+    // anything, so on a read-heavy detail modal (exercise/tracker detail)
+    // "first control" in practice often isn't visually first at all — it's
+    // whatever plain <button> happens to appear earliest in the raw HTML,
+    // which on those modals is the chart's Last-10/All-time toggle, well
+    // below the title/progress/insight cards a person actually opened the
+    // modal to see. Focusing an off-screen element auto-scrolls it into
+    // view, so without the explicit reset below, the modal would silently
+    // open scrolled past its own top content on every single open.
     const focusables = focusableEls(sheet);
     const target = focusables.find((el) => el.dataset.action !== 'close-modal') || focusables[0];
     if (target) target.focus();
     else { sheet.tabIndex = -1; sheet.focus(); }
+    sheet.scrollTop = 0;
   }
   function closeModal() {
     modalRoot().hidden = true;
@@ -2077,16 +2091,15 @@
       ${captionText ? `<div class="tier-bar-caption muted-text">${captionText}</div>` : ''}`;
   }
 
-  const STRENGTH_TIER_ABBREV = ['Untr', 'Beg', 'Nov', 'Int', 'Adv', 'Elite'];
-  const PACE_TIER_ABBREV = ['Elite', 'Adv', 'Good', 'Rec', 'Base'];
-
   // The full "Strength level" detail block — moved here from the dashboard
   // goal card (which now only shows a plain progress meter, no insight
-  // math) into the exercise detail modal instead, alongside a proper "where
-  // does this sit among the published tiers" bar rather than just the tier
-  // name in text. Every concrete number a curious person could want (the
-  // weight-equivalent of every tier at their current bodyweight, not just
-  // their own) is in the caption below the bar.
+  // math) into the exercise detail modal instead. Renders as the same
+  // `.standards-preview` table used for BMI and the bodyweight-standard
+  // goal picker (Manage -> Exercises) rather than a bespoke tier bar, so
+  // "which tier am I in" reads the same way everywhere in the app — each
+  // row spelling out both the multiplier and the weight it works out to
+  // at the current bodyweight (e.g. "0.75x BW - 135 lb+"), current tier
+  // highlighted via `.is-selected`.
   function strengthStandardsDetailHtml(ex) {
     const info = strengthLevelInfo(ex);
     if (!info) return '';
@@ -2094,36 +2107,44 @@
     if (info.needsSex) return `<div class="card"><div class="section-head"><h2>Strength level</h2></div><p class="muted-text">Set your sex in Settings → Profile to see your strength level.</p></div>`;
     const bw = currentBodyWeightLb();
     const table = LIFT_STANDARDS[ex.liftType][state.profile.sex];
-    const currentAbbrev = STRENGTH_TIER_ABBREV[INSIGHT_TIER_LABELS.indexOf(info.tier)];
-    const caption = INSIGHT_TIER_LABELS.slice(1)
-      .map((label, i) => `${label} ${fmtWeight(Math.round((bw * table[i]) / 5) * 5)}+`)
-      .join(' &middot; ');
+    const thresholds = table.map((mult) => Math.round((bw * mult) / 5) * 5);
+    const rows = INSIGHT_TIER_LABELS.map((label, j) => {
+      const rightText = j === 0
+        ? `Under ${fmtWeight(thresholds[0])}`
+        : `${round(table[j - 1], 2)}&times; &middot; ${fmtWeight(thresholds[j - 1])}+`;
+      return { label, rightText, isCurrent: label === info.tier };
+    });
     return `
       <div class="card">
         <div class="section-head"><h2>Strength level</h2></div>
         <div class="insight-line">Est. 1RM ${fmtWeight(info.oneRepMax)} &middot; ${round(info.ratio, 2)}&times; bodyweight &middot; <strong>${info.tier}</strong></div>
         <div class="insight-line muted-text">Heaviest logged: ${fmtWeight(info.heaviestLoad)}</div>
-        ${tierBarHtml(STRENGTH_TIER_ABBREV, currentAbbrev, caption)}
+        <div class="standards-preview">
+          ${rows.map((r) => `<div class="standards-preview-row${r.isCurrent ? ' is-selected' : ''}"><span>${r.label}</span><span>${r.rightText}</span></div>`).join('')}
+        </div>
         <p class="muted-text field-hint">Est. 1RM via the Epley formula, classified against published bodyweight-multiple strength standards for your sex.</p>
       </div>`;
   }
 
-  // The "Pace level" counterpart, same layout, moved off the dashboard the
-  // same way and for the same reason.
+  // The "Pace level" counterpart — same `.standards-preview` table pattern,
+  // one row per published tier showing its pace-per-mile ceiling.
   function paceStandardsDetailHtml(ex) {
     const info = paceLevelInfo(ex);
     if (!info) return '';
     if (info.needsSex) return `<div class="card"><div class="section-head"><h2>Pace level</h2></div><p class="muted-text">Set your sex in Settings → Profile to see your pace level.</p></div>`;
     const ceilings = PACE_TIERS[state.profile.sex];
-    const currentAbbrev = PACE_TIER_ABBREV[PACE_TIER_LABELS.indexOf(info.tier)];
-    const caption = PACE_TIER_LABELS
-      .map((label, i) => i < ceilings.length ? `${label} &le; ${fmtPace(ceilings[i])}/mi` : label)
-      .join(' &middot; ');
+    const rows = PACE_TIER_LABELS.map((label, i) => ({
+      label,
+      rightText: i < ceilings.length ? `&le; ${fmtPace(ceilings[i])}` : `&gt; ${fmtPace(ceilings[ceilings.length - 1])}`,
+      isCurrent: label === info.tier,
+    }));
     return `
       <div class="card">
         <div class="section-head"><h2>Pace level</h2></div>
         <div class="insight-line">${fmtPace(info.pace)} &middot; <strong>${info.tier}</strong></div>
-        ${tierBarHtml(PACE_TIER_ABBREV, currentAbbrev, caption)}
+        <div class="standards-preview">
+          ${rows.map((r) => `<div class="standards-preview-row${r.isCurrent ? ' is-selected' : ''}"><span>${r.label}</span><span>${r.rightText}</span></div>`).join('')}
+        </div>
         <p class="muted-text field-hint">Classified against general pace-per-mile tiers for your sex.</p>
       </div>`;
   }
@@ -2424,13 +2445,18 @@
   // front and center. Every macro always shows a total; one with a daily
   // goal enabled (Manage -> Nutrition -> Food) additionally shows "/ goal"
   // underneath, the same way Water shows progress toward its daily goal.
+  // The whole card is tappable (same "quick glance here, detail one tap in"
+  // pattern as every other dashboard card) into openFoodDetail() below,
+  // which is where the richer breakdown, the nutrition calculator's
+  // recommendation, and quick access to logging/adjusting goals now live —
+  // this flat grid stays a lightweight summary.
   function renderFoodDashboardSection() {
     document.getElementById('foodSectionHead').hidden = false;
     const wrap = document.getElementById('foodDashboardWrap');
     wrap.hidden = false;
     const totals = foodTotalsForDate(todayISO());
     wrap.innerHTML = `
-      <div class="card">
+      <div class="card food-dashboard-card">
         <div class="food-totals-row">
           ${MACRO_KEYS.map((k) => {
             const goalInfo = macroGoalInfo(k);
@@ -2445,6 +2471,89 @@
           }).join('')}
         </div>
       </div>`;
+    wireOpenable(wrap.querySelector('.food-dashboard-card'), openFoodDetail);
+  }
+
+  // Food's detail-on-demand modal — the dashboard card's flat totals grid
+  // expanded with per-macro progress toward any enabled goal, the
+  // nutrition calculator's recommendation (if turned on in Manage ->
+  // Nutrition), and quick actions to log food or adjust goals, rather than
+  // leaving the dashboard card as the only place to see today's food and a
+  // separate trip to Manage as the only way to act on it.
+  function openFoodDetail() {
+    const totals = foodTotalsForDate(todayISO());
+    const calc = state.settings.nutritionCalc;
+    const suggestion = calc.enabled ? computeNutritionTargets(calc.activityLevel, calc.goal) : null;
+    const rows = MACRO_KEYS.map((k) => {
+      const goalInfo = macroGoalInfo(k);
+      const hasGoal = goalInfo.enabled && goalInfo.goal != null;
+      const value = totals[k];
+      let rightText = fmtMacroValue(k, value);
+      if (hasGoal) {
+        const pct = value != null ? Math.round(Math.min(100, (value / goalInfo.goal) * 100)) : null;
+        rightText += ` / ${fmtMacroValue(k, goalInfo.goal)}${pct != null ? ` &middot; ${pct}%` : ''}`;
+      }
+      return `<div class="standards-preview-row"><span>${MACRO_LABELS[k]}</span><span>${rightText}</span></div>`;
+    }).join('');
+
+    let calcHtml;
+    if (!calc.enabled) {
+      calcHtml = `
+        <div class="card">
+          <div class="section-head"><h2>Recommendation</h2></div>
+          <p class="muted-text">Turn on the nutrition calculator (Adjust goals below) for a calorie/protein recommendation based on your profile.</p>
+        </div>`;
+    } else if (suggestion.missing) {
+      const list = suggestion.missing.length > 1
+        ? `${suggestion.missing.slice(0, -1).join(', ')} and ${suggestion.missing[suggestion.missing.length - 1]}`
+        : suggestion.missing[0];
+      calcHtml = `
+        <div class="card">
+          <div class="section-head"><h2>Recommendation</h2></div>
+          <p class="muted-text">Set your ${list} to get a calorie/protein recommendation.</p>
+        </div>`;
+    } else {
+      calcHtml = `
+        <div class="card">
+          <div class="section-head"><h2>Recommendation</h2></div>
+          <div class="insight-line">${suggestion.calories} cal &middot; ${suggestion.protein}g protein</div>
+          <p class="muted-text field-hint">For ${NUTRITION_GOAL_LABELS[calc.goal]}, ${ACTIVITY_LEVELS[calc.activityLevel].label.toLowerCase()}.</p>
+        </div>`;
+    }
+
+    openModal(`
+      <div class="modal-title-row"><h2>Food today</h2><button class="modal-close" data-action="close-modal">✕</button></div>
+      <button type="button" class="btn btn-primary btn-block" id="logFoodFromDetailBtn">Log food</button>
+      <div class="card">
+        <div class="section-head"><h2>Today's totals</h2></div>
+        <div class="standards-preview">${rows}</div>
+      </div>
+      ${calcHtml}
+      <div class="btn-row">
+        <button class="btn btn-secondary" id="adjustFoodGoalsBtn">Adjust goals</button>
+      </div>
+    `);
+    document.getElementById('logFoodFromDetailBtn').addEventListener('click', logFoodFromDetail);
+    document.getElementById('adjustFoodGoalsBtn').addEventListener('click', openFoodGoalsFromDetail);
+  }
+
+  // Jumps to the Log tab's Nutrition -> Food form, same "quick access"
+  // pattern as logExerciseFromDetail()/logTrackerFromDetail() above.
+  function logFoodFromDetail() {
+    closeModal();
+    logCategory = 'nutrition';
+    logNutritionSub = 'food';
+    switchTab('log');
+  }
+
+  // Jumps to Manage -> Nutrition -> Food, where the per-macro goal toggles
+  // and the nutrition calculator (activity level/goal/Apply button) live —
+  // the "adjustability" the flat dashboard card had no way to reach.
+  function openFoodGoalsFromDetail() {
+    closeModal();
+    manageCategory = 'nutrition';
+    manageNutritionSub = 'food';
+    switchTab('manage');
   }
 
   /* ============================== Rendering: Log tab ============================== */
@@ -2481,6 +2590,11 @@
   // deletes down to zero); Nutrition is always offered since Food has no
   // "delete down to zero" concept anymore.
   let logCategory = 'workout';
+
+  // A small pencil glyph for the "Edit" icon button in a detail modal's
+  // title row (see renderExerciseDetail/renderTrackerDetail) — same
+  // stroke-icon style as DOMAIN_TAB_ICONS below, just not tied to a domain.
+  const EDIT_ICON_SVG = '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>';
 
   // The three domain-tab icons, shared by Log (built here), and duplicated
   // byte-for-byte in index.html for History and Manage, whose outer
@@ -3073,6 +3187,29 @@
     });
   }
 
+  // Jumps straight to the Log tab with this exercise/tracker already
+  // selected — the detail modal's "Log entry" button, so a person who
+  // tapped in just to log a set doesn't have to close the modal, switch
+  // tabs, and re-pick from a dropdown they were just looking at. Reuses
+  // the same change handling the dropdown's own listener runs (dispatching
+  // a real 'change' event) rather than duplicating what it does.
+  function logExerciseFromDetail(exId) {
+    closeModal();
+    logCategory = 'workout';
+    switchTab('log');
+    const select = document.getElementById('logExercise');
+    select.value = exId;
+    select.dispatchEvent(new Event('change'));
+  }
+  function logTrackerFromDetail(trackerId) {
+    closeModal();
+    logCategory = 'measurement';
+    switchTab('log');
+    const select = document.getElementById('logTracker');
+    select.value = trackerId;
+    select.dispatchEvent(new Event('change'));
+  }
+
   /* ============================== Exercise detail modal ============================== */
 
   // `chartMetric` only matters for cardio exercises with two configured
@@ -3097,17 +3234,18 @@
           : '<p class="muted-text">No distance or pace goal set yet.</p>')
       : progressBlockHtml(ex);
 
-    let totalStat = '—';
-    if (ex.kind === 'weight') totalStat = `${entries.reduce((n, e) => n + (e.sets || []).length, 0)} sets logged`;
-    else if (ex.kind === 'reps') totalStat = `${entries.reduce((n, e) => n + (e.sets || []).reduce((m, s) => m + (s.reps || 0), 0), 0)} total reps`;
-    else totalStat = `${fmtDistance(entries.reduce((n, e) => n + (e.distance || 0), 0))} total`;
-
     const standardsHtml = ex.kind === 'weight' && state.settings.showStrengthLevel ? strengthStandardsDetailHtml(ex)
       : ex.kind === 'cardio' && state.settings.showPaceLevel ? paceStandardsDetailHtml(ex)
       : '';
 
     openModal(`
-      <div class="modal-title-row"><h2>${escapeHtml(ex.name)}</h2><button class="modal-close" data-action="close-modal">✕</button></div>
+      <div class="modal-title-row">
+        <h2>${escapeHtml(ex.name)}</h2>
+        <div class="modal-title-actions">
+          <button class="icon-btn" id="editExerciseBtn" aria-label="Edit exercise">${EDIT_ICON_SVG}</button>
+          <button class="modal-close" data-action="close-modal">✕</button>
+        </div>
+      </div>
       <!-- Wrapped in the same .card the dashboard's own goal card uses (see
            goalCardHtml()) rather than left as bare top-level modal content —
            without this, the badge and progress meter had no container of
@@ -3118,6 +3256,13 @@
         <div class="ex-card-badge badge-standalone">${kindBadge(ex)}</div>
         ${progressHtml}
       </div>
+
+      <!-- Quick access to actually logging this exercise, right where a
+           person lands after tapping in to check on it — rather than the
+           old "Sessions logged / Lifetime total" tiles here, which just
+           restated numbers already visible in the progress meter/chart
+           below without offering anything to do. -->
+      <button type="button" class="btn btn-primary btn-block" id="logEntryFromDetailBtn">Log entry</button>
 
       <!-- Concise "at a glance" headline only — the detail sentence and the
            method note (and the well-researched general explanation) now
@@ -3134,11 +3279,6 @@
 
       ${standardsHtml}
 
-      <div class="pr-grid">
-        <div class="pr-tile"><div class="value">${entries.length}</div><div class="label">Sessions logged</div></div>
-        <div class="pr-tile"><div class="value">${totalStat}</div><div class="label">Lifetime total</div></div>
-      </div>
-
       <div class="section-head">
         <h2>Trend</h2>
         <div class="segmented" id="chartScaleSegmented" role="radiogroup" aria-label="Chart range">
@@ -3154,7 +3294,6 @@
       <div class="chart-wrap">${Charts.lineChart(chartPoints, { goal: chartGoal, formatValue: (v) => formatValueForExercise(ex, v, activeMetric) })}</div>
 
       <div class="btn-row">
-        <button class="btn btn-secondary" id="editExerciseBtn">Edit exercise</button>
         <button class="btn btn-secondary" id="archiveExerciseBtn">${ex.archived ? 'Unarchive' : 'Archive'}</button>
       </div>
 
@@ -3179,6 +3318,7 @@
       wireOpenable(card, () => openSuggestionInfoModal(exId, scale, activeMetric, sugg));
     });
     document.getElementById('editExerciseBtn').addEventListener('click', () => openExerciseForm(ex.id));
+    document.getElementById('logEntryFromDetailBtn').addEventListener('click', () => logExerciseFromDetail(ex.id));
     document.getElementById('archiveExerciseBtn').addEventListener('click', () => {
       ex.archived = !ex.archived;
       save();
@@ -3607,7 +3747,13 @@
       : tracker.kind === 'sleep' && state.settings.showSleepInsights ? sleepInsightDetailHtml()
       : '';
     openModal(`
-      <div class="modal-title-row"><h2>${escapeHtml(tracker.name)}</h2><button class="modal-close" data-action="close-modal">✕</button></div>
+      <div class="modal-title-row">
+        <h2>${escapeHtml(tracker.name)}</h2>
+        <div class="modal-title-actions">
+          <button class="icon-btn" id="editTrackerBtn" aria-label="Edit tracker">${EDIT_ICON_SVG}</button>
+          <button class="modal-close" data-action="close-modal">✕</button>
+        </div>
+      </div>
       <!-- Wrapped in a .card (matching the exercise detail modal's own fix
            and how a tracker's dashboard card already wraps this same
            content) rather than left as bare top-level modal content, which
@@ -3623,6 +3769,10 @@
         <div class="ex-card-foot"><span class="ex-card-pct ${achieved ? 'is-complete' : ''}">${achieved ? '✓ Goal reached' : `${Math.round(pct)}% to goal`}</span></div>
         ${!achieved && trackerProgressDeltaText(tracker, value) ? `<div class="insight-line muted-text">${trackerProgressDeltaText(tracker, value)}</div>` : ''}` : ''}
       </div>
+
+      <!-- Quick access to logging this tracker, same as the exercise detail
+           modal's own Log entry button — see logTrackerFromDetail(). -->
+      <button type="button" class="btn btn-primary btn-block" id="logEntryFromDetailBtn">Log entry</button>
 
       ${insightDetailHtml}
 
@@ -3641,7 +3791,6 @@
       <div class="chart-wrap">${Charts.lineChart(chartPoints, { goal: tracker.goal, formatValue: (v) => fmtTrackerValue(tracker, v) })}</div>
 
       <div class="btn-row">
-        <button class="btn btn-secondary" id="editTrackerBtn">Edit tracker</button>
         <button class="btn btn-secondary" id="archiveTrackerBtn">${tracker.archived ? 'Unarchive' : 'Archive'}</button>
       </div>
 
@@ -3654,6 +3803,7 @@
     });
     wireMeasurementRowClicks(document.getElementById('trackerEntryList'));
     document.getElementById('editTrackerBtn').addEventListener('click', () => openTrackerForm(tracker.id));
+    document.getElementById('logEntryFromDetailBtn').addEventListener('click', () => logTrackerFromDetail(tracker.id));
     document.getElementById('archiveTrackerBtn').addEventListener('click', () => {
       tracker.archived = !tracker.archived;
       save();
@@ -4267,7 +4417,7 @@
       deadlift: { enabled: true, mode: 'plates', tier: 'intermediate' },
     },
     runningEnabled: true,
-    runningGoalType: 'distance',
+    runningGoalType: 'pace',
     runningDistance: '5',
     runningPaceMin: '10',
     runningPaceSec: '0',

@@ -276,9 +276,9 @@ button { font-family: inherit; }
 /* A `›` disclosure hint (plus role=button/tabindex, wired in JS) makes it
    clear these cards open something even without a visible cursor, which a
    touch device never shows. */
-.ex-card { cursor: pointer; position: relative; padding-right: 34px; }
-.ex-card:focus-visible, .daily-row:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.ex-card::after, .daily-row::after {
+.ex-card, .food-dashboard-card { cursor: pointer; position: relative; padding-right: 34px; }
+.ex-card:focus-visible, .daily-row:focus-visible, .food-dashboard-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ex-card::after, .daily-row::after, .food-dashboard-card::after {
   content: '\203A';
   position: absolute;
   right: 14px;
@@ -791,8 +791,13 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 1p
    have stacked with that gap rather than replacing it — which is exactly
    what made Settings' title-to-"Appearance" spacing roughly double every
    other section gap in the app before this fix. */
-.modal-title-row { display: flex; align-items: center; justify-content: space-between; }
+.modal-title-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .modal-title-row h2 { font-size: 18px; }
+/* Groups the title row's action icons (Edit, then ✕) so a detail modal
+   can offer Edit right where the title already is — the "more convenient
+   place" for it than a full-width button buried below the fold — without
+   the two buttons touching or wrapping oddly at 44px each. */
+.modal-title-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 /* A muted line of context right under a modal's title (e.g. which exercise
    an entry belongs to, in the edit-entry sheet). This class carries no
    rules of its own — it exists as a marker `<p>` between `.modal-title-row`
