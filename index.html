@@ -65,27 +65,33 @@
       </div>
     </section>
 
-    <!-- DASHBOARD -->
+    <!-- DASHBOARD — "Today" (what's happening right now: unlogged check-ins
+         to nudge, then whatever's already been logged today, then Water/
+         Food since both are inherently day-scoped) sits above "Progress"
+         (the lifetime goal cards + tracker trends) — see renderDashboard()
+         in app.js for the exact split/sort logic. -->
     <section id="view-dashboard" class="view" data-view="dashboard">
       <div id="summaryRow" class="summary-row"></div>
-      <div class="section-head">
-        <h2>Your goals</h2>
-      </div>
-      <div id="exerciseCards" class="card-grid"></div>
 
-      <div class="section-head" id="dailySectionHead" hidden>
-        <h2>Daily targets</h2>
-      </div>
-      <div id="dailyList" class="daily-list" hidden></div>
+      <div class="section-head"><h2>Today</h2></div>
+
+      <div class="subhead" id="todayAttentionSubhead" hidden>Needs attention</div>
+      <div id="todayAttentionWrap" class="prompt-list" hidden></div>
+
+      <div class="subhead" id="todayActivitySubhead" hidden>Logged today</div>
+      <div id="todayActivityList" class="card-grid" hidden></div>
 
       <div class="section-head" id="waterSectionHead" hidden><h2>Water</h2></div>
       <div id="waterDashboardWrap" hidden></div>
 
-      <div class="section-head" id="bodySectionHead" hidden><h2>Body &amp; wellness</h2></div>
-      <div id="bodyCards" class="card-grid" hidden></div>
-
       <div class="section-head" id="foodSectionHead" hidden><h2>Today's food</h2></div>
       <div id="foodDashboardWrap" hidden></div>
+
+      <div class="section-head"><h2>Progress</h2></div>
+      <div id="exerciseCards" class="card-grid"></div>
+
+      <div class="section-head" id="bodySectionHead" hidden><h2>Body &amp; wellness</h2></div>
+      <div id="bodyCards" class="card-grid" hidden></div>
 
       <div id="dashboardEmpty" class="empty-state" hidden>
         <p>No exercises yet.</p>
@@ -218,15 +224,15 @@
            domain always shows the same glyph everywhere it appears. -->
       <div class="domain-tabs" id="historyCategorySegmented" role="radiogroup" aria-label="History category">
         <button type="button" class="domain-tab" data-history-cat="workout" role="radio">
-          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="10" width="3" height="4" rx="1"/><rect x="5" y="8" width="2" height="8" rx="1"/><rect x="17" y="8" width="2" height="8" rx="1"/><rect x="20" y="10" width="3" height="4" rx="1"/><path d="M7 12h10"/></svg>
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.596 12.768a2 2 0 1 0 2.829-2.829l-1.768-1.767a2 2 0 0 0 2.828-2.829l-2.828-2.828a2 2 0 0 0-2.829 2.828l-1.767-1.768a2 2 0 1 0-2.829 2.829z"/><path d="m2.5 21.5 1.4-1.4"/><path d="m20.1 3.9 1.4-1.4"/><path d="M5.343 21.485a2 2 0 1 0 2.829-2.828l1.767 1.768a2 2 0 1 0 2.829-2.829l-6.364-6.364a2 2 0 1 0-2.829 2.829l1.768 1.767a2 2 0 0 0-2.828 2.829z"/><path d="m9.6 14.4 4.8-4.8"/></svg>
           <span>Workout</span>
         </button>
         <button type="button" class="domain-tab" data-history-cat="measurement" role="radio">
-          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17 17 3l4 4L7 21 3 17Z"/><path d="M7.5 16.5l1.5-1.5M11 13l1.5-1.5M14.5 9.5 16 8"/></svg>
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.3 15.3a2.4 2.4 0 0 1 0 3.4l-2.6 2.6a2.4 2.4 0 0 1-3.4 0L2.7 8.7a2.41 2.41 0 0 1 0-3.4l2.6-2.6a2.41 2.41 0 0 1 3.4 0Z"/><path d="m14.5 12.5 2-2"/><path d="m11.5 9.5 2-2"/><path d="m8.5 6.5 2-2"/><path d="m17.5 15.5 2-2"/></svg>
           <span>Measurements</span>
         </button>
         <button type="button" class="domain-tab" data-history-cat="nutrition" role="radio">
-          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2v4a2 2 0 0 0 4 0V2M8 2v20"/><path d="M16 2c-1.6 1-2.3 2.8-2.3 4.6 0 1.8.9 3 2.3 3.4V22"/></svg>
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 2v7c0 1.1.9 2 2 2h4a2 2 0 0 0 2-2V2"/><path d="M7 2v20"/><path d="M21 15V2a5 5 0 0 0-5 5v6c0 1.1.9 2 2 2h3Zm0 0v7"/></svg>
           <span>Nutrition</span>
         </button>
       </div>
@@ -259,15 +265,15 @@
            itself still opens with its own "Exercises" heading. -->
       <div class="domain-tabs" id="manageCategorySegmented" role="radiogroup" aria-label="Manage category">
         <button type="button" class="domain-tab" data-manage-cat="exercises" role="radio">
-          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="10" width="3" height="4" rx="1"/><rect x="5" y="8" width="2" height="8" rx="1"/><rect x="17" y="8" width="2" height="8" rx="1"/><rect x="20" y="10" width="3" height="4" rx="1"/><path d="M7 12h10"/></svg>
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.596 12.768a2 2 0 1 0 2.829-2.829l-1.768-1.767a2 2 0 0 0 2.828-2.829l-2.828-2.828a2 2 0 0 0-2.829 2.828l-1.767-1.768a2 2 0 1 0-2.829 2.829z"/><path d="m2.5 21.5 1.4-1.4"/><path d="m20.1 3.9 1.4-1.4"/><path d="M5.343 21.485a2 2 0 1 0 2.829-2.828l1.767 1.768a2 2 0 1 0 2.829-2.829l-6.364-6.364a2 2 0 1 0-2.829 2.829l1.768 1.767a2 2 0 0 0-2.828 2.829z"/><path d="m9.6 14.4 4.8-4.8"/></svg>
           <span>Workout</span>
         </button>
         <button type="button" class="domain-tab" data-manage-cat="measurements" role="radio">
-          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17 17 3l4 4L7 21 3 17Z"/><path d="M7.5 16.5l1.5-1.5M11 13l1.5-1.5M14.5 9.5 16 8"/></svg>
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.3 15.3a2.4 2.4 0 0 1 0 3.4l-2.6 2.6a2.4 2.4 0 0 1-3.4 0L2.7 8.7a2.41 2.41 0 0 1 0-3.4l2.6-2.6a2.41 2.41 0 0 1 3.4 0Z"/><path d="m14.5 12.5 2-2"/><path d="m11.5 9.5 2-2"/><path d="m8.5 6.5 2-2"/><path d="m17.5 15.5 2-2"/></svg>
           <span>Measurements</span>
         </button>
         <button type="button" class="domain-tab" data-manage-cat="nutrition" role="radio">
-          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2v4a2 2 0 0 0 4 0V2M8 2v20"/><path d="M16 2c-1.6 1-2.3 2.8-2.3 4.6 0 1.8.9 3 2.3 3.4V22"/></svg>
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 2v7c0 1.1.9 2 2 2h4a2 2 0 0 0 2-2V2"/><path d="M7 2v20"/><path d="M21 15V2a5 5 0 0 0-5 5v6c0 1.1.9 2 2 2h3Zm0 0v7"/></svg>
           <span>Nutrition</span>
         </button>
       </div>
@@ -275,7 +281,7 @@
       <div id="manageExercisesPanel">
         <div class="section-head">
           <h2>Exercises</h2>
-          <button class="btn btn-secondary btn-sm" data-action="add-exercise">+ Add exercise</button>
+          <button class="btn btn-secondary btn-sm btn-icon-label" data-action="add-exercise"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg><span>Add exercise</span></button>
         </div>
         <div id="exerciseManageList" class="entry-list"></div>
       </div>
@@ -283,7 +289,7 @@
       <div id="manageMeasurementsPanel" hidden>
         <div class="section-head">
           <h2>Body &amp; wellness trackers</h2>
-          <button class="btn btn-secondary btn-sm" data-action="add-tracker">+ Add tracker</button>
+          <button class="btn btn-secondary btn-sm btn-icon-label" data-action="add-tracker"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg><span>Add tracker</span></button>
         </div>
         <p class="muted-text">Anything you want a number and a trend line for — weight, body fat %, a circumference, sleep hours, calories, or anything else you think to add later.</p>
         <div id="trackerManageList" class="entry-list"></div>
@@ -306,7 +312,7 @@
           </div>
           <div class="section-head">
             <h2>Cup sizes</h2>
-            <button class="btn btn-secondary btn-sm" data-action="add-cup">+ Add cup</button>
+            <button class="btn btn-secondary btn-sm btn-icon-label" data-action="add-cup"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg><span>Add cup</span></button>
           </div>
           <div id="cupManageList" class="entry-list"></div>
         </div>
@@ -358,7 +364,7 @@
 
     <!-- SETTINGS (reached via the gear icon in the header, not a bottom tab) -->
     <section id="view-settings" class="view" data-view="settings" hidden>
-      <div class="modal-title-row"><h2>Settings</h2><button class="modal-close" data-action="close-settings">✕</button></div>
+      <div class="modal-title-row"><h2>Settings</h2><button class="modal-close" data-action="close-settings"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button></div>
 
       <div class="section-head"><h2>Appearance</h2></div>
       <div class="card">
@@ -493,7 +499,7 @@
 
       <div class="section-head"><h2>About</h2></div>
       <div class="card">
-        <p class="muted-text">Fit Log v1.11 &middot; installed as a home-screen app, all data stored on-device.</p>
+        <p class="muted-text">Fit Log v1.12 &middot; installed as a home-screen app, all data stored on-device.</p>
       </div>
     </section>
 
@@ -501,19 +507,19 @@
 
   <nav class="tabbar" id="tabbar">
     <button class="tab" data-tab="dashboard" aria-current="page">
-      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="12" width="4" height="9"/><rect x="10" y="7" width="4" height="14"/><rect x="17" y="3" width="4" height="18"/></svg>
+      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v16a2 2 0 0 0 2 2h16"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg>
       <span>Goals</span>
     </button>
     <button class="tab" data-tab="log">
-      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v8M8 12h8"/></svg>
+      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M8 12h8"/><path d="M12 8v8"/></svg>
       <span>Log</span>
     </button>
     <button class="tab" data-tab="history">
-      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/><path d="M12 8v4l3 3"/></svg>
+      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/></svg>
       <span>History</span>
     </button>
     <button class="tab" data-tab="manage">
-      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0-1.4l-1.6-1.6a1 1 0 0 0-1.4 0L3 12v3h3l8.7-8.7Z"/><path d="M13 4l3 3M4 20h16"/></svg>
+      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.375 2.625a1 1 0 0 1 3 3l-9.013 9.014a2 2 0 0 1-.853.505l-2.873.84a.5.5 0 0 1-.62-.62l.84-2.873a2 2 0 0 1 .506-.852z"/></svg>
       <span>Manage</span>
     </button>
   </nav>

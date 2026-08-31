@@ -88,8 +88,13 @@
                                      by the Log tab and the edit-entry modal.
                                      Includes the per-set ★ "working set"
                                      toggle topSetOf() prefers when present.
-     Rendering: Dashboard         – the Goals cards, Body & wellness cards,
-                                     and Water section on the home screen.
+     Rendering: Dashboard         – the home screen, split into "Today"
+                                     (needs-attention tracker prompts, then
+                                     whatever's been logged today, then
+                                     Water/Food) and "Progress" (everything
+                                     else — untouched-today goal cards, Body
+                                     & wellness tracker cards). See the
+                                     comment above renderDashboard().
      Rendering: Log tab           – quick-add for a workout set, a tracker
                                      measurement, or a cup of water.
      Rendering: History           – a month calendar with per-day colored
@@ -1817,7 +1822,7 @@
 
   function confirmDialog(title, body, confirmLabel, onConfirm, danger) {
     openModal(`
-      <div class="modal-title-row"><h2>${escapeHtml(title)}</h2><button class="modal-close" data-action="close-modal">✕</button></div>
+      <div class="modal-title-row"><h2>${escapeHtml(title)}</h2><button class="modal-close" data-action="close-modal">${CLOSE_ICON_SVG}</button></div>
       <p class="muted-text">${escapeHtml(body)}</p>
       <div class="btn-row confirm-actions">
         <button class="btn btn-secondary" data-action="close-modal">Cancel</button>
@@ -1902,7 +1907,7 @@
           <label class="field"><span class="field-label">RPE</span>
             <input type="number" step="0.5" min="1" max="10" inputmode="decimal" class="set-rpe" value="${set.rpe ?? ''}" placeholder="opt." /></label>
           <button type="button" class="set-row-star ${set.primary ? 'is-active' : ''}" data-action="toggle-primary" aria-label="Mark as working set" title="Mark as working set (used for suggestions)">★</button>
-          <button type="button" class="set-row-remove" data-action="remove-set" aria-label="Remove set">✕</button>
+          <button type="button" class="set-row-remove" data-action="remove-set" aria-label="Remove set">${CLOSE_ICON_SVG}</button>
         </div>`;
     }
     // reps kind (bodyweight)
@@ -1915,7 +1920,7 @@
           <input type="number" step="any" inputmode="decimal" class="set-addedweight" value="${aw}" placeholder="opt." /></label>
         <label class="field"><span class="field-label">RPE</span>
           <input type="number" step="0.5" min="1" max="10" inputmode="decimal" class="set-rpe" value="${set.rpe ?? ''}" placeholder="opt." /></label>
-        <button type="button" class="set-row-remove" data-action="remove-set" aria-label="Remove set">✕</button>
+        <button type="button" class="set-row-remove" data-action="remove-set" aria-label="Remove set">${CLOSE_ICON_SVG}</button>
       </div>`;
   }
 
@@ -2046,34 +2051,36 @@
     return streak;
   }
 
-  // Every configured goal, flattened to one entry per goal rather than one
-  // per exercise — a cardio exercise with both a distance and a pace goal
-  // contributes two units here, so the "Goals reached" tally below counts
-  // it as two goals, not one.
-  function activeGoalUnits() {
-    const units = [];
-    activeExercises().forEach((ex) => {
-      if (ex.kind === 'cardio') {
-        cardioMetricsOf(ex).forEach((metric) => units.push({ ex, metric }));
-      } else if (ex.goal) {
-        units.push({ ex, metric: undefined });
-      }
-    });
-    return units;
-  }
-
+  // Dropped the old "Goals reached" tally tile — whether a goal is hit is
+  // already visible on that goal's own dashboard card (its meter fills and
+  // reads "✓ Goal reached"), so a third summary number just duplicated
+  // that instead of adding anything. The two tiles that remain lean into
+  // what they actually are: a currently-burning streak (a flame, lit only
+  // while the streak is alive) and a pattern of the last 7 days (a small
+  // heat strip alongside the raw count), rather than three plain numbers
+  // in equal boxes.
   function renderSummary() {
-    const weekAgo = new Date(); weekAgo.setDate(weekAgo.getDate() - 6);
-    const weekAgoIso = localDateISO(weekAgo);
-    const sessionsThisWeek = new Set(state.entries.filter((e) => e.date >= weekAgoIso).map((e) => e.date)).size;
-    const goalUnits = activeGoalUnits();
-    const goalsHit = goalUnits.filter((u) => progressPct(u.ex, u.metric).achieved).length;
+    const days = new Set(state.entries.map((e) => e.date));
+    const today = new Date(todayISO() + 'T00:00:00');
+    const weekDots = [];
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date(today);
+      d.setDate(d.getDate() - i);
+      weekDots.push(days.has(localDateISO(d)));
+    }
+    const sessionsThisWeek = weekDots.filter(Boolean).length;
     const streak = computeStreak();
 
     document.getElementById('summaryRow').innerHTML = `
-      <div class="stat-tile"><div class="value">${sessionsThisWeek}</div><div class="label">Days logged this week</div></div>
-      <div class="stat-tile"><div class="value">${streak}</div><div class="label">Day streak</div></div>
-      <div class="stat-tile"><div class="value">${goalsHit}/${goalUnits.length}</div><div class="label">Goals reached</div></div>
+      <div class="stat-tile">
+        <div class="value">${sessionsThisWeek}</div>
+        <div class="label">Days logged this week</div>
+        <div class="heat-strip">${weekDots.map((on) => `<span class="heat-day${on ? ' on' : ''}"></span>`).join('')}</div>
+      </div>
+      <div class="stat-tile${streak > 0 ? ' is-streak-hot' : ''}">
+        <div class="value">${streak > 0 ? FLAME_ICON_SVG : ''}<span>${streak}</span></div>
+        <div class="label">Day streak</div>
+      </div>
     `;
   }
 
@@ -2394,7 +2401,8 @@
   function cupButtonsHtml() {
     return state.water.cups.map((cup) => `
       <button type="button" class="btn btn-secondary cup-btn" data-cup-id="${cup.id}">
-        <span>${escapeHtml(cup.name)}</span><span class="cup-btn-amount">${fmtVolume(cup.amountMl)}</span>
+        <span class="cup-btn-name-row">${WATER_DROP_ICON_SVG}<span>${escapeHtml(cup.name)}</span></span>
+        <span class="cup-btn-amount">${fmtVolume(cup.amountMl)}</span>
       </button>`).join('');
   }
 
@@ -2436,39 +2444,101 @@
     }));
   }
 
+  // The id of exId's most-recently-logged entry for today, or '' if it
+  // hasn't been logged today — genId() prefixes every id with a base36
+  // timestamp (see genId), so plain string comparison of ids sorts
+  // chronologically. Used to order Today's "logged today" list newest
+  // first, across a mix of goal exercises and daily targets.
+  function latestTodayEntryId(exId) {
+    return entriesFor(exId)
+      .filter((en) => en.date === todayISO())
+      .reduce((max, en) => (en.id > max ? en.id : max), '');
+  }
+
+  // The dashboard's "Today" needs-attention prompts — one compact row per
+  // dashboard-visible tracker (Weight, Sleep, or any custom one) that
+  // hasn't been logged yet today. This is deliberately just a prompt, not
+  // that tracker's full card — the full card (with its chart/trend/goal
+  // meter) keeps living in Progress via renderBodySection whether or not
+  // today's entry has landed yet; a tracker simply drops off this list the
+  // moment it's logged, rather than jumping anywhere or duplicating itself.
+  function renderTodayAttention() {
+    const pending = activeTrackers()
+      .filter((t) => t.showOnDashboard !== false)
+      .filter((t) => !state.measurements.some((m) => m.trackerId === t.id && m.date === todayISO()));
+    document.getElementById('todayAttentionSubhead').hidden = pending.length === 0;
+    const wrap = document.getElementById('todayAttentionWrap');
+    wrap.hidden = pending.length === 0;
+    wrap.innerHTML = pending.map((t) => `
+      <div class="prompt-row" data-tracker-id="${t.id}">
+        <div>
+          <div class="prompt-row-name">${escapeHtml(t.name)}</div>
+          <div class="prompt-row-sub">Not logged today</div>
+        </div>
+        <button type="button" class="btn btn-secondary btn-sm" data-action="log-tracker-prompt">Log</button>
+      </div>`).join('');
+    wrap.querySelectorAll('[data-action="log-tracker-prompt"]').forEach((btn) => {
+      btn.addEventListener('click', () => logTrackerFromDetail(btn.closest('[data-tracker-id]').getAttribute('data-tracker-id')));
+    });
+  }
+
+  // Dashboard layout: "Today" (what's happening right now) above
+  // "Progress" (the lifetime picture) — see the section-head comment in
+  // index.html. Today holds, in order: needs-attention tracker prompts
+  // (renderTodayAttention), whatever's actually been logged today (any
+  // goal exercise with a today's entry, plus daily targets — which, same
+  // as before, only ever show up on a day they're logged at all — mixed
+  // together and sorted most-recent-first), then Water and Food, since
+  // both are inherently day-scoped rather than lifetime numbers. Progress
+  // keeps everything Today didn't claim: goal exercises untouched today,
+  // and every tracker's own card (Body & wellness) regardless of whether
+  // it was just logged — a tracker's card is a trend, not a today-only
+  // thing, so it doesn't disappear from Progress just because it's also
+  // prompted (or was, a moment ago) in Today.
   function renderDashboard() {
     renderSummary();
     const all = activeExercises();
     const goalList = all.filter((e) => sectionOf(e) === 'goal');
     const dailyDefined = all.filter((e) => sectionOf(e) === 'daily');
+    const isLoggedToday = (e) => entriesFor(e.id).some((en) => en.date === todayISO());
+    const goalsToday = goalList.filter(isLoggedToday);
+    const goalsRemaining = goalList.filter((e) => !isLoggedToday(e));
     // A daily target only earns a spot on the dashboard once you've
     // actually logged it today — otherwise it'd be a standing reminder
     // cluttering the goals page every day whether or not you got to it.
     // It's still fully definable/loggable/editable via Log/History/Manage
     // even on a day it doesn't show here.
-    const dailyToday = dailyDefined.filter((e) => entriesFor(e.id).some((en) => en.date === todayISO()));
+    const dailyToday = dailyDefined.filter(isLoggedToday);
     // accessory exercises are intentionally omitted from the dashboard —
     // they're still fully logged/edited via the Log and History tabs.
 
     document.getElementById('dashboardEmpty').hidden = (goalList.length + dailyDefined.length) > 0;
 
-    const cardsWrap = document.getElementById('exerciseCards');
-    cardsWrap.innerHTML = goalList.map(goalCardHtml).join('');
-    cardsWrap.querySelectorAll('.ex-card[data-exercise-id]').forEach((card) => {
+    renderTodayAttention();
+
+    const todayItems = [...goalsToday, ...dailyToday]
+      .sort((a, b) => latestTodayEntryId(b.id).localeCompare(latestTodayEntryId(a.id)));
+    document.getElementById('todayActivitySubhead').hidden = todayItems.length === 0;
+    const todayWrap = document.getElementById('todayActivityList');
+    todayWrap.hidden = todayItems.length === 0;
+    todayWrap.innerHTML = todayItems.map((e) => sectionOf(e) === 'goal' ? goalCardHtml(e) : dailyRowHtml(e)).join('');
+    todayWrap.querySelectorAll('.ex-card[data-exercise-id]').forEach((card) => {
       wireOpenable(card, () => openExerciseDetail(card.getAttribute('data-exercise-id')));
     });
-
-    document.getElementById('dailySectionHead').hidden = dailyToday.length === 0;
-    const dailyWrap = document.getElementById('dailyList');
-    dailyWrap.hidden = dailyToday.length === 0;
-    dailyWrap.innerHTML = dailyToday.map(dailyRowHtml).join('');
-    dailyWrap.querySelectorAll('.daily-row').forEach((row) => {
+    todayWrap.querySelectorAll('.daily-row').forEach((row) => {
       wireOpenable(row, () => openExerciseDetail(row.getAttribute('data-exercise-id')));
     });
 
     renderWaterSection();
-    renderBodySection();
     renderFoodDashboardSection();
+
+    const cardsWrap = document.getElementById('exerciseCards');
+    cardsWrap.innerHTML = goalsRemaining.map(goalCardHtml).join('');
+    cardsWrap.querySelectorAll('.ex-card[data-exercise-id]').forEach((card) => {
+      wireOpenable(card, () => openExerciseDetail(card.getAttribute('data-exercise-id')));
+    });
+
+    renderBodySection();
   }
 
   // A read-only "today so far" summary of all four macros — Food doesn't
@@ -2555,7 +2625,7 @@
     }
 
     openModal(`
-      <div class="modal-title-row"><h2>Food today</h2><button class="modal-close" data-action="close-modal">✕</button></div>
+      <div class="modal-title-row"><h2>Food today</h2><button class="modal-close" data-action="close-modal">${CLOSE_ICON_SVG}</button></div>
       <button type="button" class="btn btn-primary btn-block" id="logFoodFromDetailBtn">Log food</button>
       <div class="card">
         <div class="section-head"><h2>Today's totals</h2></div>
@@ -2624,10 +2694,41 @@
   // "delete down to zero" concept anymore.
   let logCategory = 'workout';
 
+  // Every inline SVG icon in the app — this constant plus the ones below —
+  // is Lucide's actual stroke-icon set (24x24 viewBox, stroke=currentColor,
+  // stroke-width=2, round caps/joins; https://lucide.dev, ISC license),
+  // hand-copied in from the `lucide-static` package rather than pulled from
+  // a CDN or npm dependency, so the app keeps working fully offline with no
+  // new install. Using one real, licensed source everywhere replaces what
+  // used to be a mix of hand-drawn shapes (which already matched this style
+  // closely) and plain text glyphs (✕, ‹, +) standing in for icons — see
+  // CLOSE_ICON_SVG/BACK_CHEVRON_ICON_SVG/PLUS_ICON_SVG below for those.
   // A small pencil glyph for the "Edit" icon button in a detail modal's
-  // title row (see renderExerciseDetail/renderTrackerDetail) — same
-  // stroke-icon style as DOMAIN_TAB_ICONS below, just not tied to a domain.
-  const EDIT_ICON_SVG = '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>';
+  // title row (see renderExerciseDetail/renderTrackerDetail).
+  const EDIT_ICON_SVG = '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/></svg>';
+
+  // The generic modal "✕" close button and the small "✕" that removes one
+  // set row from the workout log form — both were a plain text character
+  // before; this is Lucide's `x`.
+  const CLOSE_ICON_SVG = '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>';
+
+  // The "Next session" modal's back link — used to be the HTML entity
+  // "&lsaquo;" (‹), which didn't match the calendar's own SVG chevrons.
+  // Lucide's `chevron-left` (the calendar's prev/next-month arrows already
+  // are this exact path, so they needed no change).
+  const BACK_CHEVRON_ICON_SVG = '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>';
+
+  // The "+ Add exercise / tracker / cup" buttons' leading "+" — used to be
+  // a literal "+" character prefixed onto the label text. Lucide's `plus`.
+  const PLUS_ICON_SVG = '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>';
+
+  // The day-streak stat tile's flame (see renderSummary) — Lucide `flame`.
+  const FLAME_ICON_SVG = '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3q1 4 4 6.5t3 5.5a1 1 0 0 1-14 0 5 5 0 0 1 1-3 1 1 0 0 0 5 0c0-2-1.5-3-1.5-5q0-2 2.5-4"/></svg>';
+
+  // A small water-drop glyph next to each water "cup" quick-log button (see
+  // cupButtonsHtml) — there was no icon here at all before. Lucide
+  // `droplets`.
+  const WATER_DROP_ICON_SVG = '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 16.3c2.2 0 4-1.83 4-4.05 0-1.16-.57-2.26-1.71-3.19S7.29 6.75 7 5.3c-.29 1.45-1.14 2.84-2.29 3.76S3 11.1 3 12.25c0 2.22 1.8 4.05 4 4.05z"/><path d="M12.56 6.6A10.97 10.97 0 0 0 14 3.02c.5 2.5 2 4.9 4 6.5s3 3.5 3 5.5a6.98 6.98 0 0 1-11.91 4.97"/></svg>';
 
   // The three domain-tab icons, shared by Log (built here), and duplicated
   // byte-for-byte in index.html for History and Manage, whose outer
@@ -2636,10 +2737,11 @@
   // all three copies identical — same glyph for the same domain everywhere
   // it appears is the whole point of giving these their own bigger,
   // consistent design family instead of the old cramped inline pill.
+  // (Lucide `dumbbell` / `ruler` / `utensils`.)
   const DOMAIN_TAB_ICONS = {
-    workout: '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="10" width="3" height="4" rx="1"/><rect x="5" y="8" width="2" height="8" rx="1"/><rect x="17" y="8" width="2" height="8" rx="1"/><rect x="20" y="10" width="3" height="4" rx="1"/><path d="M7 12h10"/></svg>',
-    measurement: '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17 17 3l4 4L7 21 3 17Z"/><path d="M7.5 16.5l1.5-1.5M11 13l1.5-1.5M14.5 9.5 16 8"/></svg>',
-    nutrition: '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2v4a2 2 0 0 0 4 0V2M8 2v20"/><path d="M16 2c-1.6 1-2.3 2.8-2.3 4.6 0 1.8.9 3 2.3 3.4V22"/></svg>',
+    workout: '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.596 12.768a2 2 0 1 0 2.829-2.829l-1.768-1.767a2 2 0 0 0 2.828-2.829l-2.828-2.828a2 2 0 0 0-2.829 2.828l-1.767-1.768a2 2 0 1 0-2.829 2.829z"/><path d="m2.5 21.5 1.4-1.4"/><path d="m20.1 3.9 1.4-1.4"/><path d="M5.343 21.485a2 2 0 1 0 2.829-2.828l1.767 1.768a2 2 0 1 0 2.829-2.829l-6.364-6.364a2 2 0 1 0-2.829 2.829l1.768 1.767a2 2 0 0 0-2.828 2.829z"/><path d="m9.6 14.4 4.8-4.8"/></svg>',
+    measurement: '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.3 15.3a2.4 2.4 0 0 1 0 3.4l-2.6 2.6a2.4 2.4 0 0 1-3.4 0L2.7 8.7a2.41 2.41 0 0 1 0-3.4l2.6-2.6a2.41 2.41 0 0 1 3.4 0Z"/><path d="m14.5 12.5 2-2"/><path d="m11.5 9.5 2-2"/><path d="m8.5 6.5 2-2"/><path d="m17.5 15.5 2-2"/></svg>',
+    nutrition: '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 2v7c0 1.1.9 2 2 2h4a2 2 0 0 0 2-2V2"/><path d="M7 2v20"/><path d="M21 15V2a5 5 0 0 0-5 5v6c0 1.1.9 2 2 2h3Zm0 0v7"/></svg>',
   };
 
   function availableLogCategories() {
@@ -2894,7 +2996,7 @@
     const e = state.waterEntries.find((x) => x.id === entryId);
     if (!e) return;
     openModal(`
-      <div class="modal-title-row"><h2>Edit water entry</h2><button class="modal-close" data-action="close-modal">✕</button></div>
+      <div class="modal-title-row"><h2>Edit water entry</h2><button class="modal-close" data-action="close-modal">${CLOSE_ICON_SVG}</button></div>
       <div class="form-card">
         <label class="field"><span class="field-label">Date</span><input type="date" id="editWaterDate" value="${e.date}" /></label>
         <label class="field"><span class="field-label">Amount (${Units.volumeUnitLabel()})</span>
@@ -2948,7 +3050,7 @@
     const e = state.food.entries.find((x) => x.id === entryId);
     if (!e) return;
     openModal(`
-      <div class="modal-title-row"><h2>Edit food entry</h2><button class="modal-close" data-action="close-modal">✕</button></div>
+      <div class="modal-title-row"><h2>Edit food entry</h2><button class="modal-close" data-action="close-modal">${CLOSE_ICON_SVG}</button></div>
       <div class="form-card">
         <label class="field"><span class="field-label">Date</span><input type="date" id="editFoodDate" value="${e.date}" /></label>
         ${MACRO_KEYS.map((k) => `
@@ -3072,7 +3174,7 @@
     const dateLabel = new Date(dateIso + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
 
     openModal(`
-      <div class="modal-title-row"><h2>${dateLabel}</h2><button class="modal-close" data-action="close-modal">✕</button></div>
+      <div class="modal-title-row"><h2>${dateLabel}</h2><button class="modal-close" data-action="close-modal">${CLOSE_ICON_SVG}</button></div>
       ${nothingLogged ? '<p class="muted-text">Nothing logged on this day.</p>' : ''}
       ${workoutEntries.length ? `
         <div class="section-head"><h2>Workouts</h2></div>
@@ -3184,7 +3286,7 @@
     if (!entry) return;
     const ex = exerciseById(entry.exerciseId);
     openModal(`
-      <div class="modal-title-row"><h2>Edit entry</h2><button class="modal-close" data-action="close-modal">✕</button></div>
+      <div class="modal-title-row"><h2>Edit entry</h2><button class="modal-close" data-action="close-modal">${CLOSE_ICON_SVG}</button></div>
       <p class="muted-text modal-subtitle">${escapeHtml(ex ? ex.name : 'Deleted exercise')}</p>
       <div class="form-card">
         <label class="field"><span class="field-label">Date</span><input type="date" id="editEntryDate" value="${entry.date}" /></label>
@@ -3276,7 +3378,7 @@
         <h2>${escapeHtml(ex.name)}</h2>
         <div class="modal-title-actions">
           <button class="icon-btn" id="editExerciseBtn" aria-label="Edit exercise">${EDIT_ICON_SVG}</button>
-          <button class="modal-close" data-action="close-modal">✕</button>
+          <button class="modal-close" data-action="close-modal">${CLOSE_ICON_SVG}</button>
         </div>
       </div>
       <!-- Wrapped in the same .card the dashboard's own goal card uses (see
@@ -3377,8 +3479,8 @@
   function openSuggestionInfoModal(exId, scale, activeMetric, sugg) {
     const ex = exerciseById(exId);
     openModal(`
-      <button type="button" class="modal-back-link" data-action="back-to-exercise">&lsaquo; ${ex ? escapeHtml(ex.name) : 'Back'}</button>
-      <div class="modal-title-row"><h2>Next session</h2><button class="modal-close" data-action="close-modal">✕</button></div>
+      <button type="button" class="modal-back-link" data-action="back-to-exercise">${BACK_CHEVRON_ICON_SVG}${ex ? escapeHtml(ex.name) : 'Back'}</button>
+      <div class="modal-title-row"><h2>Next session</h2><button class="modal-close" data-action="close-modal">${CLOSE_ICON_SVG}</button></div>
 
       ${sugg.detail || sugg.method ? `
         <div class="card suggestion-card">
@@ -3414,7 +3516,7 @@
     const bodyRegion = ex ? (ex.bodyRegion || 'upper') : 'upper';
 
     openModal(`
-      <div class="modal-title-row"><h2>${editing ? 'Edit exercise' : 'Add exercise'}</h2><button class="modal-close" data-action="close-modal">✕</button></div>
+      <div class="modal-title-row"><h2>${editing ? 'Edit exercise' : 'Add exercise'}</h2><button class="modal-close" data-action="close-modal">${CLOSE_ICON_SVG}</button></div>
       <div class="form-card">
         <label class="field"><span class="field-label">Name</span>
           <input type="text" id="exName" value="${ex ? escapeHtml(ex.name) : ''}" placeholder="e.g. Overhead Press" maxlength="60" /></label>
@@ -3717,7 +3819,7 @@
     const tracker = trackerById(m.trackerId);
     const isSleep = tracker && tracker.kind === 'sleep';
     openModal(`
-      <div class="modal-title-row"><h2>Edit entry</h2><button class="modal-close" data-action="close-modal">✕</button></div>
+      <div class="modal-title-row"><h2>Edit entry</h2><button class="modal-close" data-action="close-modal">${CLOSE_ICON_SVG}</button></div>
       <p class="muted-text modal-subtitle">${escapeHtml(tracker ? tracker.name : 'Deleted tracker')}</p>
       <div class="form-card">
         <label class="field"><span class="field-label">Date</span><input type="date" id="editMeasurementDate" value="${m.date}" /></label>
@@ -3784,7 +3886,7 @@
         <h2>${escapeHtml(tracker.name)}</h2>
         <div class="modal-title-actions">
           <button class="icon-btn" id="editTrackerBtn" aria-label="Edit tracker">${EDIT_ICON_SVG}</button>
-          <button class="modal-close" data-action="close-modal">✕</button>
+          <button class="modal-close" data-action="close-modal">${CLOSE_ICON_SVG}</button>
         </div>
       </div>
       <!-- Wrapped in a .card (matching the exercise detail modal's own fix
@@ -3878,7 +3980,7 @@
     const typeLocked = hasEntries || isSleep;
 
     openModal(`
-      <div class="modal-title-row"><h2>${editing ? 'Edit tracker' : 'Add tracker'}</h2><button class="modal-close" data-action="close-modal">✕</button></div>
+      <div class="modal-title-row"><h2>${editing ? 'Edit tracker' : 'Add tracker'}</h2><button class="modal-close" data-action="close-modal">${CLOSE_ICON_SVG}</button></div>
       <div class="form-card">
         <label class="field"><span class="field-label">Name</span>
           <input type="text" id="trkName" value="${tracker ? escapeHtml(tracker.name) : ''}" placeholder="e.g. Waist, Protein, Resting Heart Rate" maxlength="60" /></label>
@@ -4031,7 +4133,7 @@
     const editing = !!cupId;
     const cup = editing ? cupById(cupId) : null;
     openModal(`
-      <div class="modal-title-row"><h2>${editing ? 'Edit cup' : 'Add cup'}</h2><button class="modal-close" data-action="close-modal">✕</button></div>
+      <div class="modal-title-row"><h2>${editing ? 'Edit cup' : 'Add cup'}</h2><button class="modal-close" data-action="close-modal">${CLOSE_ICON_SVG}</button></div>
       <div class="form-card">
         <label class="field"><span class="field-label">Name</span>
           <input type="text" id="cupName" value="${cup ? escapeHtml(cup.name) : ''}" placeholder="e.g. Water bottle" maxlength="40" /></label>

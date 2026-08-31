@@ -224,6 +224,29 @@ button { font-family: inherit; }
 .section-head:first-child { margin-top: 0; }
 .section-head h2 { font-size: 15px; color: var(--text-secondary); font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
 
+/* A lighter-weight sub-heading for the two rows inside "Today" (see
+   view-dashboard) — one notch quieter than a full .section-head, since
+   these aren't top-level dashboard sections, just labeling which part of
+   "Today" a card belongs to. */
+.subhead { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); margin: 14px 2px 8px; }
+.subhead:first-child { margin-top: 0; }
+
+/* ============ Today: needs-attention prompts ============
+   A compact "log it" row for a dashboard tracker (Weight, Sleep, or any
+   custom one) that hasn't been logged yet today — see renderTodayAttention
+   in app.js. Dashed border (vs. a card's solid one) marks it as a pending
+   to-do rather than a normal card; it disappears from here the moment
+   that tracker gets an entry for today, same as it always could via
+   Log/History/Manage regardless of whether it shows here. */
+.prompt-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 4px; }
+.prompt-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  background: var(--surface-1); border: 1px dashed var(--border);
+  border-radius: var(--radius-md); padding: 10px 12px;
+}
+.prompt-row-name { font-size: 13.5px; font-weight: 600; }
+.prompt-row-sub { font-size: 11px; color: var(--muted); }
+
 /* ============ Domain tabs (Workout / Measurements / Nutrition) ============
    Log/History/Manage's top-level category switcher used to be a small
    inline pill row squeezed next to the section title — on a narrow phone
@@ -249,7 +272,7 @@ button { font-family: inherit; }
 /* ============ Summary row ============ */
 .summary-row {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(2, 1fr);
   gap: 10px;
 }
 .stat-tile {
@@ -261,8 +284,20 @@ button { font-family: inherit; }
   flex-direction: column;
   gap: 2px;
 }
-.stat-tile .value { font-size: 22px; font-weight: 600; }
+.stat-tile .value { font-size: 22px; font-weight: 600; display: flex; align-items: center; gap: 4px; }
 .stat-tile .label { font-size: 12px; color: var(--text-secondary); }
+/* The day-streak tile lights up with a warm gradient + a flame icon (see
+   renderSummary) once there's an active streak to show off — dormant
+   (streak 0) it stays a plain tile, same as the days-logged one. */
+.stat-tile.is-streak-hot { background: linear-gradient(160deg, rgba(250,178,25,0.18), rgba(232,98,44,0.14)); border-color: rgba(232,98,44,0.35); }
+.stat-tile.is-streak-hot .value { color: #e8622c; }
+.stat-tile .value .icon { width: 18px; height: 18px; flex: none; }
+/* A tiny rolling-7-day "did I log something" strip under the weekly count
+   — same spirit as a GitHub contribution row, just two states (on/off)
+   instead of a heat gradient. */
+.heat-strip { display: flex; gap: 4px; margin-top: 4px; }
+.heat-day { width: 14px; height: 14px; border-radius: 4px; background: var(--surface-2); border: 1px solid var(--border); }
+.heat-day.on { background: var(--accent); border-color: var(--accent); }
 
 /* ============ Card grid / exercise cards ============ */
 .card-grid { display: flex; flex-direction: column; gap: 12px; }
@@ -427,6 +462,7 @@ button { font-family: inherit; }
   background: none; border: none; padding: 0 0 10px; margin: 0;
   color: var(--accent); font-size: 13px; font-weight: 600; cursor: pointer;
 }
+.modal-back-link .icon { width: 16px; height: 16px; flex: none; }
 
 /* Plain-language reference content (e.g. "how progression decisions work")
    inside a modal — ordinary prose with small subheadings, not a card. */
@@ -499,6 +535,8 @@ button { font-family: inherit; }
   gap: 2px;
   padding: 10px 14px;
 }
+.cup-btn-name-row { display: flex; align-items: center; gap: 5px; }
+.cup-btn-name-row .icon { width: 14px; height: 14px; flex: none; }
 .cup-btn-amount { font-size: 12px; color: var(--text-secondary); font-weight: 400; }
 input, select {
   font-family: inherit;
@@ -537,6 +575,7 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 1p
   border-radius: var(--radius-sm);
   width: 44px; height: 44px;
   cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
 }
 .set-row-remove { color: var(--critical); }
 .set-row-star { color: var(--border); font-size: 18px; line-height: 1; }
@@ -558,6 +597,10 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 1p
 .btn-danger { background: var(--critical-bg); color: var(--critical); }
 .btn-block { width: 100%; }
 .btn-sm { padding: 6px 12px; font-size: 13px; }
+/* "+ Add exercise / tracker / cup" — a real Lucide `plus` icon in place of
+   the old literal "+" character, vertically centered against the label. */
+.btn-icon-label { display: inline-flex; align-items: center; gap: 4px; }
+.btn-icon-label .icon { width: 14px; height: 14px; }
 .btn-row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
 /* confirmDialog's Cancel/Confirm row is a direct `.modal-sheet` child (the
    only place this class is used), so its spacing above already comes from
@@ -823,7 +866,7 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 1p
    and whatever follows, spaced by `.modal-sheet`'s gap on both sides like
    everything else there — kept as a class rather than removed so call
    sites stay self-documenting about what that line is. */
-.modal-close { border: none; background: var(--surface-2); width: 44px; height: 44px; border-radius: 999px; color: var(--text-primary); cursor: pointer; }
+.modal-close { border: none; background: var(--surface-2); width: 44px; height: 44px; border-radius: 999px; color: var(--text-primary); cursor: pointer; display: flex; align-items: center; justify-content: center; }
 
 /* ============ Toast ============ */
 .toast {
