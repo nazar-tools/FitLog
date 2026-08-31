@@ -154,7 +154,7 @@
       </form>
 
       <div id="logNutritionPanel" hidden>
-        <div class="segmented" id="logNutritionSubSegmented" role="radiogroup" aria-label="Nutrition type"></div>
+        <div class="segmented-new" id="logNutritionSubSegmented" role="radiogroup" aria-label="Nutrition type"></div>
 
         <div id="logWaterPanel" class="card form-card" hidden>
           <span class="field-label">Tap a cup to log it for today</span>
@@ -166,6 +166,11 @@
               <button type="button" class="btn btn-secondary" id="logWaterCustomAddBtn">Add</button>
             </div>
           </label>
+        </div>
+
+        <div id="savedFoodsWrap" class="card form-card" hidden>
+          <span class="field-label">Saved foods — tap one to log it</span>
+          <div id="savedFoodLogList" class="entry-list"></div>
         </div>
 
         <form id="logFoodForm" class="card form-card" hidden>
@@ -242,10 +247,7 @@
       </label>
       <div class="field" id="historyNutritionSubField" hidden>
         <span class="field-label">Nutrition type</span>
-        <div class="segmented" id="historyNutritionSubSegmented" role="radiogroup" aria-label="Nutrition type">
-          <button type="button" data-nutrition-sub="water" role="radio">Water</button>
-          <button type="button" data-nutrition-sub="food" role="radio">Food</button>
-        </div>
+        <div class="segmented-new" id="historyNutritionSubSegmented" role="radiogroup" aria-label="Nutrition type"></div>
       </div>
       <div id="historyList" class="entry-list"></div>
       <div id="historyEmpty" class="empty-state" hidden>
@@ -296,10 +298,7 @@
       </div>
 
       <div id="manageNutritionPanel" hidden>
-        <div class="segmented" id="manageNutritionSubSegmented" role="radiogroup" aria-label="Nutrition type">
-          <button type="button" data-nutrition-sub="water" role="radio">Water</button>
-          <button type="button" data-nutrition-sub="food" role="radio">Food</button>
-        </div>
+        <div class="segmented-new" id="manageNutritionSubSegmented" role="radiogroup" aria-label="Nutrition type"></div>
 
         <div id="manageWaterPanel" hidden>
           <div class="section-head"><h2>Daily water goal</h2></div>
@@ -318,46 +317,66 @@
         </div>
 
         <div id="manageFoodPanel" hidden>
-          <div class="section-head"><h2>Nutrition calculator</h2></div>
-          <p class="muted-text">Estimates daily calories and protein from your Profile, body weight, activity level, and goal (Mifflin-St Jeor formula) — apply it below.</p>
-          <div class="card" id="nutritionCalcCard">
+          <div class="card">
             <div class="setting-row">
-              <span>Use calculator</span>
-              <div class="segmented" id="nutritionCalcEnabledSegmented" role="radiogroup" aria-label="Use nutrition calculator">
+              <span>Track food</span>
+              <div class="segmented" id="trackFoodSegmented" role="radiogroup" aria-label="Track food">
                 <button type="button" data-bool-choice="off" role="radio">Off</button>
                 <button type="button" data-bool-choice="on" role="radio">On</button>
               </div>
             </div>
-            <div id="nutritionCalcFields" hidden>
-              <div class="field">
-                <span class="field-label">Activity level</span>
-                <select id="nutritionActivityLevel"></select>
-              </div>
-              <div class="field">
-                <span class="field-label">Goal</span>
-                <div class="segmented" id="nutritionGoalSegmented" role="radiogroup" aria-label="Nutrition goal">
-                  <button type="button" data-goal-choice="lose" role="radio">Lose weight</button>
-                  <button type="button" data-goal-choice="maintain" role="radio">Maintain</button>
-                  <button type="button" data-goal-choice="gain" role="radio">Gain weight</button>
+          </div>
+          <p class="muted-text" id="trackFoodOffHint" hidden>Food is off — hidden from the dashboard, Log, and History. Nothing already logged is lost; turn it back on to see it again.</p>
+
+          <div id="foodTrackedFields">
+            <div class="section-head"><h2>Nutrition calculator</h2></div>
+            <p class="muted-text">Estimates daily calories and protein from your Profile, body weight, activity level, and goal (Mifflin-St Jeor formula) — apply it below.</p>
+            <div class="card" id="nutritionCalcCard">
+              <div class="setting-row">
+                <span>Use calculator</span>
+                <div class="segmented" id="nutritionCalcEnabledSegmented" role="radiogroup" aria-label="Use nutrition calculator">
+                  <button type="button" data-bool-choice="off" role="radio">Off</button>
+                  <button type="button" data-bool-choice="on" role="radio">On</button>
                 </div>
               </div>
-              <p class="muted-text field-hint" id="nutritionCalcMissing" hidden></p>
-              <div class="pr-grid" id="nutritionCalcPreview" hidden>
-                <div class="pr-tile"><div class="value" id="nutritionCalcCalories">—</div><div class="label">Calories/day</div></div>
-                <div class="pr-tile"><div class="value" id="nutritionCalcProtein">—</div><div class="label">Protein/day</div></div>
+              <div id="nutritionCalcFields" hidden>
+                <div class="field">
+                  <span class="field-label">Activity level</span>
+                  <select id="nutritionActivityLevel"></select>
+                </div>
+                <div class="field">
+                  <span class="field-label">Goal</span>
+                  <div class="segmented" id="nutritionGoalSegmented" role="radiogroup" aria-label="Nutrition goal">
+                    <button type="button" data-goal-choice="lose" role="radio">Lose weight</button>
+                    <button type="button" data-goal-choice="maintain" role="radio">Maintain</button>
+                    <button type="button" data-goal-choice="gain" role="radio">Gain weight</button>
+                  </div>
+                </div>
+                <p class="muted-text field-hint" id="nutritionCalcMissing" hidden></p>
+                <div class="pr-grid" id="nutritionCalcPreview" hidden>
+                  <div class="pr-tile"><div class="value" id="nutritionCalcCalories">—</div><div class="label">Calories/day</div></div>
+                  <div class="pr-tile"><div class="value" id="nutritionCalcProtein">—</div><div class="label">Protein/day</div></div>
+                </div>
+                <button type="button" class="btn btn-primary btn-block" id="applyNutritionCalcBtn">Apply to daily goals</button>
               </div>
-              <button type="button" class="btn btn-primary btn-block" id="applyNutritionCalcBtn">Apply to daily goals</button>
             </div>
-          </div>
 
-          <div class="section-head"><h2>Daily goals</h2></div>
-          <p class="muted-text">Every field below is always available to log from Log &rarr; Nutrition &rarr; Food. Turn on a daily goal for any of them here — one, several, or all — to see progress against it on the dashboard.</p>
-          <!-- Populated by renderFoodManagePanel() — one toggle+amount row
-               per MACRO_KEYS entry, rather than one hardcoded row per field
-               in markup, since that list has grown from 4 to 7 fields
-               (sugar/sodium/caffeine) and is more likely to grow again than
-               Water's fixed cup-size list is. -->
-          <div class="card" id="macroGoalRows"></div>
+            <div class="section-head"><h2>Tracked macros</h2></div>
+            <p class="muted-text">Calories is always tracked and required to log an entry. Turn any other field on to start logging it — turning it back off hides it from the log form and today's totals, without losing anything already logged. Add a daily goal to any tracked field to see progress against it on the dashboard.</p>
+            <!-- Populated by renderFoodManagePanel() — one toggle+amount row
+                 per MACRO_KEYS entry, rather than one hardcoded row per field
+                 in markup, since that list has grown from 4 to 7 fields
+                 (sugar/sodium/caffeine) and is more likely to grow again than
+                 Water's fixed cup-size list is. -->
+            <div class="card" id="macroGoalRows"></div>
+
+            <div class="section-head">
+              <h2>Saved foods</h2>
+              <button class="btn btn-secondary btn-sm btn-icon-label" data-action="add-saved-food"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg><span>Save a new food</span></button>
+            </div>
+            <p class="muted-text">Research a food's numbers once, save it here, then log it in one tap from Log &rarr; Food — optionally scaling the quantity.</p>
+            <div id="savedFoodManageList" class="entry-list"></div>
+          </div>
         </div>
       </div>
     </section>
@@ -484,6 +503,13 @@
             <button type="button" data-bool-choice="on" role="radio">On</button>
           </div>
         </div>
+        <div class="setting-row">
+          <span>Macro guidance <span class="muted-text">(%DV for Fat, Sugar, Sodium, etc.)</span></span>
+          <div class="segmented" id="showMacroGuidanceSegmented" role="radiogroup" aria-label="Macro guidance">
+            <button type="button" data-bool-choice="off" role="radio">Off</button>
+            <button type="button" data-bool-choice="on" role="radio">On</button>
+          </div>
+        </div>
         <p class="muted-text field-hint">Strength and pace levels use published benchmarks, split by sex (set in Profile above).</p>
       </div>
 
@@ -499,7 +525,7 @@
 
       <div class="section-head"><h2>About</h2></div>
       <div class="card">
-        <p class="muted-text">Fit Log v1.12 &middot; installed as a home-screen app, all data stored on-device.</p>
+        <p class="muted-text">Fit Log v1.13 &middot; installed as a home-screen app, all data stored on-device.</p>
       </div>
     </section>
 

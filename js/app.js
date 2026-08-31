@@ -195,7 +195,7 @@
      import path runs the exact same migrations.
      ========================================================================== */
 
-  const SCHEMA_VERSION = 11;
+  const SCHEMA_VERSION = 12;
 
   // Known "daily" exercise ids from before the Goal/Daily/Other split
   // existed (schema v1). Used only by the v1->v2 migration below.
@@ -473,7 +473,33 @@
       }
       return data;
     },
-    // Next migration goes here, keyed `11: (data) => { ...; return data; }`.
+    // v11 -> v12: three changes, all for the nutrition/onboarding rework.
+    // (1) Each macro's `enabled` flag (see macroGoalInfo) is repurposed
+    // from "has a daily goal" to "tracked at all" for every macro EXCEPT
+    // Calories, which is always tracked regardless (see macroTracked) —
+    // its `enabled` still only ever means "has a goal," so migrating it
+    // needs no change. Protein/Carbs/Fat are forced on so nobody who never
+    // bothered to set a goal for them suddenly loses a field they were
+    // already using; Sugar/Sodium/Caffeine are forced on only where an
+    // existing entry actually has a value for them, so a field genuinely
+    // never used stays off (the declutter this was for) while one that IS
+    // used stays visible. (2) `food.savedFoods` — the new Saved Foods list,
+    // starts empty. (3) `settings.trackFood`/`showMacroGuidance` — new
+    // toggles, both additive with safe defaults (Food stays on for
+    // existing installs; guidance starts off like every other insight).
+    11: (data) => {
+      const usedExtraKeys = new Set();
+      (data.food.entries || []).forEach((e) => {
+        ['sugar', 'sodium', 'caffeine'].forEach((k) => { if (e[k] != null) usedExtraKeys.add(k); });
+      });
+      ['protein', 'carbs', 'fat'].forEach((k) => { data.settings.macroGoals[k].enabled = true; });
+      usedExtraKeys.forEach((k) => { data.settings.macroGoals[k].enabled = true; });
+      if (!Array.isArray(data.food.savedFoods)) data.food.savedFoods = [];
+      if (data.settings.trackFood === undefined) data.settings.trackFood = true;
+      if (data.settings.showMacroGuidance === undefined) data.settings.showMacroGuidance = false;
+      return data;
+    },
+    // Next migration goes here, keyed `12: (data) => { ...; return data; }`.
   };
 
   /** Walks `data` forward through MIGRATIONS until it matches SCHEMA_VERSION. */
@@ -555,13 +581,26 @@
     // separate, optional trailing-nights average/category insight
     // (sleepInsights()), same off-by-default treatment as every other one.
     showSleepInsights: false,
-    // Every macro is always loggable (see the "Food / nutrition" section
-    // below) — this only controls whether a DAILY GOAL is set for a given
-    // macro, and what it is. All off by default, same as a water/tracker
-    // goal starting unset. Managed from Manage -> Food.
+    // Daily-value guidance card (Fat/Sugar/Sodium/etc. vs. published FDA
+    // reference values) in the Food detail modal — off by default, same
+    // off-by-default treatment as every other insight above.
+    showMacroGuidance: false,
+    // Whether Food is tracked at all — the setup wizard's Food interest
+    // tile writes this; a Settings toggle re-enables it later, since Food
+    // has no per-item unarchive the way a tracker does. Gates the
+    // dashboard's Food section and the Food sub-tab in Log/History/Manage.
+    trackFood: true,
+    // Each macro's `enabled` flag now does double duty: whether the field
+    // is tracked at all (shown in the log form / today's totals), and
+    // whether it additionally has a daily GOAL set. Calories has no
+    // visibility toggle (always tracked, see renderFoodManagePanel) so its
+    // `enabled` here only ever means "has a goal," same as before.
+    // Protein/Carbs/Fat start tracked (the four macros this app has always
+    // shown); Sugar/Sodium/Caffeine start off — opt in from Manage ->
+    // Nutrition -> Food. Managed from Manage -> Food.
     macroGoals: {
-      calories: { enabled: false, goal: null }, protein: { enabled: false, goal: null },
-      carbs: { enabled: false, goal: null }, fat: { enabled: false, goal: null },
+      calories: { enabled: false, goal: null }, protein: { enabled: true, goal: null },
+      carbs: { enabled: true, goal: null }, fat: { enabled: true, goal: null },
       sugar: { enabled: false, goal: null }, sodium: { enabled: false, goal: null }, caffeine: { enabled: false, goal: null },
     },
     // The nutrition calculator (Manage -> Nutrition -> Food): off by
@@ -578,7 +617,7 @@
   // A brand-new install's starting Food state — always empty; there's no
   // meaningful "starter" food entry the way there are starter exercises.
   function defaultFood() {
-    return { entries: [] };
+    return { entries: [], savedFoods: [] };
   }
 
   // The starting data for a brand-new install — already in the current
@@ -986,6 +1025,10 @@
   // suggestions, each tagged with `metric`, computed from the same pair of
   // logged entries (one run informs both).
   function suggestNextTarget(exercise) {
+    // Daily-section exercises (push-ups, crunches, etc.) are open-ended "stay
+    // active" targets, not a progressive-overload lift or a cardio goal —
+    // there's no "next session" to size, so no suggestion card at all.
+    if (sectionOf(exercise) === 'daily') return [];
     const entries = entriesFor(exercise.id).slice().sort((a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id));
     if (!entries.length) return [{ headline: 'Log a session to get a suggestion.', method: null }];
     const last = entries[0];
@@ -1498,15 +1541,23 @@
      same rationale as Water above: this is additive, and specifically
      built to never touch `exercises`/`entries`, `trackers`/`measurements`,
      or `water`/`waterEntries`. One entry is one thing eaten OR drunk, with
-     up to seven optional numbers (any or all may be left blank, since not
-     everyone knows every value for everything they consume) plus an
-     optional note, on a date. Every field in MACRO_KEYS is ALWAYS loggable
-     — there's no visibility toggle. What IS a per-install choice
-     (`state.settings.macroGoals`, managed from Manage -> Nutrition -> Food)
-     is which fields have a daily GOAL set, mirroring how a water/tracker
-     goal is opt-in: a field with no goal just totals for the day with no
-     progress comparison; one with a goal shows "1850 / 2600 kcal" style
-     progress the same way Water shows progress toward its daily goal.
+     Calories plus up to six other optional numbers (any of the six may be
+     left blank, since not everyone knows every value for everything they
+     consume) plus an optional note, on a date.
+
+     Calories is always tracked and always required to log an entry — see
+     handleLogFoodSubmit. Every other field in MACRO_KEYS is gated by
+     `state.settings.macroGoals[key].enabled` (managed from Manage ->
+     Nutrition -> Food): Off means the field is fully gone — not in the log
+     form, not in today's totals, not in history — not just "no goal set."
+     On does double duty, the same one toggle also revealing an optional
+     daily-goal amount for that field, mirroring how a water/tracker goal is
+     opt-in: tracked-with-no-goal just totals for the day with no progress
+     comparison; tracked-with-a-goal shows "1850 / 2600 kcal" style progress
+     the same way Water shows progress toward its daily goal. Turning a
+     field back on doesn't lose anything logged while it was off — old
+     values for it stay in storage untouched, they just don't surface in the
+     UI until it's tracked again.
 
      Sodium, sugar, and caffeine were added the same way as the original
      four macros — new keys in this same list, nothing structurally new —
@@ -1530,7 +1581,48 @@
   // single typical serving/meal looks like for that field.
   const MACRO_PLACEHOLDERS = { calories: '520', protein: '30', carbs: '30', fat: '15', sugar: '10', sodium: '400', caffeine: '95' };
 
+  // FDA Nutrition Facts Daily Values for a 2,000-calorie diet — the same
+  // reference figures printed on every packaged-food label in the US, used
+  // by the optional "Daily value guidance" card (Settings ->
+  // showMacroGuidance). Caffeine has no formal %DV; 400mg is the FDA's own
+  // general consumer guidance for "how much is usually not associated with
+  // dangerous effects," shown the same way but labeled as general guidance
+  // rather than a DV. The published Sugar DV (50g) is specifically for
+  // ADDED sugar; Fit Log logs one total-sugar number, so that comparison is
+  // an upper bound, not exact — flagged wherever it's shown. Calories has
+  // no fixed DV (the app's own nutrition calculator is the personalized
+  // equivalent) and Carbs/Protein/Fat are the plain macronutrient DVs, not
+  // per-meal targets.
+  const MACRO_DV = { protein: 50, carbs: 275, fat: 78, sugar: 50, sodium: 2300, caffeine: 400 };
+  // Macros where going over 100% DV is a "watch this" signal worth
+  // flagging red — the public-health framing for these three is "less is
+  // better," unlike Protein/Carbs/Fat, where a published DV is just a
+  // reference point, not a ceiling. Only these three ever get the red
+  // over-DV treatment on the dashboard card or in the guidance table.
+  const MACRO_DV_OVER_FLAGS = new Set(['sugar', 'sodium', 'caffeine']);
+  // Rounded %DV for one macro's value, or null if there's no DV for that
+  // key or nothing logged yet — shared by the dashboard card's red
+  // highlighting and the food detail modal's guidance table.
+  function macroDvPct(key, value) {
+    const dv = MACRO_DV[key];
+    if (dv == null || value == null) return null;
+    return Math.round((value / dv) * 100);
+  }
+  function macroDvOver(key, value) {
+    const pct = macroDvPct(key, value);
+    return MACRO_DV_OVER_FLAGS.has(key) && pct != null && pct >= 100;
+  }
+
   function macroGoalInfo(key) { return state.settings.macroGoals[key]; }
+
+  // Whether a macro is tracked at all right now — shown in the log form,
+  // totaled on the dashboard, offered in Manage. Calories is exempt from
+  // the toggle entirely (see the section comment above) and always tracked.
+  function macroTracked(key) { return key === 'calories' || macroGoalInfo(key).enabled; }
+
+  // Every currently-tracked macro, in MACRO_KEYS order — what the log form
+  // and today's totals actually render.
+  function trackedMacroKeys() { return MACRO_KEYS.filter(macroTracked); }
 
   // Fields that currently have a daily goal turned on, in MACRO_KEYS order.
   function macroGoalKeys() {
@@ -1635,8 +1727,11 @@
 
   // A short "520 cal, 40g protein" style summary for one entry or one
   // day's totals — used by both the entry row and the history date header.
+  // Only currently-tracked macros are included, same as the log form and
+  // today's totals — a macro turned off is fully gone from history too,
+  // not just new logging (see the "Food / nutrition" section).
   function macroSummaryText(values) {
-    const parts = MACRO_KEYS
+    const parts = trackedMacroKeys()
       .filter((k) => values[k] != null)
       .map((k) => k === 'calories' ? `${Math.round(values[k])} cal` : `${fmtMacroValue(k, values[k])} ${MACRO_LABELS[k].toLowerCase()}`);
     return parts.length ? parts.join(', ') : 'No macros logged';
@@ -2541,33 +2636,40 @@
     renderBodySection();
   }
 
-  // A read-only "today so far" summary of all four macros — Food doesn't
-  // get quick-tap logging buttons on the dashboard the way Water does
-  // (typed macro numbers don't reduce to one tap), but seeing today's
-  // running total without a trip to Log or History is still worth having
-  // front and center. Every macro always shows a total; one with a daily
-  // goal enabled (Manage -> Nutrition -> Food) additionally shows "/ goal"
-  // underneath, the same way Water shows progress toward its daily goal.
-  // The whole card is tappable (same "quick glance here, detail one tap in"
-  // pattern as every other dashboard card) into openFoodDetail() below,
-  // which is where the richer breakdown, the nutrition calculator's
-  // recommendation, and quick access to logging/adjusting goals now live —
-  // this flat grid stays a lightweight summary.
+  // A read-only "today so far" summary of every tracked macro (see
+  // trackedMacroKeys — a macro turned off in Manage -> Nutrition -> Food
+  // isn't rendered here at all) — Food doesn't get quick-tap logging
+  // buttons on the dashboard the way Water does (typed macro numbers don't
+  // reduce to one tap), but seeing today's running total without a trip to
+  // Log or History is still worth having front and center. Every tile
+  // always shows a total; one with a daily goal enabled additionally shows
+  // "/ goal" underneath, the same way Water shows progress toward its daily
+  // goal; when the daily-value guidance toggle (Settings -> Insights) is
+  // on, a value past the DV for Sugar/Sodium/Caffeine (see
+  // MACRO_DV_OVER_FLAGS) is highlighted red right here too, not just in the
+  // detail modal's table. The whole card is tappable (same "quick glance
+  // here, detail one tap in" pattern as every other dashboard card) into
+  // openFoodDetail() below, which is where the richer breakdown, the
+  // nutrition calculator's recommendation, and quick access to
+  // logging/adjusting goals now live — this flat grid stays a lightweight
+  // summary.
   function renderFoodDashboardSection() {
-    document.getElementById('foodSectionHead').hidden = false;
+    document.getElementById('foodSectionHead').hidden = !state.settings.trackFood;
     const wrap = document.getElementById('foodDashboardWrap');
-    wrap.hidden = false;
+    wrap.hidden = !state.settings.trackFood;
+    if (!state.settings.trackFood) { wrap.innerHTML = ''; return; }
     const totals = foodTotalsForDate(todayISO());
     wrap.innerHTML = `
       <div class="card food-dashboard-card">
         <div class="food-totals-row">
-          ${MACRO_KEYS.map((k) => {
+          ${trackedMacroKeys().map((k) => {
             const goalInfo = macroGoalInfo(k);
             const goalLine = (goalInfo.enabled && goalInfo.goal != null)
               ? `<div class="food-total-goal">/ ${fmtMacroValue(k, goalInfo.goal)}</div>` : '';
+            const isOver = state.settings.showMacroGuidance && macroDvOver(k, totals[k]);
             return `
               <div class="food-total-item">
-                <div class="food-total-value">${fmtMacroValue(k, totals[k])}</div>
+                <div class="food-total-value${isOver ? ' is-over-dv' : ''}">${fmtMacroValue(k, totals[k])}</div>
                 ${goalLine}
                 <div class="food-total-label">${MACRO_LABELS[k]}</div>
               </div>`;
@@ -2587,7 +2689,8 @@
     const totals = foodTotalsForDate(todayISO());
     const calc = state.settings.nutritionCalc;
     const suggestion = calc.enabled ? computeNutritionTargets(calc.activityLevel, calc.goal) : null;
-    const rows = MACRO_KEYS.map((k) => {
+    const trackedKeys = trackedMacroKeys();
+    const rows = trackedKeys.map((k) => {
       const goalInfo = macroGoalInfo(k);
       const hasGoal = goalInfo.enabled && goalInfo.goal != null;
       const value = totals[k];
@@ -2598,6 +2701,30 @@
       }
       return `<div class="standards-preview-row"><span>${MACRO_LABELS[k]}</span><span>${rightText}</span></div>`;
     }).join('');
+
+    // "Daily value guidance" — a second, toggleable table (Settings ->
+    // Insights -> Macro guidance) rather than folded into the totals table
+    // above: mixing a personal goal ("1850 / 2600 kcal") and a generic FDA
+    // reference value ("58g of 78g DV") on the same row read as two
+    // different kinds of number competing for the same line. Row text is
+    // deliberately just "value + %DV", not a sentence ("61g over the 50g
+    // added-sugar DV") — the caveats that sentence used to carry (added
+    // sugar vs. total sugar, caffeine's guidance vs. a real DV) live once,
+    // below the table, instead of repeated per row.
+    const guidanceKeys = trackedKeys.filter((k) => MACRO_DV[k] != null);
+    const guidanceHtml = (state.settings.showMacroGuidance && guidanceKeys.length) ? `
+      <div class="card">
+        <div class="section-head"><h2>Daily value guidance</h2></div>
+        <div class="standards-preview">
+          ${guidanceKeys.map((k) => {
+            const value = totals[k];
+            const pct = macroDvPct(k, value);
+            const over = macroDvOver(k, value);
+            return `<div class="standards-preview-row${over ? ' over' : ''}"><span>${MACRO_LABELS[k]}</span><span>${fmtMacroValue(k, value)} <span class="pct">${pct != null ? `${pct}% DV` : '—'}</span></span></div>`;
+          }).join('')}
+        </div>
+        <p class="muted-text field-hint">General adult reference values for a 2,000-calorie diet, not personalized. Sugar's DV is for <i>added</i> sugar specifically — Fit Log logs one total, so treat that comparison as an upper bound. Caffeine has no official DV; 400mg is the FDA's general guidance, shown the same way.</p>
+      </div>` : '';
 
     let calcHtml;
     if (!calc.enabled) {
@@ -2631,6 +2758,7 @@
         <div class="section-head"><h2>Today's totals</h2></div>
         <div class="standards-preview">${rows}</div>
       </div>
+      ${guidanceHtml}
       ${calcHtml}
       <div class="btn-row">
         <button class="btn btn-secondary" id="adjustFoodGoalsBtn">Adjust goals</button>
@@ -2730,6 +2858,17 @@
   // `droplets`.
   const WATER_DROP_ICON_SVG = '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 16.3c2.2 0 4-1.83 4-4.05 0-1.16-.57-2.26-1.71-3.19S7.29 6.75 7 5.3c-.29 1.45-1.14 2.84-2.29 3.76S3 11.1 3 12.25c0 2.22 1.8 4.05 4 4.05z"/><path d="M12.56 6.6A10.97 10.97 0 0 0 14 3.02c.5 2.5 2 4.9 4 6.5s3 3.5 3 5.5a6.98 6.98 0 0 1-11.91 4.97"/></svg>';
 
+  // The Water/Food sub-tabs' Food glyph (see nutritionSubTabsHtml below),
+  // and the setup wizard's Food interest tile. Lucide `apple`.
+  const APPLE_ICON_SVG = '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 6.528V3a1 1 0 0 1 1-1h0"/><path d="M18.237 21A15 15 0 0 0 22 11a6 6 0 0 0-10-4.472A6 6 0 0 0 2 11a15.1 15.1 0 0 0 3.763 10 3 3 0 0 0 3.648.648 5.5 5.5 0 0 1 5.178 0A3 3 0 0 0 18.237 21"/></svg>';
+
+  // The setup wizard's interest tiles (see renderSetupStepInterests) — one
+  // icon per trackable thing the wizard asks about up front. Lifting reuses
+  // DOMAIN_TAB_ICONS.workout (same dumbbell, same meaning); the rest are new.
+  const FOOTPRINTS_ICON_SVG = '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 16v-2.38C4 11.5 2.97 10.5 3 8c.03-2.72 1.49-6 4.5-6C9.37 2 10 3.8 10 5.5c0 3.11-2 5.66-2 8.68V16a2 2 0 1 1-4 0Z"/><path d="M20 20v-2.38c0-2.12 1.03-3.12 1-5.62-.03-2.72-1.49-6-4.5-6C14.63 6 14 7.8 14 9.5c0 3.11 2 5.66 2 8.68V20a2 2 0 1 0 4 0Z"/><path d="M16 17h4"/><path d="M4 13h4"/></svg>';
+  const SCALE_ICON_SVG = '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v18"/><path d="m19 8 3 8a5 5 0 0 1-6 0zV7"/><path d="M3 7h1a17 17 0 0 0 8-2 17 17 0 0 0 8 2h1"/><path d="m5 8 3 8a5 5 0 0 1-6 0zV7"/><path d="M7 21h10"/></svg>';
+  const MOON_ICON_SVG = '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.985 12.486a9 9 0 1 1-9.473-9.472c.405-.022.617.46.402.803a6 6 0 0 0 8.268 8.268c.344-.215.825-.004.803.401"/></svg>';
+
   // The three domain-tab icons, shared by Log (built here), and duplicated
   // byte-for-byte in index.html for History and Manage, whose outer
   // category buttons are static markup rather than JS-rendered (History and
@@ -2744,10 +2883,25 @@
     nutrition: '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 2v7c0 1.1.9 2 2 2h4a2 2 0 0 0 2-2V2"/><path d="M7 2v20"/><path d="M21 15V2a5 5 0 0 0-5 5v6c0 1.1.9 2 2 2h3Zm0 0v7"/></svg>',
   };
 
+  // Nutrition's Water/Food sub-tabs (icon + label pill — see .segmented-new
+  // in styles.css), shared by all three places it appears: Log, History,
+  // and Manage > Nutrition. All three already track which sub is active in
+  // their own local variable and re-render on click; this just builds the
+  // markup so the three copies can't drift the way the old plain-text pill
+  // (`<button>${s.label}</button>`) did.
+  const NUTRITION_SUB_ICONS = { water: WATER_DROP_ICON_SVG, food: APPLE_ICON_SVG };
+  function nutritionSubTabsHtml(subs, activeId) {
+    return subs.map((s) => `
+      <button type="button" data-nutrition-sub="${s.id}" role="radio" aria-checked="${s.id === activeId}">
+        ${NUTRITION_SUB_ICONS[s.id] || ''}
+        <span>${s.label}</span>
+      </button>`).join('');
+  }
+
   function availableLogCategories() {
     const cats = [{ id: 'workout', label: 'Workout' }];
     if (activeTrackers().length) cats.push({ id: 'measurement', label: 'Measurements' });
-    cats.push({ id: 'nutrition', label: 'Nutrition' });
+    if (availableNutritionSubs().length) cats.push({ id: 'nutrition', label: 'Nutrition' });
     return cats;
   }
 
@@ -2835,34 +2989,39 @@
     }));
   }
 
-  // All four macros, always — there's no visibility toggle (see the "Food
-  // / nutrition" section for why); every field is independently optional
-  // at the point of logging regardless of whether it has a daily goal set.
+  // Only currently-tracked macros (see trackedMacroKeys) — a macro turned
+  // off in Manage -> Nutrition -> Food doesn't show up here at all. Calories
+  // is always first and always required (handleLogFoodSubmit below); every
+  // other tracked field stays genuinely optional.
   function renderLogFoodForm() {
     document.getElementById('logFoodDate').value = document.getElementById('logFoodDate').value || todayISO();
     const wrap = document.getElementById('logFoodDynamicFields');
-    wrap.innerHTML = MACRO_KEYS.map((k) => `
-      <label class="field"><span class="field-label">${MACRO_LABELS[k]}${MACRO_UNITS[k] ? ` (${MACRO_UNITS[k]})` : ''} <span class="muted-text">(optional)</span></span>
-        <input type="number" step="any" min="0" id="logFood_${k}" placeholder="e.g. ${MACRO_PLACEHOLDERS[k]}" /></label>`).join('');
+    wrap.innerHTML = trackedMacroKeys().map((k) => {
+      const req = k === 'calories';
+      return `
+      <label class="field"><span class="field-label">${MACRO_LABELS[k]}${MACRO_UNITS[k] ? ` (${MACRO_UNITS[k]})` : ''} ${req ? '<span class="req-mark">*</span>' : '<span class="muted-text">(optional)</span>'}</span>
+        <input type="number" step="any" min="0" id="logFood_${k}" placeholder="e.g. ${MACRO_PLACEHOLDERS[k]}" ${req ? 'required' : ''} /></label>`;
+    }).join('');
   }
 
   function handleLogFoodSubmit(ev) {
     ev.preventDefault();
     const values = {};
-    let any = false;
-    MACRO_KEYS.forEach((k) => {
+    trackedMacroKeys().forEach((k) => {
       const el = document.getElementById(`logFood_${k}`);
       const raw = el ? parseFloat(el.value) : NaN;
       values[k] = (!Number.isNaN(raw) && raw >= 0) ? raw : null;
-      if (values[k] != null) any = true;
     });
-    if (!any) { toast('Enter at least one value before saving.'); return; }
+    // Calories is the one required field — an entry with, say, only sodium
+    // filled in isn't a usable food log (see the "Food / nutrition"
+    // section). Every other tracked macro stays optional.
+    if (values.calories == null) { toast('Enter calories to log a food entry.'); return; }
     const date = document.getElementById('logFoodDate').value || todayISO();
     const note = document.getElementById('logFoodNote').value.trim();
     state.food.entries.push({ id: genId('food'), date, ...values, note: note || null });
     save();
     toast('Food logged');
-    MACRO_KEYS.forEach((k) => { const el = document.getElementById(`logFood_${k}`); if (el) el.value = ''; });
+    trackedMacroKeys().forEach((k) => { const el = document.getElementById(`logFood_${k}`); if (el) el.value = ''; });
     document.getElementById('logFoodNote').value = '';
     renderRecentEntries();
     renderDashboard();
@@ -2872,13 +3031,17 @@
   // Nutrition's own nested segmented control — Water and Food are too
   // different an interaction (tap-a-cup vs. typed numbers) to share one
   // form the way Workout/Measurements/Nutrition share the outer one. Water
-  // is only offered while at least one cup exists; Food is always offered.
+  // is only offered while at least one cup exists; Food only while
+  // settings.trackFood is on (see the setup wizard's interests step and the
+  // Settings toggle that mirrors it) — both can be off at once, which
+  // every caller of this (Log/History/Manage) needs to handle rendering
+  // nothing rather than assuming at least one sub always exists.
   let logNutritionSub = 'water';
 
   function availableNutritionSubs() {
     const subs = [];
     if (state.water.cups.length) subs.push({ id: 'water', label: 'Water' });
-    subs.push({ id: 'food', label: 'Food' });
+    if (state.settings.trackFood) subs.push({ id: 'food', label: 'Food' });
     return subs;
   }
 
@@ -2886,15 +3049,15 @@
     const subs = availableNutritionSubs();
     if (!subs.some((s) => s.id === logNutritionSub)) logNutritionSub = subs[0].id;
     const seg = document.getElementById('logNutritionSubSegmented');
-    seg.innerHTML = subs.map((s) => `<button type="button" data-nutrition-sub="${s.id}" role="radio">${s.label}</button>`).join('');
+    seg.innerHTML = nutritionSubTabsHtml(subs, logNutritionSub);
     seg.querySelectorAll('button').forEach((b) => {
-      b.setAttribute('aria-checked', String(b.dataset.nutritionSub === logNutritionSub));
       b.addEventListener('click', () => { logNutritionSub = b.dataset.nutritionSub; renderLogNutritionPanel(); renderRecentEntries(); });
     });
     document.getElementById('logWaterPanel').hidden = logNutritionSub !== 'water';
     document.getElementById('logFoodForm').hidden = logNutritionSub !== 'food';
+    document.getElementById('savedFoodsWrap').hidden = logNutritionSub !== 'food' || !state.food.savedFoods.length;
     if (logNutritionSub === 'water') renderLogWaterPanel();
-    if (logNutritionSub === 'food') renderLogFoodForm();
+    if (logNutritionSub === 'food') { renderLogFoodForm(); renderSavedFoodLogList(); }
   }
 
   // Redraws whichever Log sub-form is currently selected, plus the shared
@@ -3042,10 +3205,10 @@
     });
   }
 
-  // Edit modal always shows all four macro fields — every macro is always
-  // loggable regardless of which ones currently have a daily goal set (see
-  // the "Food / nutrition" section), so there's nothing to conditionally
-  // hide here in the first place.
+  // Edit modal only shows currently-tracked macro fields (see
+  // trackedMacroKeys) — a field that's off doesn't render an input at all,
+  // so `Object.assign(e, values)` below only ever touches tracked keys and
+  // any value already saved for an untracked one is left exactly as it was.
   function openFoodEntryModal(entryId) {
     const e = state.food.entries.find((x) => x.id === entryId);
     if (!e) return;
@@ -3053,9 +3216,12 @@
       <div class="modal-title-row"><h2>Edit food entry</h2><button class="modal-close" data-action="close-modal">${CLOSE_ICON_SVG}</button></div>
       <div class="form-card">
         <label class="field"><span class="field-label">Date</span><input type="date" id="editFoodDate" value="${e.date}" /></label>
-        ${MACRO_KEYS.map((k) => `
-        <label class="field"><span class="field-label">${MACRO_LABELS[k]}${MACRO_UNITS[k] ? ` (${MACRO_UNITS[k]})` : ''} <span class="muted-text">(optional)</span></span>
-          <input type="number" step="any" min="0" id="editFood_${k}" value="${e[k] != null ? e[k] : ''}" /></label>`).join('')}
+        ${trackedMacroKeys().map((k) => {
+          const req = k === 'calories';
+          return `
+        <label class="field"><span class="field-label">${MACRO_LABELS[k]}${MACRO_UNITS[k] ? ` (${MACRO_UNITS[k]})` : ''} ${req ? '<span class="req-mark">*</span>' : '<span class="muted-text">(optional)</span>'}</span>
+          <input type="number" step="any" min="0" id="editFood_${k}" value="${e[k] != null ? e[k] : ''}" ${req ? 'required' : ''} /></label>`;
+        }).join('')}
         <label class="field"><span class="field-label">Note</span><input type="text" id="editFoodNote" value="${e.note ? escapeHtml(e.note) : ''}" maxlength="200" /></label>
         <div class="btn-row"><button class="btn btn-primary btn-block" id="saveFoodEntryBtn">Save changes</button></div>
         <button class="btn btn-danger btn-block" id="deleteFoodEntryBtn">Delete entry</button>
@@ -3067,8 +3233,8 @@
     };
     document.getElementById('saveFoodEntryBtn').addEventListener('click', () => {
       const values = {};
-      MACRO_KEYS.forEach((k) => { values[k] = readMacro(`editFood_${k}`); });
-      if (MACRO_KEYS.every((k) => values[k] == null)) { toast('Enter at least one value.'); return; }
+      trackedMacroKeys().forEach((k) => { values[k] = readMacro(`editFood_${k}`); });
+      if (values.calories == null) { toast('Enter calories to save this entry.'); return; }
       e.date = document.getElementById('editFoodDate').value || e.date;
       Object.assign(e, values);
       e.note = document.getElementById('editFoodNote').value.trim() || null;
@@ -3085,6 +3251,197 @@
         renderRecentEntries(); renderDashboard(); renderHistory();
       }, true);
     });
+  }
+
+  /* ============================== Saved Foods ==============================
+     The exercise-library equivalent for food: research a food's numbers
+     once, save it under a name (Manage -> Nutrition -> Food -> Saved
+     foods), and every later logging of it is one tap — optionally scaled by
+     quantity — instead of retyping every macro. A saved food stores
+     whatever tracked macros were filled in when it was created/edited, same
+     shape as a food entry; logging one just scales those fields by the
+     chosen quantity and pushes a normal entry, indistinguishable afterward
+     from one typed by hand. No database, no barcode lookup, no network —
+     just a shortcut list the user curates themselves. */
+
+  function savedFoodById(id) { return state.food.savedFoods.find((f) => f.id === id); }
+
+  function savedFoodRowHtml(food) {
+    return `
+      <div class="entry-row is-manage" data-saved-food-id="${food.id}">
+        <div class="entry-row-main">
+          <div class="entry-row-title">${escapeHtml(food.name)}</div>
+          <div class="entry-row-sub">${macroSummaryText(food)}</div>
+        </div>
+        <div class="entry-row-actions">
+          <button class="btn btn-secondary btn-sm" data-action="edit-saved-food" data-id="${food.id}">Edit</button>
+        </div>
+      </div>`;
+  }
+
+  function renderSavedFoodManageList() {
+    const wrap = document.getElementById('savedFoodManageList');
+    wrap.innerHTML = state.food.savedFoods.map(savedFoodRowHtml).join('')
+      || '<p class="muted-text">No saved foods yet — research a food once, save it here, then log it in one tap from Log &rarr; Food.</p>';
+    wrap.querySelectorAll('[data-action="edit-saved-food"]').forEach((btn) => btn.addEventListener('click', () => openSavedFoodForm(btn.dataset.id)));
+  }
+
+  // Only currently-tracked macros are asked for (same fields as the log
+  // form itself, Calories required) — a saved food is just a template for
+  // a food entry, so it follows the same tracking rules one would.
+  function openSavedFoodForm(foodId) {
+    const editing = !!foodId;
+    const food = editing ? savedFoodById(foodId) : null;
+    openModal(`
+      <div class="modal-title-row"><h2>${editing ? 'Edit saved food' : 'Save a new food'}</h2><button class="modal-close" data-action="close-modal">${CLOSE_ICON_SVG}</button></div>
+      <div class="form-card">
+        <label class="field"><span class="field-label">Name</span>
+          <input type="text" id="savedFoodName" value="${food ? escapeHtml(food.name) : ''}" placeholder="e.g. Chicken breast, 6oz" maxlength="60" /></label>
+        ${trackedMacroKeys().map((k) => {
+          const req = k === 'calories';
+          return `
+        <label class="field"><span class="field-label">${MACRO_LABELS[k]}${MACRO_UNITS[k] ? ` (${MACRO_UNITS[k]})` : ''} ${req ? '<span class="req-mark">*</span>' : '<span class="muted-text">(optional)</span>'}</span>
+          <input type="number" step="any" min="0" id="savedFood_${k}" value="${food && food[k] != null ? food[k] : ''}" ${req ? 'required' : ''} /></label>`;
+        }).join('')}
+        <button type="button" class="btn btn-primary btn-block" id="saveSavedFoodBtn">${editing ? 'Save changes' : 'Save food'}</button>
+        ${editing ? `<button type="button" class="btn-text-danger" id="deleteSavedFoodBtn">Delete saved food</button>` : ''}
+      </div>
+    `);
+    document.getElementById('saveSavedFoodBtn').addEventListener('click', () => {
+      const name = document.getElementById('savedFoodName').value.trim();
+      if (!name) { toast('Give it a name.'); return; }
+      const values = {};
+      trackedMacroKeys().forEach((k) => {
+        const el = document.getElementById(`savedFood_${k}`);
+        const raw = el ? parseFloat(el.value) : NaN;
+        values[k] = (!Number.isNaN(raw) && raw >= 0) ? raw : null;
+      });
+      if (values.calories == null) { toast('Enter calories to save this food.'); return; }
+      if (editing) {
+        food.name = name;
+        Object.assign(food, values);
+      } else {
+        state.food.savedFoods.push({ id: genId('savedfood'), name, ...values });
+      }
+      save();
+      closeModal();
+      toast(editing ? 'Saved food updated' : 'Food saved');
+      renderManage();
+      renderLogView();
+    });
+    if (editing) {
+      document.getElementById('deleteSavedFoodBtn').addEventListener('click', () => {
+        confirmDialog('Delete this saved food?', 'This can’t be undone. Food entries already logged from it aren’t affected.', 'Delete', () => {
+          state.food.savedFoods = state.food.savedFoods.filter((f) => f.id !== foodId);
+          save();
+          closeModal();
+          toast('Saved food deleted');
+          renderManage();
+          renderLogView();
+        }, true);
+      });
+    }
+  }
+
+  // Log -> Food's quantity picker is transient UI state, not saved
+  // anywhere — which saved food (if any) is expanded, and what quantity is
+  // currently chosen for it. Reset to 1x whenever a different row is
+  // tapped, same "one open at a time" behavior used elsewhere (e.g. the
+  // suggestion-info modal).
+  let expandedSavedFoodId = null;
+  let savedFoodQty = 1;
+  const SAVED_FOOD_QTY_PRESETS = [0.5, 0.75, 1, 1.5, 2];
+
+  // Every tracked macro on `food`, scaled by `qty` and rounded to one
+  // decimal place — e.g. 1.5x on 280 cal / 53g protein logs 420 cal /
+  // 79.5g protein. A macro the saved food has no value for stays null, same
+  // as any other optional field.
+  function scaledSavedFoodValues(food, qty) {
+    const values = {};
+    trackedMacroKeys().forEach((k) => { values[k] = food[k] != null ? round(food[k] * qty, 1) : null; });
+    return values;
+  }
+
+  function renderSavedFoodLogList() {
+    const wrap = document.getElementById('savedFoodsWrap');
+    const list = document.getElementById('savedFoodLogList');
+    const foods = state.food.savedFoods;
+    wrap.hidden = foods.length === 0;
+    if (!foods.length) { list.innerHTML = ''; return; }
+    list.innerHTML = foods.map((food) => {
+      const expanded = expandedSavedFoodId === food.id;
+      const isCustomQty = !SAVED_FOOD_QTY_PRESETS.includes(savedFoodQty);
+      return `
+        <div class="entry-row saved-food-log-row" data-saved-food-id="${food.id}">
+          <div class="entry-row-main">
+            <div class="entry-row-title">${escapeHtml(food.name)}</div>
+            <div class="entry-row-sub">${macroSummaryText(food)}</div>
+          </div>
+        </div>
+        ${expanded ? `
+        <div class="card form-card saved-food-qty-card">
+          <div class="chip-picker" id="savedFoodQtyChips" role="radiogroup" aria-label="Quantity">
+            ${SAVED_FOOD_QTY_PRESETS.map((q) => `<button type="button" class="chip-option${savedFoodQty === q ? ' is-active' : ''}" data-qty="${q}" role="radio" aria-checked="${savedFoodQty === q}">${q}&times;</button>`).join('')}
+            <button type="button" class="chip-option${isCustomQty ? ' is-active' : ''}" data-qty="custom" role="radio" aria-checked="${isCustomQty}">Custom&hellip;</button>
+          </div>
+          ${isCustomQty ? `
+          <label class="field"><span class="field-label">Custom quantity (&times;)</span>
+            <input type="number" step="any" min="0" id="savedFoodCustomQty" value="${savedFoodQty}" /></label>` : ''}
+          <p class="muted-text field-hint">Logs: ${macroSummaryText(scaledSavedFoodValues(food, savedFoodQty))}</p>
+          <button type="button" class="btn btn-primary btn-block" id="logSavedFoodBtn">Log it</button>
+        </div>` : ''}`;
+    }).join('');
+    list.querySelectorAll('.saved-food-log-row').forEach((row) => {
+      row.addEventListener('click', () => {
+        const id = row.dataset.savedFoodId;
+        expandedSavedFoodId = expandedSavedFoodId === id ? null : id;
+        savedFoodQty = 1;
+        renderSavedFoodLogList();
+      });
+    });
+    const chips = document.getElementById('savedFoodQtyChips');
+    if (chips) {
+      chips.querySelectorAll('.chip-option').forEach((btn) => {
+        btn.addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          if (btn.dataset.qty === 'custom') { savedFoodQty = 1.25; } // any non-preset value switches the picker into "Custom" mode
+          else savedFoodQty = parseFloat(btn.dataset.qty);
+          renderSavedFoodLogList();
+        });
+      });
+    }
+    const customInput = document.getElementById('savedFoodCustomQty');
+    if (customInput) {
+      customInput.addEventListener('click', (ev) => ev.stopPropagation());
+      customInput.addEventListener('change', () => {
+        const raw = parseFloat(customInput.value);
+        if (!Number.isNaN(raw) && raw > 0) savedFoodQty = raw;
+        renderSavedFoodLogList();
+      });
+    }
+    const logBtn = document.getElementById('logSavedFoodBtn');
+    if (logBtn) {
+      logBtn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        logSavedFood(expandedSavedFoodId, savedFoodQty);
+      });
+    }
+  }
+
+  function logSavedFood(foodId, qty) {
+    const food = savedFoodById(foodId);
+    if (!food) return;
+    const values = scaledSavedFoodValues(food, qty);
+    const date = document.getElementById('logFoodDate').value || todayISO();
+    state.food.entries.push({ id: genId('food'), date, ...values, note: food.name });
+    save();
+    toast(`${food.name} logged`);
+    expandedSavedFoodId = null;
+    savedFoodQty = 1;
+    renderSavedFoodLogList();
+    renderRecentEntries();
+    renderDashboard();
+    renderHistory();
   }
 
   function handleLogSubmit(ev) {
@@ -3225,9 +3582,9 @@
     document.getElementById('historyFilterField').hidden = historyCategory !== 'workout';
     document.getElementById('historyNutritionSubField').hidden = historyCategory !== 'nutrition';
     if (historyCategory === 'nutrition') {
-      document.querySelectorAll('#historyNutritionSubSegmented button').forEach((b) => {
-        b.setAttribute('aria-checked', String(b.dataset.nutritionSub === historyNutritionSub));
-      });
+      const subs = availableNutritionSubs();
+      if (subs.length && !subs.some((s) => s.id === historyNutritionSub)) historyNutritionSub = subs[0].id;
+      document.getElementById('historyNutritionSubSegmented').innerHTML = subs.length ? nutritionSubTabsHtml(subs, historyNutritionSub) : '';
     }
   }
 
@@ -3236,6 +3593,11 @@
     renderHistoryCategorySegmented();
     const wrap = document.getElementById('historyList');
 
+    if (historyCategory === 'nutrition' && !availableNutritionSubs().length) {
+      document.getElementById('historyEmpty').hidden = false;
+      wrap.innerHTML = '';
+      return;
+    }
     if (historyCategory === 'measurement') {
       const list = state.measurements.slice().sort((a, b) => (b.date + b.id).localeCompare(a.date + a.id));
       document.getElementById('historyEmpty').hidden = list.length > 0;
@@ -4199,17 +4561,25 @@
     document.getElementById('manageNutritionPanel').hidden = cat !== 'nutrition';
   }
 
+  // Unlike Log/History (which only offer a sub while it's actually tracked
+  // — see availableNutritionSubs), Manage always offers both Water and
+  // Food: it's specifically where a turned-off feature gets turned back on
+  // (add a cup here even with zero cups today; flip "Track food" back on
+  // here even while Food is off), so it can't gate on the very thing it's
+  // meant to change.
+  const MANAGE_NUTRITION_SUBS = [{ id: 'water', label: 'Water' }, { id: 'food', label: 'Food' }];
   function setManageNutritionSub(sub) {
-    manageNutritionSub = sub;
-    document.querySelectorAll('#manageNutritionSubSegmented button').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.nutritionSub === sub)));
-    document.getElementById('manageWaterPanel').hidden = sub !== 'water';
-    document.getElementById('manageFoodPanel').hidden = sub !== 'food';
+    manageNutritionSub = MANAGE_NUTRITION_SUBS.some((s) => s.id === sub) ? sub : 'water';
+    document.getElementById('manageNutritionSubSegmented').innerHTML = nutritionSubTabsHtml(MANAGE_NUTRITION_SUBS, manageNutritionSub);
+    document.getElementById('manageWaterPanel').hidden = manageNutritionSub !== 'water';
+    document.getElementById('manageFoodPanel').hidden = manageNutritionSub !== 'food';
   }
 
-  // Food's one piece of configuration: whether each macro has a daily
-  // goal, and what it is — every macro is always loggable regardless (see
-  // the "Food / nutrition" section). Mirrors Water's own goal input right
-  // next to it under the same Nutrition category.
+  // Food's one piece of configuration: which macros are tracked at all, and
+  // which of those have a daily goal (see the "Food / nutrition" section —
+  // Calories is exempt from the tracking half, this only ever sets its
+  // goal). Mirrors Water's own goal input right next to it under the same
+  // Nutrition category.
   // The row markup is built once (guarded by wrap.dataset.built) rather
   // than on every render, for two reasons: MACRO_KEYS can grow (it already
   // has, from 4 to 7 fields) so this can't be hand-written static HTML the
@@ -4260,13 +4630,19 @@
   }
 
   function renderFoodManagePanel() {
+    const tracked = state.settings.trackFood;
+    document.querySelectorAll('#trackFoodSegmented button').forEach((b) => b.setAttribute('aria-checked', String((b.dataset.boolChoice === 'on') === tracked)));
+    document.getElementById('trackFoodOffHint').hidden = tracked;
+    document.getElementById('foodTrackedFields').hidden = !tracked;
+    if (!tracked) return;
     renderNutritionCalcCard();
+    renderSavedFoodManageList();
     const wrap = document.getElementById('macroGoalRows');
     if (!wrap.dataset.built) {
       wrap.innerHTML = MACRO_KEYS.map((k) => `
         <div class="setting-row">
-          <span>${MACRO_LABELS[k]}</span>
-          <div class="segmented" data-macro-goal-toggle="${k}" role="radiogroup" aria-label="${MACRO_LABELS[k]} goal">
+          <span>${MACRO_LABELS[k]} <span class="muted-text" data-macro-hint="${k}"></span></span>
+          <div class="segmented" data-macro-goal-toggle="${k}" role="radiogroup" aria-label="${MACRO_LABELS[k]} ${k === 'calories' ? 'goal' : 'tracking'}">
             <button type="button" data-bool-choice="off" role="radio">Off</button>
             <button type="button" data-bool-choice="on" role="radio">On</button>
           </div>
@@ -4296,6 +4672,9 @@
         renderDashboard();
       });
     }
+    // Calories has no "not tracked" state (see macroTracked) — its toggle
+    // only ever means "has a goal." Every other macro's toggle means both
+    // "tracked at all" and, once on, optionally "has a goal" too.
     MACRO_KEYS.forEach((k) => {
       const info = macroGoalInfo(k);
       wrap.querySelectorAll(`[data-macro-goal-toggle="${k}"] button`).forEach((b) => b.setAttribute('aria-checked', String((b.dataset.boolChoice === 'on') === info.enabled)));
@@ -4303,6 +4682,12 @@
       if (field) field.hidden = !info.enabled;
       const input = wrap.querySelector(`[data-macro-goal-input="${k}"]`);
       if (input && document.activeElement !== input) input.value = info.goal != null ? info.goal : '';
+      const hint = wrap.querySelector(`[data-macro-hint="${k}"]`);
+      if (hint) {
+        hint.textContent = k === 'calories'
+          ? (info.enabled && info.goal != null ? `(goal: ${fmtMacroValue(k, info.goal)})` : '(always tracked)')
+          : (!info.enabled ? '(not tracked)' : (info.goal != null ? `(goal: ${fmtMacroValue(k, info.goal)})` : '(tracked)'));
+      }
     });
   }
 
@@ -4408,6 +4793,7 @@
     document.querySelectorAll('#showStrengthLevelSegmented button').forEach((b) => b.setAttribute('aria-checked', String((b.dataset.boolChoice === 'on') === state.settings.showStrengthLevel)));
     document.querySelectorAll('#showPaceLevelSegmented button').forEach((b) => b.setAttribute('aria-checked', String((b.dataset.boolChoice === 'on') === state.settings.showPaceLevel)));
     document.querySelectorAll('#showSleepInsightsSegmented button').forEach((b) => b.setAttribute('aria-checked', String((b.dataset.boolChoice === 'on') === state.settings.showSleepInsights)));
+    document.querySelectorAll('#showMacroGuidanceSegmented button').forEach((b) => b.setAttribute('aria-checked', String((b.dataset.boolChoice === 'on') === state.settings.showMacroGuidance)));
   }
 
   /* ============================== Backup validation ==============================
@@ -4540,28 +4926,54 @@
      anything skipped here is still addable later from Manage/Settings,
      exactly as if it had come from the old fixed defaults. */
 
-  let setupStep = 1;
-  const SETUP_STEP_COUNT = 4;
+  // The wizard's step list isn't fixed-length — it's computed fresh from
+  // the Interests step's answers every time (see setupStepSequence below),
+  // so `setupStepIndex` is an offset into whatever that sequence currently
+  // is rather than a fixed 1-4 count. Turning an interest off doesn't just
+  // hide content within a step the way the old per-step toggles did; the
+  // whole step disappears from the sequence, so "Step 2 of 5" always
+  // reflects only what's actually left to answer.
+  let setupStepIndex = 0;
   let setupAnswers = {
+    // What this install tracks at all (see renderSetupStepInterests) —
+    // Lifting/Running/Body weight/Water default on (same as this app
+    // always tracked before interests existed); Sleep/Food default off,
+    // the actual declutter this step was for. Lifting also decides whether
+    // the daily bodyweight-target exercises (push-ups/squats/pull-ups) get
+    // seeded — those are exercise tracking too, not a separate concern.
+    interests: { lifting: true, running: true, bodyweight: true, sleep: false, water: true, food: false },
     heightFt: '', heightIn: '', heightCm: '',
     weight: '', sex: '',
-    liftingEnabled: true,
     lifts: {
       bench: { enabled: true, mode: 'plates', tier: 'intermediate' },
       squat: { enabled: true, mode: 'plates', tier: 'intermediate' },
       deadlift: { enabled: true, mode: 'plates', tier: 'intermediate' },
     },
-    runningEnabled: true,
     runningGoalType: 'pace',
     runningDistance: '5',
     runningPaceMin: '10',
     runningPaceSec: '0',
-    waterEnabled: true,
     waterGoal: '',
     weightGoalEnabled: false,
     weightGoalValue: '',
     insightsEnabled: false,
   };
+
+  // Recomputed on every render rather than fixed at wizard start — its
+  // first two entries (interests, about) are always present; everything
+  // after depends on what got turned on in the Interests step, which can
+  // only be (re)answered at index 0, so the sequence is always accurate by
+  // the time the user reaches any later index. 'goals' is always last
+  // (before Finish) even when both Water and Body weight are off, since
+  // the Insight calculators toggle lives there regardless.
+  function setupStepSequence() {
+    const seq = ['interests', 'about'];
+    if (setupAnswers.interests.lifting) seq.push('lifting');
+    if (setupAnswers.interests.running) seq.push('running');
+    seq.push('goals');
+    return seq;
+  }
+  const SETUP_STEP_TITLES = { interests: 'What do you want to track?', about: 'About you', lifting: 'Lifting goals', running: 'Running goal', goals: 'Other goals' };
 
   // The topbar normally reserves the iOS notch/status-bar area itself (its
   // own top padding includes env(safe-area-inset-top) — see styles.css —
@@ -4582,7 +4994,7 @@
   }
 
   function startSetupWizard() {
-    setupStep = 1;
+    setupStepIndex = 0;
     hideAppChrome();
     switchTab('setup');
     renderSetupStep();
@@ -4603,16 +5015,52 @@
   }
 
   function renderSetupStep() {
-    document.getElementById('setupBackBtn').hidden = setupStep === 1;
-    document.getElementById('setupNextBtn').textContent = setupStep === SETUP_STEP_COUNT ? 'Finish setup' : 'Next';
-    if (setupStep === 1) renderSetupStep1();
-    else if (setupStep === 2) renderSetupStep2();
-    else if (setupStep === 3) renderSetupStep3();
-    else renderSetupStep4();
+    const seq = setupStepSequence();
+    if (setupStepIndex >= seq.length) setupStepIndex = seq.length - 1; // interest turned off after passing its step — land on the new last step instead of an index that no longer exists
+    const key = seq[setupStepIndex];
+    document.getElementById('setupStepLabel').textContent = `Step ${setupStepIndex + 1} of ${seq.length} · ${SETUP_STEP_TITLES[key]}`;
+    document.getElementById('setupBackBtn').hidden = setupStepIndex === 0;
+    document.getElementById('setupNextBtn').textContent = setupStepIndex === seq.length - 1 ? 'Finish setup' : 'Next';
+    if (key === 'interests') renderSetupStepInterests();
+    else if (key === 'about') renderSetupStepAbout();
+    else if (key === 'lifting') renderSetupStepLifting();
+    else if (key === 'running') renderSetupStepRunning();
+    else renderSetupStepGoals();
   }
 
-  function renderSetupStep1() {
-    document.getElementById('setupStepLabel').textContent = 'Step 1 of 4 · About you';
+  // Six independent on/off tiles rather than a radiogroup — any combination
+  // is valid, including all-off (someone who just wants the bare workout
+  // log with nothing else). Tapping a tile only flips its own answer and
+  // re-renders this step; the sequence itself (and therefore which later
+  // steps exist) is recomputed the next time Next/Back moves off this step.
+  function interestTileHtml(key, icon, label, on) {
+    return `<button type="button" class="domain-tab interest-tile" data-interest="${key}" aria-pressed="${on}">
+      ${icon}
+      <span>${label}</span>
+    </button>`;
+  }
+  function renderSetupStepInterests() {
+    const i = setupAnswers.interests;
+    document.getElementById('setupContent').innerHTML = `
+      <p class="muted-text">Tap to turn any of these on or off. Nothing here is permanent — everything stays changeable later in Manage and Settings.</p>
+      <div class="interest-grid">
+        ${interestTileHtml('lifting', DOMAIN_TAB_ICONS.workout, 'Lifting', i.lifting)}
+        ${interestTileHtml('running', FOOTPRINTS_ICON_SVG, 'Running', i.running)}
+        ${interestTileHtml('bodyweight', SCALE_ICON_SVG, 'Body weight', i.bodyweight)}
+        ${interestTileHtml('sleep', MOON_ICON_SVG, 'Sleep', i.sleep)}
+        ${interestTileHtml('water', WATER_DROP_ICON_SVG, 'Water', i.water)}
+        ${interestTileHtml('food', APPLE_ICON_SVG, 'Food', i.food)}
+      </div>`;
+    document.querySelectorAll('#setupContent [data-interest]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const key = btn.dataset.interest;
+        setupAnswers.interests[key] = !setupAnswers.interests[key];
+        renderSetupStepInterests();
+      });
+    });
+  }
+
+  function renderSetupStepAbout() {
     const cm = state.settings.lengthUnit === 'cm';
     document.getElementById('setupContent').innerHTML = `
       <p class="muted-text">A couple of basics, both optional — used only to size your goals below and the optional insight calculators in Settings.</p>
@@ -4640,18 +5088,19 @@
         </div>
       </div>`;
     document.querySelectorAll('#setupSexSegmented button').forEach((b) => {
-      b.addEventListener('click', () => { captureSetupStep(); setupAnswers.sex = b.dataset.sexChoice; renderSetupStep1(); });
+      b.addEventListener('click', () => { captureSetupStep(); setupAnswers.sex = b.dataset.sexChoice; renderSetupStepAbout(); });
     });
   }
 
-  function renderSetupStep2() {
-    document.getElementById('setupStepLabel').textContent = 'Step 2 of 4 · Lifting goals';
+  // Reached only when the Interests step turned Lifting on — no separate
+  // "Track lifting goals" toggle here anymore (that decision already got
+  // made). Content and wiring below are otherwise unchanged from before the
+  // interests rework.
+  function renderSetupStepLifting() {
     const lifts = setupAnswers.lifts;
     const canUseStandards = setupAnswers.weight !== '' && setupAnswers.sex !== '';
     document.getElementById('setupContent').innerHTML = `
-      ${setupBoolRowHtml('setupLiftingToggle', 'Track lifting goals', setupAnswers.liftingEnabled)}
-      ${setupAnswers.liftingEnabled ? `
-        <p class="muted-text">Each lift can use a fixed plates goal, or a bodyweight-multiple standard${canUseStandards ? '' : ' (enter weight + sex in step 1 to unlock this)'}.</p>
+        <p class="muted-text">Each lift can use a fixed plates goal, or a bodyweight-multiple standard${canUseStandards ? '' : ' (enter weight + sex in the previous step to unlock this)'}.</p>
         <div class="card form-card">
           ${['bench', 'squat', 'deadlift'].map((key) => {
             const lift = lifts[key];
@@ -4680,25 +5129,23 @@
               </div>` : ''}` : ''}
             </div>`;
           }).join('')}
-        </div>
-      ` : ''}`;
-    wireSetupBoolRow('setupLiftingToggle', (v) => { setupAnswers.liftingEnabled = v; renderSetupStep2(); });
+        </div>`;
     ['bench', 'squat', 'deadlift'].forEach((key) => {
       const toggleEl = document.querySelector(`[data-lift-toggle="${key}"]`);
-      if (toggleEl) toggleEl.querySelectorAll('button').forEach((b) => b.addEventListener('click', () => { lifts[key].enabled = b.dataset.boolChoice === 'on'; renderSetupStep2(); }));
+      if (toggleEl) toggleEl.querySelectorAll('button').forEach((b) => b.addEventListener('click', () => { lifts[key].enabled = b.dataset.boolChoice === 'on'; renderSetupStepLifting(); }));
       const modeEl = document.querySelector(`[data-lift-mode="${key}"]`);
-      if (modeEl) modeEl.querySelectorAll('button').forEach((b) => b.addEventListener('click', () => { if (!b.disabled) { lifts[key].mode = b.dataset.modeChoice; renderSetupStep2(); } }));
+      if (modeEl) modeEl.querySelectorAll('button').forEach((b) => b.addEventListener('click', () => { if (!b.disabled) { lifts[key].mode = b.dataset.modeChoice; renderSetupStepLifting(); } }));
       const tierEl = document.querySelector(`[data-lift-tier="${key}"]`);
-      if (tierEl) tierEl.querySelectorAll('button').forEach((b) => b.addEventListener('click', () => { lifts[key].tier = b.dataset.tierChoice; renderSetupStep2(); }));
+      if (tierEl) tierEl.querySelectorAll('button').forEach((b) => b.addEventListener('click', () => { lifts[key].tier = b.dataset.tierChoice; renderSetupStepLifting(); }));
     });
   }
 
-  function renderSetupStep3() {
-    document.getElementById('setupStepLabel').textContent = 'Step 3 of 4 · Running goal';
+  // Reached only when the Interests step turned Running on — see the
+  // Lifting step's comment above for why there's no separate track/don't
+  // track toggle here anymore either.
+  function renderSetupStepRunning() {
     const t = setupAnswers.runningGoalType;
     document.getElementById('setupContent').innerHTML = `
-      ${setupBoolRowHtml('setupRunningToggle', 'Track running', setupAnswers.runningEnabled)}
-      ${setupAnswers.runningEnabled ? `
       <div class="card form-card">
         <div class="setting-row">
           <span>Goal by</span>
@@ -4715,43 +5162,46 @@
             <input type="number" step="1" min="0" inputmode="numeric" id="setupRunPaceMin" value="${escapeHtml(setupAnswers.runningPaceMin)}" placeholder="min" />
             <input type="number" step="1" min="0" max="59" inputmode="numeric" id="setupRunPaceSec" value="${escapeHtml(setupAnswers.runningPaceSec)}" placeholder="sec" />
           </div></label>` : ''}
-      </div>` : ''}`;
-    wireSetupBoolRow('setupRunningToggle', (v) => { captureSetupStep(); setupAnswers.runningEnabled = v; renderSetupStep3(); });
-    if (setupAnswers.runningEnabled) {
-      document.querySelectorAll('#setupRunGoalType button').forEach((b) => b.addEventListener('click', () => {
-        captureSetupStep(); // keep whatever's already typed before the field set changes shape
-        setupAnswers.runningGoalType = b.dataset.typeChoice;
-        renderSetupStep3();
-      }));
-    }
+      </div>`;
+    document.querySelectorAll('#setupRunGoalType button').forEach((b) => b.addEventListener('click', () => {
+      captureSetupStep(); // keep whatever's already typed before the field set changes shape
+      setupAnswers.runningGoalType = b.dataset.typeChoice;
+      renderSetupStepRunning();
+    }));
   }
 
-  function renderSetupStep4() {
-    document.getElementById('setupStepLabel').textContent = 'Step 4 of 4 · Other goals';
+  // Reached last, always — even when both Water and Body weight are off, so
+  // the Insight-calculators toggle always has somewhere to live. No more
+  // on/off toggle for Water or Body weight themselves here — the Interests
+  // step already decided that; this step only asks about their goal.
+  function renderSetupStepGoals() {
+    const i = setupAnswers.interests;
     document.getElementById('setupContent').innerHTML = `
-      ${setupBoolRowHtml('setupWaterToggle', 'Water tracking', setupAnswers.waterEnabled)}
-      ${setupAnswers.waterEnabled ? `<div class="card form-card">
+      ${i.water ? `<div class="card form-card">
         <label class="field"><span class="field-label">Daily water goal (${Units.volumeUnitLabel()})</span>
           <input type="number" step="any" min="0" id="setupWaterGoal" value="${escapeHtml(setupAnswers.waterGoal || round(Units.mlToDisplay(2000), 0))}" /></label>
       </div>` : ''}
+      ${i.bodyweight ? `
       ${setupBoolRowHtml('setupWeightGoalToggle', 'Body weight goal', setupAnswers.weightGoalEnabled)}
       ${setupAnswers.weightGoalEnabled ? `<div class="card form-card">
         <label class="field"><span class="field-label">Target weight (${Units.weightUnitLabel()})</span>
           <input type="number" step="any" min="0" id="setupWeightGoal" value="${escapeHtml(setupAnswers.weightGoalValue)}" /></label>
-      </div>` : ''}
+      </div>` : ''}` : ''}
       ${setupBoolRowHtml('setupInsightsToggle', 'Insight calculators (BMI, strength level, pace level)', setupAnswers.insightsEnabled)}
       <p class="muted-text">General published benchmarks — each can be turned off individually later in Settings → Insights.</p>`;
-    wireSetupBoolRow('setupWaterToggle', (v) => { captureSetupStep(); setupAnswers.waterEnabled = v; renderSetupStep4(); });
-    wireSetupBoolRow('setupWeightGoalToggle', (v) => { captureSetupStep(); setupAnswers.weightGoalEnabled = v; renderSetupStep4(); });
-    wireSetupBoolRow('setupInsightsToggle', (v) => { captureSetupStep(); setupAnswers.insightsEnabled = v; renderSetupStep4(); });
+    if (i.bodyweight) wireSetupBoolRow('setupWeightGoalToggle', (v) => { captureSetupStep(); setupAnswers.weightGoalEnabled = v; renderSetupStepGoals(); });
+    wireSetupBoolRow('setupInsightsToggle', (v) => { captureSetupStep(); setupAnswers.insightsEnabled = v; renderSetupStepGoals(); });
   }
 
   // Plain text/number inputs aren't captured until Back/Next is pressed
   // (unlike the toggles above, which write into setupAnswers immediately on
   // click since they also change what's on screen) — this is what reads
-  // them just before the step changes.
+  // them just before the step changes. Keyed by the step's identity in the
+  // (dynamic) sequence rather than a fixed number, same as everything else
+  // in the wizard since the interests rework.
   function captureSetupStep() {
-    if (setupStep === 1) {
+    const key = setupStepSequence()[setupStepIndex];
+    if (key === 'about') {
       const cmEl = document.getElementById('setupHeightCm');
       if (cmEl) setupAnswers.heightCm = cmEl.value;
       const ftEl = document.getElementById('setupHeightFt');
@@ -4759,14 +5209,14 @@
       const inEl = document.getElementById('setupHeightIn');
       if (inEl) setupAnswers.heightIn = inEl.value;
       setupAnswers.weight = document.getElementById('setupWeight').value;
-    } else if (setupStep === 3 && setupAnswers.runningEnabled) {
+    } else if (key === 'running') {
       const distEl = document.getElementById('setupRunDistance');
       if (distEl) setupAnswers.runningDistance = distEl.value;
       const minEl = document.getElementById('setupRunPaceMin');
       if (minEl) setupAnswers.runningPaceMin = minEl.value;
       const secEl = document.getElementById('setupRunPaceSec');
       if (secEl) setupAnswers.runningPaceSec = secEl.value;
-    } else if (setupStep === 4) {
+    } else if (key === 'goals') {
       const waterEl = document.getElementById('setupWaterGoal');
       if (waterEl) setupAnswers.waterGoal = waterEl.value;
       const goalEl = document.getElementById('setupWeightGoal');
@@ -4776,13 +5226,14 @@
 
   function goSetupNext() {
     captureSetupStep();
-    if (setupStep === SETUP_STEP_COUNT) { finishSetup(); return; }
-    setupStep++;
+    const seq = setupStepSequence();
+    if (setupStepIndex === seq.length - 1) { finishSetup(); return; }
+    setupStepIndex++;
     renderSetupStep();
   }
   function goSetupBack() {
     captureSetupStep();
-    setupStep--;
+    setupStepIndex--;
     renderSetupStep();
   }
 
@@ -4804,9 +5255,10 @@
     const rawWeight = parseFloat(setupAnswers.weight);
     const weightLb = (!Number.isNaN(rawWeight) && rawWeight > 0) ? Units.displayToLb(rawWeight) : null;
     const sex = setupAnswers.sex || null;
+    const i = setupAnswers.interests;
 
     const exercises = [];
-    if (setupAnswers.liftingEnabled) {
+    if (i.lifting) {
       ['bench', 'squat', 'deadlift'].forEach((key) => {
         const lift = setupAnswers.lifts[key];
         if (!lift.enabled) return;
@@ -4818,16 +5270,16 @@
           archived: false, createdAt: now,
         });
       });
+      // Daily bodyweight targets ride along with the Lifting interest — the
+      // mockup's flow has no separate step for them, so they're exercise
+      // tracking that follows Lifting rather than a concern of their own.
+      exercises.push(
+        { id: 'ex_pushups', name: 'Push-ups', kind: 'reps', section: 'daily', goal: 50, archived: false, createdAt: now },
+        { id: 'ex_bwsquats', name: 'Bodyweight Squats', kind: 'reps', section: 'daily', goal: 50, archived: false, createdAt: now },
+        { id: 'ex_pullups', name: 'Pull-ups', kind: 'reps', section: 'daily', goal: 15, archived: false, createdAt: now },
+      );
     }
-    // Daily bodyweight targets are seeded unconditionally, same as the old
-    // fixed defaults — the wizard's toggles are for the bigger goal-style
-    // decisions (lifting/running/water/weight), not every single exercise.
-    exercises.push(
-      { id: 'ex_pushups', name: 'Push-ups', kind: 'reps', section: 'daily', goal: 50, archived: false, createdAt: now },
-      { id: 'ex_bwsquats', name: 'Bodyweight Squats', kind: 'reps', section: 'daily', goal: 50, archived: false, createdAt: now },
-      { id: 'ex_pullups', name: 'Pull-ups', kind: 'reps', section: 'daily', goal: 15, archived: false, createdAt: now },
-    );
-    if (setupAnswers.runningEnabled) {
+    if (i.running) {
       const t = setupAnswers.runningGoalType;
       const distanceGoal = t !== 'pace' ? Units.displayToMi(parseFloat(setupAnswers.runningDistance) || 5) : null;
       const paceSec = (parseInt(setupAnswers.runningPaceMin, 10) || 0) * 60 + (parseInt(setupAnswers.runningPaceSec, 10) || 0);
@@ -4836,10 +5288,21 @@
     }
 
     const trackers = defaultTrackers();
+    // Body weight / Sleep off reuses each tracker's own archived flag rather
+    // than omitting the tracker entirely — the same mechanism Manage already
+    // uses to hide a tracker, so re-enabling later is just an un-archive.
+    if (!i.bodyweight) trackers.find((tr) => tr.id === 'trk_weight').archived = true;
+    if (!i.sleep) trackers.find((tr) => tr.id === 'trk_sleep').archived = true;
+
     const measurements = [];
     if (weightLb != null) {
+      // Seeded regardless of the Body weight interest: it's the one data
+      // point behind BMI/strength-standard math elsewhere (currentBodyWeightLb()
+      // and friends read state.measurements directly, unfiltered by whether
+      // the tracker itself is archived), so hiding the tracker doesn't mean
+      // that starting number should be thrown away.
       measurements.push({ id: genId('meas'), trackerId: 'trk_weight', date: todayISO(), value: weightLb, note: null });
-      if (setupAnswers.weightGoalEnabled && setupAnswers.weightGoalValue !== '') {
+      if (i.bodyweight && setupAnswers.weightGoalEnabled && setupAnswers.weightGoalValue !== '') {
         const targetLb = Units.displayToLb(parseFloat(setupAnswers.weightGoalValue));
         if (!Number.isNaN(targetLb)) {
           const weightTracker = trackers.find((tr) => tr.id === 'trk_weight');
@@ -4850,9 +5313,11 @@
       }
     }
 
-    const water = defaultWater();
-    water.goalMl = null;
-    if (setupAnswers.waterEnabled) {
+    // Water off reuses the same "zero cups" shape the always-present cup UI
+    // already treats as off, rather than a separate flag.
+    const water = i.water ? defaultWater() : { goalMl: null, cups: [] };
+    if (i.water) {
+      water.goalMl = null;
       const rawGoal = parseFloat(setupAnswers.waterGoal);
       water.goalMl = (!Number.isNaN(rawGoal) && rawGoal > 0) ? Units.displayToMl(rawGoal) : defaultWater().goalMl;
     }
@@ -4868,6 +5333,7 @@
     state.settings.showWeightInsights = setupAnswers.insightsEnabled;
     state.settings.showStrengthLevel = setupAnswers.insightsEnabled;
     state.settings.showPaceLevel = setupAnswers.insightsEnabled;
+    state.settings.trackFood = i.food;
 
     save();
     showAppChrome();
@@ -5010,6 +5476,7 @@
     document.querySelectorAll('[data-action="add-exercise"]').forEach((btn) => btn.addEventListener('click', () => openExerciseForm(null)));
     document.querySelectorAll('[data-action="add-tracker"]').forEach((btn) => btn.addEventListener('click', () => openTrackerForm(null)));
     document.querySelectorAll('[data-action="add-cup"]').forEach((btn) => btn.addEventListener('click', () => openCupForm(null)));
+    document.querySelectorAll('[data-action="add-saved-food"]').forEach((btn) => btn.addEventListener('click', () => openSavedFoodForm(null)));
 
     document.getElementById('manageNutritionSubSegmented').addEventListener('click', (ev) => {
       const btn = ev.target.closest('button'); if (!btn) return;
@@ -5028,6 +5495,17 @@
       toast('Water goal saved');
       renderManage();
       renderDashboard();
+    });
+
+    // Master on/off for Food (Manage -> Nutrition -> Food) — mirrors
+    // Water's own "off means zero cups" self-management: turning this off
+    // hides Food from the dashboard and from Log/History (see
+    // availableNutritionSubs), without touching any already-logged entries.
+    document.getElementById('trackFoodSegmented').addEventListener('click', (ev) => {
+      const btn = ev.target.closest('button'); if (!btn) return;
+      state.settings.trackFood = btn.dataset.boolChoice === 'on';
+      save();
+      renderAll();
     });
 
     // Nutrition calculator (Manage -> Nutrition -> Food) — "Use calculator"
@@ -5138,6 +5616,10 @@
     document.getElementById('showSleepInsightsSegmented').addEventListener('click', (ev) => {
       const btn = ev.target.closest('button'); if (!btn) return;
       state.settings.showSleepInsights = btn.dataset.boolChoice === 'on'; save(); renderAll();
+    });
+    document.getElementById('showMacroGuidanceSegmented').addEventListener('click', (ev) => {
+      const btn = ev.target.closest('button'); if (!btn) return;
+      state.settings.showMacroGuidance = btn.dataset.boolChoice === 'on'; save(); renderAll();
     });
 
     document.getElementById('exportBtn').addEventListener('click', exportBackup);
