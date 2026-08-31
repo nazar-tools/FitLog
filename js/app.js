@@ -195,7 +195,7 @@
      import path runs the exact same migrations.
      ========================================================================== */
 
-  const SCHEMA_VERSION = 12;
+  const SCHEMA_VERSION = 13;
 
   // Known "daily" exercise ids from before the Goal/Daily/Other split
   // existed (schema v1). Used only by the v1->v2 migration below.
@@ -499,7 +499,23 @@
       if (data.settings.showMacroGuidance === undefined) data.settings.showMacroGuidance = false;
       return data;
     },
-    // Next migration goes here, keyed `12: (data) => { ...; return data; }`.
+    // v12 -> v13: the Manage-consistency rework. Water and Food were nested
+    // one level inside a "Nutrition" domain tab; that nesting is gone now
+    // (see availableDomainCategories/DOMAIN_LABELS) — Workout, Body
+    // (measurements), Water, and Food are four flat, identically-styled
+    // domains. Each of the four now also gets the same explicit "Track
+    // this" master toggle Food already had (`trackFood`) — added here for
+    // the other three (`trackWorkout`, `trackMeasurements`, `trackWater`),
+    // all defaulting to true so nothing that was visible before silently
+    // disappears on upgrade. This is purely a navigation/visibility change;
+    // it doesn't touch exercises, trackers, water entries, or food entries.
+    12: (data) => {
+      if (data.settings.trackWorkout === undefined) data.settings.trackWorkout = true;
+      if (data.settings.trackMeasurements === undefined) data.settings.trackMeasurements = true;
+      if (data.settings.trackWater === undefined) data.settings.trackWater = true;
+      return data;
+    },
+    // Next migration goes here, keyed `13: (data) => { ...; return data; }`.
   };
 
   /** Walks `data` forward through MIGRATIONS until it matches SCHEMA_VERSION. */
@@ -585,10 +601,19 @@
     // reference values) in the Food detail modal — off by default, same
     // off-by-default treatment as every other insight above.
     showMacroGuidance: false,
-    // Whether Food is tracked at all — the setup wizard's Food interest
-    // tile writes this; a Settings toggle re-enables it later, since Food
-    // has no per-item unarchive the way a tracker does. Gates the
-    // dashboard's Food section and the Food sub-tab in Log/History/Manage.
+    // Each of the four Manage domains (Workout, Body/measurements, Water,
+    // Food) has the identical "Track this" master toggle — the setup
+    // wizard's interest tiles write these; each one's own Manage panel
+    // (which always shows regardless of this flag, same as Food already
+    // worked) is where it gets turned back on. Gates whether that domain's
+    // tab even appears in Log/History, and its dashboard section. All four
+    // default to true so nothing that was visible before this existed
+    // silently disappears on upgrade (see the v12->v13 migration for
+    // trackWorkout/trackMeasurements/trackWater specifically — trackFood is
+    // older and already carried this same default).
+    trackWorkout: true,
+    trackMeasurements: true,
+    trackWater: true,
     trackFood: true,
     // Each macro's `enabled` flag now does double duty: whether the field
     // is tracked at all (shown in the log form / today's totals), and
@@ -2768,22 +2793,20 @@
     document.getElementById('adjustFoodGoalsBtn').addEventListener('click', openFoodGoalsFromDetail);
   }
 
-  // Jumps to the Log tab's Nutrition -> Food form, same "quick access"
-  // pattern as logExerciseFromDetail()/logTrackerFromDetail() above.
+  // Jumps to the Log tab's Food form, same "quick access" pattern as
+  // logExerciseFromDetail()/logTrackerFromDetail() above.
   function logFoodFromDetail() {
     closeModal();
-    logCategory = 'nutrition';
-    logNutritionSub = 'food';
+    logCategory = 'food';
     switchTab('log');
   }
 
-  // Jumps to Manage -> Nutrition -> Food, where the per-macro goal toggles
-  // and the nutrition calculator (activity level/goal/Apply button) live —
-  // the "adjustability" the flat dashboard card had no way to reach.
+  // Jumps to Manage -> Food, where the per-macro tracked/goal toggles and
+  // the nutrition calculator (activity level/goal/Apply button) live — the
+  // "adjustability" the flat dashboard card had no way to reach.
   function openFoodGoalsFromDetail() {
     closeModal();
-    manageCategory = 'nutrition';
-    manageNutritionSub = 'food';
+    manageCategory = 'food';
     switchTab('manage');
   }
 
@@ -2809,17 +2832,11 @@
     select.innerHTML = html;
   }
 
-  // The Log tab is grouped by domain — Workout, Measurements, Nutrition —
-  // switched by a segmented control at the top rather than separate tabs,
-  // since they're all "add one thing" forms sharing the same "Recent
-  // entries" list below. Nutrition itself covers two very different
-  // logging interactions (tap-a-cup water, typed-number food), so it gets
-  // its own nested segmented control (see availableNutritionSubs()/
-  // renderLogNutritionPanel()) rather than being split back into two
-  // top-level categories. Measurements is only offered once there's at
-  // least one tracker (it ships pre-seeded, but stays hidden if the user
-  // deletes down to zero); Nutrition is always offered since Food has no
-  // "delete down to zero" concept anymore.
+  // The Log tab is grouped by domain — Workout, Body, Water, Food — switched
+  // by a segmented control at the top rather than separate tabs, since
+  // they're all "add one thing" forms sharing the same "Recent entries"
+  // list below. See availableDomainCategories() below for which of the
+  // four actually show up here (only the ones currently tracked).
   let logCategory = 'workout';
 
   // Every inline SVG icon in the app — this constant plus the ones below —
@@ -2858,8 +2875,8 @@
   // `droplets`.
   const WATER_DROP_ICON_SVG = '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 16.3c2.2 0 4-1.83 4-4.05 0-1.16-.57-2.26-1.71-3.19S7.29 6.75 7 5.3c-.29 1.45-1.14 2.84-2.29 3.76S3 11.1 3 12.25c0 2.22 1.8 4.05 4 4.05z"/><path d="M12.56 6.6A10.97 10.97 0 0 0 14 3.02c.5 2.5 2 4.9 4 6.5s3 3.5 3 5.5a6.98 6.98 0 0 1-11.91 4.97"/></svg>';
 
-  // The Water/Food sub-tabs' Food glyph (see nutritionSubTabsHtml below),
-  // and the setup wizard's Food interest tile. Lucide `apple`.
+  // The Food domain tab's glyph, and the setup wizard's Food interest tile.
+  // Lucide `apple`.
   const APPLE_ICON_SVG = '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 6.528V3a1 1 0 0 1 1-1h0"/><path d="M18.237 21A15 15 0 0 0 22 11a6 6 0 0 0-10-4.472A6 6 0 0 0 2 11a15.1 15.1 0 0 0 3.763 10 3 3 0 0 0 3.648.648 5.5 5.5 0 0 1 5.178 0A3 3 0 0 0 18.237 21"/></svg>';
 
   // The setup wizard's interest tiles (see renderSetupStepInterests) — one
@@ -2869,54 +2886,91 @@
   const SCALE_ICON_SVG = '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v18"/><path d="m19 8 3 8a5 5 0 0 1-6 0zV7"/><path d="M3 7h1a17 17 0 0 0 8-2 17 17 0 0 0 8 2h1"/><path d="m5 8 3 8a5 5 0 0 1-6 0zV7"/><path d="M7 21h10"/></svg>';
   const MOON_ICON_SVG = '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.985 12.486a9 9 0 1 1-9.473-9.472c.405-.022.617.46.402.803a6 6 0 0 0 8.268 8.268c.344-.215.825-.004.803.401"/></svg>';
 
-  // The three domain-tab icons, shared by Log (built here), and duplicated
-  // byte-for-byte in index.html for History and Manage, whose outer
-  // category buttons are static markup rather than JS-rendered (History and
-  // Manage always offer all three domains; only Log's can disappear). Keep
-  // all three copies identical — same glyph for the same domain everywhere
-  // it appears is the whole point of giving these their own bigger,
-  // consistent design family instead of the old cramped inline pill.
-  // (Lucide `dumbbell` / `ruler` / `utensils`.)
+  // The four domain-tab icons — Workout / Body / Water / Food — shared by
+  // every place a domain tab appears (Log, History, Manage all render these
+  // from the same JS now, rather than three hand-copied static markups that
+  // could drift). (Lucide `dumbbell` / `ruler` / `droplets` / `apple`.)
+  //
+  // Water and Food used to be nested one level down inside a third
+  // "Nutrition" domain tab, with their own smaller sub-tab pill underneath
+  // it — visually a second, different-looking layer of navigation stacked
+  // under the first. They're flat top-level domains now, same size and
+  // style as Workout/Body, so there is exactly one level of navigation
+  // anywhere in Log/History/Manage, never two.
   const DOMAIN_TAB_ICONS = {
     workout: '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.596 12.768a2 2 0 1 0 2.829-2.829l-1.768-1.767a2 2 0 0 0 2.828-2.829l-2.828-2.828a2 2 0 0 0-2.829 2.828l-1.767-1.768a2 2 0 1 0-2.829 2.829z"/><path d="m2.5 21.5 1.4-1.4"/><path d="m20.1 3.9 1.4-1.4"/><path d="M5.343 21.485a2 2 0 1 0 2.829-2.828l1.767 1.768a2 2 0 1 0 2.829-2.829l-6.364-6.364a2 2 0 1 0-2.829 2.829l1.768 1.767a2 2 0 0 0-2.828 2.829z"/><path d="m9.6 14.4 4.8-4.8"/></svg>',
-    measurement: '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.3 15.3a2.4 2.4 0 0 1 0 3.4l-2.6 2.6a2.4 2.4 0 0 1-3.4 0L2.7 8.7a2.41 2.41 0 0 1 0-3.4l2.6-2.6a2.41 2.41 0 0 1 3.4 0Z"/><path d="m14.5 12.5 2-2"/><path d="m11.5 9.5 2-2"/><path d="m8.5 6.5 2-2"/><path d="m17.5 15.5 2-2"/></svg>',
-    nutrition: '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 2v7c0 1.1.9 2 2 2h4a2 2 0 0 0 2-2V2"/><path d="M7 2v20"/><path d="M21 15V2a5 5 0 0 0-5 5v6c0 1.1.9 2 2 2h3Zm0 0v7"/></svg>',
+    measurements: '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.3 15.3a2.4 2.4 0 0 1 0 3.4l-2.6 2.6a2.4 2.4 0 0 1-3.4 0L2.7 8.7a2.41 2.41 0 0 1 0-3.4l2.6-2.6a2.41 2.41 0 0 1 3.4 0Z"/><path d="m14.5 12.5 2-2"/><path d="m11.5 9.5 2-2"/><path d="m8.5 6.5 2-2"/><path d="m17.5 15.5 2-2"/></svg>',
+    water: WATER_DROP_ICON_SVG,
+    food: APPLE_ICON_SVG,
   };
 
-  // Nutrition's Water/Food sub-tabs (icon + label pill — see .segmented-new
-  // in styles.css), shared by all three places it appears: Log, History,
-  // and Manage > Nutrition. All three already track which sub is active in
-  // their own local variable and re-render on click; this just builds the
-  // markup so the three copies can't drift the way the old plain-text pill
-  // (`<button>${s.label}</button>`) did.
-  const NUTRITION_SUB_ICONS = { water: WATER_DROP_ICON_SVG, food: APPLE_ICON_SVG };
-  function nutritionSubTabsHtml(subs, activeId) {
-    return subs.map((s) => `
-      <button type="button" data-nutrition-sub="${s.id}" role="radio" aria-checked="${s.id === activeId}">
-        ${NUTRITION_SUB_ICONS[s.id] || ''}
-        <span>${s.label}</span>
-      </button>`).join('');
+  // Visible label per domain — "Body" rather than "Measurements" purely so
+  // four labels fit as comfortably at this tap-target size as three used
+  // to; the underlying id stays "measurements" (matches the settings flag
+  // trackMeasurements below), same "id stays put, only the label changes"
+  // precedent as Workout (id stays "workout" even though this used to say
+  // "Exercises" in Manage specifically).
+  const DOMAIN_LABELS = { workout: 'Workout', measurements: 'Body', water: 'Water', food: 'Food' };
+  const DOMAIN_ORDER = ['workout', 'measurements', 'water', 'food'];
+
+  // One master "Track this" toggle per domain (settings.trackWorkout/
+  // trackMeasurements/trackWater/trackFood — see DEFAULT_SETTINGS) rather
+  // than four different ways of expressing "this whole feature is off,"
+  // the way it used to be (Food had an explicit toggle, Water was "off"
+  // only by implication — zero cups defined — and Workout/Body had no
+  // domain-level off state at all, only per-item archiving). All four
+  // domains now answer the same "is this domain on at all" question the
+  // same way, on top of whichever finer-grained per-item state
+  // (archived exercises/trackers, individual macro tracking) already
+  // existed underneath it.
+  function domainTracked(id) {
+    if (id === 'workout') return state.settings.trackWorkout;
+    if (id === 'measurements') return state.settings.trackMeasurements;
+    if (id === 'water') return state.settings.trackWater;
+    return state.settings.trackFood;
   }
 
-  function availableLogCategories() {
-    const cats = [{ id: 'workout', label: 'Workout' }];
-    if (activeTrackers().length) cats.push({ id: 'measurement', label: 'Measurements' });
-    if (availableNutritionSubs().length) cats.push({ id: 'nutrition', label: 'Nutrition' });
-    return cats;
+  // Log/History only ever offer a domain that's actually turned on — a
+  // fully-off domain simply isn't a tab to switch to, rather than a tab
+  // that opens to an explanatory empty state. See ALL_DOMAIN_CATEGORIES
+  // below for Manage's different rule.
+  function availableDomainCategories() {
+    return DOMAIN_ORDER.filter(domainTracked).map((id) => ({ id, label: DOMAIN_LABELS[id] }));
   }
 
-  function renderLogCategorySegmented() {
-    const cats = availableLogCategories();
-    if (!cats.some((c) => c.id === logCategory)) logCategory = cats[0].id;
-    const seg = document.getElementById('logCategorySegmented');
-    seg.innerHTML = cats.map((c) => `
-      <button type="button" class="domain-tab" data-log-cat="${c.id}" role="radio">
+  // Manage always offers all four regardless of tracked state — same
+  // reasoning the old MANAGE_NUTRITION_SUBS constant this replaces already
+  // established: Manage is specifically where a turned-off domain gets
+  // turned back on, so it can't gate its own tabs on the very flag they
+  // exist to change.
+  const ALL_DOMAIN_CATEGORIES = DOMAIN_ORDER.map((id) => ({ id, label: DOMAIN_LABELS[id] }));
+
+  // Shared domain-tab markup builder for Log, History, and Manage — all
+  // three now render this identical component from the same list of
+  // categories (Log/History pass availableDomainCategories(), Manage
+  // passes ALL_DOMAIN_CATEGORIES) rather than three separately hand-built
+  // copies that could drift. A domain that's toggled off gets the shared
+  // `.is-toggled-off` dimmed treatment (Manage only, since that's the only
+  // caller that ever renders an off domain's tab at all) — still fully
+  // tappable, since Manage is where you'd tap it to turn it back on.
+  function domainTabsHtml(cats, activeId) {
+    return cats.map((c) => `
+      <button type="button" class="domain-tab${domainTracked(c.id) ? '' : ' is-toggled-off'}" data-domain-cat="${c.id}" role="radio" aria-checked="${c.id === activeId}">
         ${DOMAIN_TAB_ICONS[c.id] || ''}
         <span>${c.label}</span>
       </button>`).join('');
+  }
+
+  function renderLogCategorySegmented() {
+    const cats = availableDomainCategories();
+    // Every domain toggled off at once is a real (if unusual) reachable
+    // state — see renderLogView()'s own guard below — so this can't just
+    // assume cats[0] exists.
+    if (cats.length && !cats.some((c) => c.id === logCategory)) logCategory = cats[0].id;
+    const seg = document.getElementById('logCategorySegmented');
+    seg.innerHTML = domainTabsHtml(cats, logCategory);
     seg.querySelectorAll('button').forEach((b) => {
-      b.setAttribute('aria-checked', String(b.dataset.logCat === logCategory));
-      b.addEventListener('click', () => { logCategory = b.dataset.logCat; renderLogView(); });
+      b.addEventListener('click', () => { logCategory = b.dataset.domainCat; renderLogView(); });
     });
   }
 
@@ -3028,70 +3082,46 @@
     renderHistory();
   }
 
-  // Nutrition's own nested segmented control — Water and Food are too
-  // different an interaction (tap-a-cup vs. typed numbers) to share one
-  // form the way Workout/Measurements/Nutrition share the outer one. Water
-  // is only offered while at least one cup exists; Food only while
-  // settings.trackFood is on (see the setup wizard's interests step and the
-  // Settings toggle that mirrors it) — both can be off at once, which
-  // every caller of this (Log/History/Manage) needs to handle rendering
-  // nothing rather than assuming at least one sub always exists.
-  let logNutritionSub = 'water';
-
-  function availableNutritionSubs() {
-    const subs = [];
-    if (state.water.cups.length) subs.push({ id: 'water', label: 'Water' });
-    if (state.settings.trackFood) subs.push({ id: 'food', label: 'Food' });
-    return subs;
-  }
-
-  function renderLogNutritionPanel() {
-    const subs = availableNutritionSubs();
-    if (!subs.some((s) => s.id === logNutritionSub)) logNutritionSub = subs[0].id;
-    const seg = document.getElementById('logNutritionSubSegmented');
-    seg.innerHTML = nutritionSubTabsHtml(subs, logNutritionSub);
-    seg.querySelectorAll('button').forEach((b) => {
-      b.addEventListener('click', () => { logNutritionSub = b.dataset.nutritionSub; renderLogNutritionPanel(); renderRecentEntries(); });
-    });
-    document.getElementById('logWaterPanel').hidden = logNutritionSub !== 'water';
-    document.getElementById('logFoodForm').hidden = logNutritionSub !== 'food';
-    document.getElementById('savedFoodsWrap').hidden = logNutritionSub !== 'food' || !state.food.savedFoods.length;
-    if (logNutritionSub === 'water') renderLogWaterPanel();
-    if (logNutritionSub === 'food') { renderLogFoodForm(); renderSavedFoodLogList(); }
-  }
-
-  // Redraws whichever Log sub-form is currently selected, plus the shared
-  // "Recent entries" list below it.
+  // Redraws whichever Log form is currently selected, plus the shared
+  // "Recent entries" list below it. Water and Food used to share one
+  // "Nutrition" wrapper div with their own nested sub-tab; now that they're
+  // flat top-level categories like Workout/Body, each is just another
+  // sibling form gated directly on `logCategory`, same as the other two.
   function renderLogView() {
     renderLogCategorySegmented();
+    const cats = availableDomainCategories();
+    document.getElementById('logAllOffHint').hidden = cats.length > 0;
     document.getElementById('logForm').hidden = logCategory !== 'workout';
-    document.getElementById('logMeasurementForm').hidden = logCategory !== 'measurement';
-    document.getElementById('logNutritionPanel').hidden = logCategory !== 'nutrition';
+    document.getElementById('logMeasurementForm').hidden = logCategory !== 'measurements';
+    document.getElementById('logWaterPanel').hidden = logCategory !== 'water';
+    document.getElementById('logFoodForm').hidden = logCategory !== 'food';
+    document.getElementById('savedFoodsWrap').hidden = logCategory !== 'food' || !state.food.savedFoods.length;
     if (logCategory === 'workout') renderLogForm();
-    if (logCategory === 'measurement') renderLogMeasurementForm();
-    if (logCategory === 'nutrition') renderLogNutritionPanel();
+    if (logCategory === 'measurements') renderLogMeasurementForm();
+    if (logCategory === 'water') renderLogWaterPanel();
+    if (logCategory === 'food') { renderLogFoodForm(); renderSavedFoodLogList(); }
     renderRecentEntries();
   }
 
-  // "Recent entries" always reflects whichever Log category (and, for
-  // Nutrition, sub-category) is active, rather than always showing
-  // workouts — otherwise it would look broken while logging water, a
-  // measurement, or food.
+  // "Recent entries" always reflects whichever Log category is active,
+  // rather than always showing workouts — otherwise it would look broken
+  // while logging water, a measurement, or food.
   function renderRecentEntries() {
     const wrap = document.getElementById('recentEntries');
-    if (logCategory === 'measurement') {
+    if (!availableDomainCategories().length) { wrap.innerHTML = ''; return; }
+    if (logCategory === 'measurements') {
       const recent = state.measurements.slice().sort((a, b) => (b.date + b.id).localeCompare(a.date + a.id)).slice(0, 8);
       wrap.innerHTML = recent.length ? recent.map((m) => measurementRowHtml(m)).join('') : `<p class="muted-text">Nothing logged yet.</p>`;
       wireMeasurementRowClicks(wrap);
       return;
     }
-    if (logCategory === 'nutrition' && logNutritionSub === 'water') {
+    if (logCategory === 'water') {
       const recent = state.waterEntries.slice().sort((a, b) => (b.date + b.id).localeCompare(a.date + a.id)).slice(0, 8);
       wrap.innerHTML = recent.length ? recent.map((e) => waterEntryRowHtml(e)).join('') : `<p class="muted-text">Nothing logged yet.</p>`;
       wireWaterEntryRowClicks(wrap);
       return;
     }
-    if (logCategory === 'nutrition' && logNutritionSub === 'food') {
+    if (logCategory === 'food') {
       const recent = state.food.entries.slice().sort((a, b) => (b.date + b.id).localeCompare(a.date + a.id)).slice(0, 8);
       wrap.innerHTML = recent.length ? recent.map((e) => foodEntryRowHtml(e)).join('') : `<p class="muted-text">Nothing logged yet.</p>`;
       wireFoodEntryRowClicks(wrap);
@@ -3572,47 +3602,44 @@
   }
 
   let historyCategory = 'workout';
-  // Nutrition's nested sub-choice within History, mirroring Log's.
-  let historyNutritionSub = 'water';
 
   function renderHistoryCategorySegmented() {
-    document.querySelectorAll('#historyCategorySegmented button').forEach((b) => {
-      b.setAttribute('aria-checked', String(b.dataset.historyCat === historyCategory));
+    const cats = availableDomainCategories();
+    if (cats.length && !cats.some((c) => c.id === historyCategory)) historyCategory = cats[0].id;
+    const seg = document.getElementById('historyCategorySegmented');
+    seg.innerHTML = domainTabsHtml(cats, historyCategory);
+    seg.querySelectorAll('button').forEach((b) => {
+      b.addEventListener('click', () => { historyCategory = b.dataset.domainCat; renderHistory(); });
     });
-    document.getElementById('historyFilterField').hidden = historyCategory !== 'workout';
-    document.getElementById('historyNutritionSubField').hidden = historyCategory !== 'nutrition';
-    if (historyCategory === 'nutrition') {
-      const subs = availableNutritionSubs();
-      if (subs.length && !subs.some((s) => s.id === historyNutritionSub)) historyNutritionSub = subs[0].id;
-      document.getElementById('historyNutritionSubSegmented').innerHTML = subs.length ? nutritionSubTabsHtml(subs, historyNutritionSub) : '';
-    }
+    document.getElementById('historyFilterField').hidden = historyCategory !== 'workout' || !cats.length;
   }
 
   function renderHistory() {
     renderHistoryCalendar();
     renderHistoryCategorySegmented();
     const wrap = document.getElementById('historyList');
+    const cats = availableDomainCategories();
 
-    if (historyCategory === 'nutrition' && !availableNutritionSubs().length) {
+    if (!cats.length) {
       document.getElementById('historyEmpty').hidden = false;
       wrap.innerHTML = '';
       return;
     }
-    if (historyCategory === 'measurement') {
+    if (historyCategory === 'measurements') {
       const list = state.measurements.slice().sort((a, b) => (b.date + b.id).localeCompare(a.date + a.id));
       document.getElementById('historyEmpty').hidden = list.length > 0;
       wrap.innerHTML = list.map((m) => measurementRowHtml(m)).join('');
       wireMeasurementRowClicks(wrap);
       return;
     }
-    if (historyCategory === 'nutrition' && historyNutritionSub === 'water') {
+    if (historyCategory === 'water') {
       const list = state.waterEntries.slice().sort((a, b) => (b.date + b.id).localeCompare(a.date + a.id));
       document.getElementById('historyEmpty').hidden = list.length > 0;
       wrap.innerHTML = list.map((e) => waterEntryRowHtml(e)).join('');
       wireWaterEntryRowClicks(wrap);
       return;
     }
-    if (historyCategory === 'nutrition' && historyNutritionSub === 'food') {
+    if (historyCategory === 'food') {
       // Grouped by date with each day's totals as a header, rather than one
       // flat list — "total everything by day" is the whole point of the
       // feature, so History is where those totals actually live, not just
@@ -3700,7 +3727,7 @@
   }
   function logTrackerFromDetail(trackerId) {
     closeModal();
-    logCategory = 'measurement';
+    logCategory = 'measurements';
     switchTab('log');
     const select = document.getElementById('logTracker');
     select.value = trackerId;
@@ -4254,8 +4281,8 @@
       <!-- Wrapped in a .card (matching the exercise detail modal's own fix
            and how a tracker's dashboard card already wraps this same
            content) rather than left as bare top-level modal content, which
-           had no spacing of its own and sat jammed against the pr-grid
-           right below it. -->
+           had no spacing of its own and sat jammed against whatever
+           followed it. -->
       <div class="card">
         <div class="ex-card-values">
           <div class="ex-card-current">${fmtTrackerValue(tracker, value)}</div>
@@ -4272,11 +4299,6 @@
       <button type="button" class="btn btn-primary btn-block" id="logEntryFromDetailBtn">Log entry</button>
 
       ${insightDetailHtml}
-
-      <div class="pr-grid">
-        <div class="pr-tile"><div class="value">${history.length}</div><div class="label">Entries logged</div></div>
-        <div class="pr-tile"><div class="value">${latest ? fmtDateShort(latest.date) : '—'}</div><div class="label">Last logged</div></div>
-      </div>
 
       <div class="section-head">
         <h2>Trend</h2>
@@ -4540,59 +4562,56 @@
   }
 
   /* ============================== Manage ==============================
-     One tab with three top-level sub-panels, switched by
-     manageCategorySegmented: Exercises (the lift/reps/cardio definitions,
-     previously listed in Settings), Measurements (the metric trackers from
-     the section above), and Nutrition (Water's daily goal + cup sizes, and
-     Food's per-macro daily-goal toggles), which itself nests a second
-     Water/Food segmented control mirroring Log and History. All
-     configuration lives here now; Settings (reached from the header) is
-     app-wide preferences only. */
+     One tab with four flat, identically-styled domain panels — Workout,
+     Body (measurements), Water, and Food — switched by
+     manageCategorySegmented using the same domainTabsHtml()/
+     domainTracked() helpers Log and History use, except Manage always
+     shows all four (see ALL_DOMAIN_CATEGORIES) regardless of each domain's
+     tracked state: it's specifically where a turned-off domain gets turned
+     back on (add a cup here even with zero cups today; flip Water back on
+     here even while it's off), so it can't gate on the very thing it's
+     meant to change. Each panel carries the identical "Track this" master
+     toggle (trackWorkoutSegmented/trackMeasurementsSegmented/
+     trackWaterSegmented/trackFoodSegmented, each writing the matching
+     settings.track* flag via renderDomainTrackToggle() below) — Food had
+     this pattern first, the other three were added to match it exactly.
+     All configuration lives here now; Settings (reached from the header)
+     is app-wide preferences only. */
 
-  let manageCategory = 'exercises';
-  // Nutrition's nested sub-choice within Manage, mirroring Log/History's.
-  let manageNutritionSub = 'water';
+  let manageCategory = 'workout';
 
   function setManageCategory(cat) {
     manageCategory = cat;
-    document.querySelectorAll('#manageCategorySegmented button').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.manageCat === cat)));
-    document.getElementById('manageExercisesPanel').hidden = cat !== 'exercises';
+    const seg = document.getElementById('manageCategorySegmented');
+    seg.innerHTML = domainTabsHtml(ALL_DOMAIN_CATEGORIES, manageCategory);
+    seg.querySelectorAll('button').forEach((b) => {
+      b.addEventListener('click', () => setManageCategory(b.dataset.domainCat));
+    });
+    document.getElementById('manageExercisesPanel').hidden = cat !== 'workout';
     document.getElementById('manageMeasurementsPanel').hidden = cat !== 'measurements';
-    document.getElementById('manageNutritionPanel').hidden = cat !== 'nutrition';
+    document.getElementById('manageWaterPanel').hidden = cat !== 'water';
+    document.getElementById('manageFoodPanel').hidden = cat !== 'food';
   }
 
-  // Unlike Log/History (which only offer a sub while it's actually tracked
-  // — see availableNutritionSubs), Manage always offers both Water and
-  // Food: it's specifically where a turned-off feature gets turned back on
-  // (add a cup here even with zero cups today; flip "Track food" back on
-  // here even while Food is off), so it can't gate on the very thing it's
-  // meant to change.
-  const MANAGE_NUTRITION_SUBS = [{ id: 'water', label: 'Water' }, { id: 'food', label: 'Food' }];
-  function setManageNutritionSub(sub) {
-    manageNutritionSub = MANAGE_NUTRITION_SUBS.some((s) => s.id === sub) ? sub : 'water';
-    document.getElementById('manageNutritionSubSegmented').innerHTML = nutritionSubTabsHtml(MANAGE_NUTRITION_SUBS, manageNutritionSub);
-    document.getElementById('manageWaterPanel').hidden = manageNutritionSub !== 'water';
-    document.getElementById('manageFoodPanel').hidden = manageNutritionSub !== 'food';
+  // Shared by all four Manage panels' "Track this" master toggle: shows the
+  // segmented's current state, shows/hides the off-hint paragraph, and
+  // shows/hides the panel's `${id}TrackedFields` wrapper — mirroring the
+  // pattern Food's trackFood toggle originally used alone. Returns whether
+  // the domain is tracked, so each panel's render function can skip
+  // rebuilding its (hidden) fields when off, same as Food already did.
+  function renderDomainTrackToggle(id) {
+    const tracked = domainTracked(id);
+    const cap = id.charAt(0).toUpperCase() + id.slice(1);
+    document.querySelectorAll(`#track${cap}Segmented button`).forEach((b) => b.setAttribute('aria-checked', String((b.dataset.boolChoice === 'on') === tracked)));
+    document.getElementById(`track${cap}OffHint`).hidden = tracked;
+    document.getElementById(`${id}TrackedFields`).hidden = !tracked;
+    return tracked;
   }
 
-  // Food's one piece of configuration: which macros are tracked at all, and
-  // which of those have a daily goal (see the "Food / nutrition" section —
-  // Calories is exempt from the tracking half, this only ever sets its
-  // goal). Mirrors Water's own goal input right next to it under the same
-  // Nutrition category.
-  // The row markup is built once (guarded by wrap.dataset.built) rather
-  // than on every render, for two reasons: MACRO_KEYS can grow (it already
-  // has, from 4 to 7 fields) so this can't be hand-written static HTML the
-  // way Water's fixed cup list can be, and rebuilding via innerHTML on
-  // every single toggle click would blow away focus/in-progress typing in
-  // any OTHER field's goal-amount input at the same time. Click/change are
-  // wired once via delegation on the container instead of per-field
-  // getElementById calls, so this never throws no matter how many (or few)
-  // fields MACRO_KEYS lists.
-  // The Nutrition calculator card just above the daily-goals list — options
-  // list built once (same one-time-build reasoning as macroGoalRows below),
-  // everything else refreshed every render since the live preview needs to
-  // track whatever Profile/body-weight facts currently exist.
+  // The Nutrition calculator card at the bottom of the Food panel — options
+  // list built once (same one-time-build reasoning as renderMacroGoalRows
+  // above), everything else refreshed every render since the live preview
+  // needs to track whatever Profile/body-weight facts currently exist.
   function renderNutritionCalcCard() {
     const select = document.getElementById('nutritionActivityLevel');
     if (!select.dataset.built) {
@@ -4629,23 +4648,56 @@
     }
   }
 
-  function renderFoodManagePanel() {
-    const tracked = state.settings.trackFood;
-    document.querySelectorAll('#trackFoodSegmented button').forEach((b) => b.setAttribute('aria-checked', String((b.dataset.boolChoice === 'on') === tracked)));
-    document.getElementById('trackFoodOffHint').hidden = tracked;
-    document.getElementById('foodTrackedFields').hidden = !tracked;
-    if (!tracked) return;
-    renderNutritionCalcCard();
-    renderSavedFoodManageList();
+  // Which non-calorie macros are tracked at all — a compact chip row rather
+  // than the full toggle+label rows this used to be, since a chip only
+  // needs to say "this one, or not" (the goal, if any, lives one section
+  // down in renderMacroGoalRows). Built once (guarded by wrap.dataset.built)
+  // since MACRO_KEYS can grow (already has, 4 fields to 7), same reasoning
+  // as renderMacroGoalRows below.
+  function renderMacroTrackChips() {
+    const wrap = document.getElementById('macroTrackChips');
+    const keys = MACRO_KEYS.filter((k) => k !== 'calories');
+    if (!wrap.dataset.built) {
+      wrap.innerHTML = keys.map((k) => `<button type="button" class="chip-option" data-macro-chip="${k}" role="checkbox">${MACRO_LABELS[k]}</button>`).join('');
+      wrap.dataset.built = '1';
+      wrap.addEventListener('click', (ev) => {
+        const btn = ev.target.closest('[data-macro-chip]');
+        if (!btn) return;
+        const info = macroGoalInfo(btn.dataset.macroChip);
+        info.enabled = !info.enabled;
+        save();
+        renderMacroTrackChips();
+        renderMacroGoalRows();
+        renderDashboard();
+      });
+    }
+    keys.forEach((k) => {
+      const tracked = macroTracked(k);
+      const btn = wrap.querySelector(`[data-macro-chip="${k}"]`);
+      btn.classList.toggle('is-active', tracked);
+      btn.classList.toggle('is-toggled-off', !tracked);
+      btn.setAttribute('aria-checked', String(tracked));
+    });
+  }
+
+  // Daily-goal rows, one per MACRO_KEYS entry, but only shown once its
+  // macro is tracked (see renderMacroTrackChips above) — except Calories,
+  // which is always tracked and always shown here since having a goal for
+  // it is its own separate on/off (see macroTracked). Row markup is built
+  // once, same "MACRO_KEYS can grow, and rebuilding via innerHTML would
+  // blow away in-progress typing in another field" reasoning as before;
+  // click/change stay delegated on the container for the same reason.
+  function renderMacroGoalRows() {
     const wrap = document.getElementById('macroGoalRows');
     if (!wrap.dataset.built) {
       wrap.innerHTML = MACRO_KEYS.map((k) => `
-        <div class="setting-row">
+        <div class="setting-row" data-macro-goal-row="${k}">
           <span>${MACRO_LABELS[k]} <span class="muted-text" data-macro-hint="${k}"></span></span>
-          <div class="segmented" data-macro-goal-toggle="${k}" role="radiogroup" aria-label="${MACRO_LABELS[k]} ${k === 'calories' ? 'goal' : 'tracking'}">
+          ${k === 'calories' ? `
+          <div class="segmented" data-macro-goal-toggle="${k}" role="radiogroup" aria-label="Calories goal">
             <button type="button" data-bool-choice="off" role="radio">Off</button>
             <button type="button" data-bool-choice="on" role="radio">On</button>
-          </div>
+          </div>` : ''}
         </div>
         <label class="field" data-macro-goal-field="${k}" hidden>
           <span class="field-label">Daily goal (${MACRO_UNITS[k] || 'cal'})</span>
@@ -4659,7 +4711,7 @@
         const k = toggle.dataset.macroGoalToggle;
         macroGoalInfo(k).enabled = btn.dataset.boolChoice === 'on';
         save();
-        renderFoodManagePanel();
+        renderMacroGoalRows();
         renderDashboard();
       });
       wrap.addEventListener('change', (ev) => {
@@ -4672,32 +4724,43 @@
         renderDashboard();
       });
     }
-    // Calories has no "not tracked" state (see macroTracked) — its toggle
-    // only ever means "has a goal." Every other macro's toggle means both
-    // "tracked at all" and, once on, optionally "has a goal" too.
     MACRO_KEYS.forEach((k) => {
       const info = macroGoalInfo(k);
-      wrap.querySelectorAll(`[data-macro-goal-toggle="${k}"] button`).forEach((b) => b.setAttribute('aria-checked', String((b.dataset.boolChoice === 'on') === info.enabled)));
+      const tracked = macroTracked(k);
+      const row = wrap.querySelector(`[data-macro-goal-row="${k}"]`);
+      if (row) row.hidden = !tracked;
+      if (k === 'calories') {
+        wrap.querySelectorAll(`[data-macro-goal-toggle="${k}"] button`).forEach((b) => b.setAttribute('aria-checked', String((b.dataset.boolChoice === 'on') === info.enabled)));
+      }
       const field = wrap.querySelector(`[data-macro-goal-field="${k}"]`);
-      if (field) field.hidden = !info.enabled;
+      if (field) field.hidden = k === 'calories' ? !info.enabled : !tracked;
       const input = wrap.querySelector(`[data-macro-goal-input="${k}"]`);
       if (input && document.activeElement !== input) input.value = info.goal != null ? info.goal : '';
       const hint = wrap.querySelector(`[data-macro-hint="${k}"]`);
       if (hint) {
         hint.textContent = k === 'calories'
           ? (info.enabled && info.goal != null ? `(goal: ${fmtMacroValue(k, info.goal)})` : '(always tracked)')
-          : (!info.enabled ? '(not tracked)' : (info.goal != null ? `(goal: ${fmtMacroValue(k, info.goal)})` : '(tracked)'));
+          : (info.goal != null ? `(goal: ${fmtMacroValue(k, info.goal)})` : '(no goal set)');
       }
     });
   }
 
+  function renderFoodManagePanel() {
+    if (!renderDomainTrackToggle('food')) return;
+    renderSavedFoodManageList();
+    renderMacroTrackChips();
+    renderMacroGoalRows();
+    renderNutritionCalcCard();
+  }
+
   function renderExerciseManageList() {
+    if (!renderDomainTrackToggle('workout')) return;
     const wrap = document.getElementById('exerciseManageList');
     const groups = groupBySection(state.exercises);
     wrap.innerHTML = ['goal', 'daily', 'accessory'].map((sec) => {
       if (!groups[sec].length) return '';
       return `<div class="manage-group-label">${SECTION_LABELS[sec]}</div>` + groups[sec].map((ex) => `
-        <div class="entry-row is-manage" data-exercise-id="${ex.id}">
+        <div class="entry-row is-manage${ex.archived ? ' is-toggled-off' : ''}" data-exercise-id="${ex.id}">
           <div class="entry-row-main">
             <div class="entry-row-title">${escapeHtml(ex.name)} ${ex.archived ? '<span class="chip chip-archived">archived</span>' : ''}</div>
             <div class="entry-row-sub">${kindBadge(ex)}${exerciseGoalSummary(ex)}</div>
@@ -4721,7 +4784,7 @@
 
   function trackerManageRowHtml(tracker) {
     return `
-      <div class="entry-row is-manage" data-tracker-id="${tracker.id}">
+      <div class="entry-row is-manage${tracker.archived ? ' is-toggled-off' : ''}" data-tracker-id="${tracker.id}">
         <div class="entry-row-main">
           <div class="entry-row-title">${escapeHtml(tracker.name)} ${tracker.archived ? '<span class="chip chip-archived">archived</span>' : ''}${tracker.showOnDashboard === false ? '<span class="chip">hidden from dashboard</span>' : ''}</div>
           <div class="entry-row-sub">${UNIT_KIND_LABELS[tracker.unitKind] || ''}${tracker.goal != null ? ` · ${trackerGoalLabel(tracker)}` : ' · no goal set'}</div>
@@ -4734,6 +4797,7 @@
   }
 
   function renderTrackerManageList() {
+    if (!renderDomainTrackToggle('measurements')) return;
     const wrap = document.getElementById('trackerManageList');
     wrap.innerHTML = state.trackers.map(trackerManageRowHtml).join('') || '<p class="muted-text">No trackers yet — add one to start tracking anything you like.</p>';
     wrap.querySelectorAll('[data-action="edit-tracker"]').forEach((btn) => btn.addEventListener('click', () => openTrackerForm(btn.dataset.id)));
@@ -4748,6 +4812,7 @@
   }
 
   function renderWaterManagePanel() {
+    if (!renderDomainTrackToggle('water')) return;
     document.getElementById('waterGoalUnitLabel').textContent = Units.volumeUnitLabel();
     // Same re-render-clobbers-an-unsaved-field guard as the Profile height
     // field above.
@@ -4761,7 +4826,6 @@
 
   function renderManage() {
     setManageCategory(manageCategory);
-    setManageNutritionSub(manageNutritionSub);
     renderExerciseManageList();
     renderTrackerManageList();
     renderWaterManagePanel();
@@ -4943,7 +5007,7 @@
     // seeded — those are exercise tracking too, not a separate concern.
     interests: { lifting: true, running: true, bodyweight: true, sleep: false, water: true, food: false },
     heightFt: '', heightIn: '', heightCm: '',
-    weight: '', sex: '',
+    weight: '', age: '', sex: '',
     lifts: {
       bench: { enabled: true, mode: 'plates', tier: 'intermediate' },
       squat: { enabled: true, mode: 'plates', tier: 'intermediate' },
@@ -5063,7 +5127,7 @@
   function renderSetupStepAbout() {
     const cm = state.settings.lengthUnit === 'cm';
     document.getElementById('setupContent').innerHTML = `
-      <p class="muted-text">A couple of basics, both optional — used only to size your goals below and the optional insight calculators in Settings.</p>
+      <p class="muted-text">A couple of basics, all optional — used only to size your goals below and the optional insight calculators in Settings (including the nutrition calculator, which needs age specifically to estimate calories).</p>
       <div class="form-card">
         ${cm ? `
         <label class="field"><span class="field-label">Height (cm)</span>
@@ -5078,8 +5142,10 @@
         `}
         <label class="field"><span class="field-label">Weight (${Units.weightUnitLabel()})</span>
           <input type="number" step="any" min="0" id="setupWeight" value="${escapeHtml(setupAnswers.weight)}" placeholder="Not set" /></label>
+        <label class="field"><span class="field-label">Age <span class="muted-text">(for nutrition advice)</span></span>
+          <input type="number" step="1" min="0" max="120" inputmode="numeric" id="setupAge" value="${escapeHtml(setupAnswers.age)}" placeholder="Not set" /></label>
         <div class="setting-row">
-          <span>Sex <span class="muted-text">(for strength/pace benchmarks)</span></span>
+          <span>Sex <span class="muted-text">(for strength/pace benchmarks + nutrition calculator)</span></span>
           <div class="segmented" id="setupSexSegmented" role="radiogroup" aria-label="Sex">
             <button type="button" data-sex-choice="" role="radio" aria-checked="${setupAnswers.sex === ''}">Not set</button>
             <button type="button" data-sex-choice="male" role="radio" aria-checked="${setupAnswers.sex === 'male'}">Male</button>
@@ -5209,6 +5275,7 @@
       const inEl = document.getElementById('setupHeightIn');
       if (inEl) setupAnswers.heightIn = inEl.value;
       setupAnswers.weight = document.getElementById('setupWeight').value;
+      setupAnswers.age = document.getElementById('setupAge').value;
     } else if (key === 'running') {
       const distEl = document.getElementById('setupRunDistance');
       if (distEl) setupAnswers.runningDistance = distEl.value;
@@ -5322,6 +5389,8 @@
       water.goalMl = (!Number.isNaN(rawGoal) && rawGoal > 0) ? Units.displayToMl(rawGoal) : defaultWater().goalMl;
     }
 
+    const rawAge = parseInt(setupAnswers.age, 10);
+    state.profile.age = (!Number.isNaN(rawAge) && rawAge > 0) ? rawAge : null;
     state.profile.heightCm = heightCm;
     state.profile.sex = sex;
     state.exercises = exercises;
@@ -5333,6 +5402,13 @@
     state.settings.showWeightInsights = setupAnswers.insightsEnabled;
     state.settings.showStrengthLevel = setupAnswers.insightsEnabled;
     state.settings.showPaceLevel = setupAnswers.insightsEnabled;
+    // The four Manage domains' master toggles (see DEFAULT_SETTINGS) start
+    // wherever the interests that feed each one landed — Workout covers
+    // both Lifting and Running (either one is enough to keep it on), Body
+    // covers Body weight and Sleep the same way, Water/Food map 1:1.
+    state.settings.trackWorkout = i.lifting || i.running;
+    state.settings.trackMeasurements = i.bodyweight || i.sleep;
+    state.settings.trackWater = i.water;
     state.settings.trackFood = i.food;
 
     save();
@@ -5450,16 +5526,10 @@
     document.getElementById('logFoodForm').addEventListener('submit', handleLogFoodSubmit);
 
     document.getElementById('historyFilter').addEventListener('change', renderHistory);
-    document.getElementById('historyCategorySegmented').addEventListener('click', (ev) => {
-      const btn = ev.target.closest('button'); if (!btn) return;
-      historyCategory = btn.dataset.historyCat;
-      renderHistory();
-    });
-    document.getElementById('historyNutritionSubSegmented').addEventListener('click', (ev) => {
-      const btn = ev.target.closest('button'); if (!btn) return;
-      historyNutritionSub = btn.dataset.nutritionSub;
-      renderHistory();
-    });
+    // historyCategorySegmented's buttons are wired inline, on every rebuild,
+    // by renderHistoryCategorySegmented() itself (it's rebuilt via
+    // domainTabsHtml() whenever the tracked-domain set can change) — same
+    // pattern manageCategorySegmented uses below via setManageCategory().
     document.getElementById('calPrevBtn').addEventListener('click', () => {
       calendarMonth.setMonth(calendarMonth.getMonth() - 1);
       renderHistoryCalendar();
@@ -5469,19 +5539,12 @@
       renderHistoryCalendar();
     });
 
-    document.getElementById('manageCategorySegmented').addEventListener('click', (ev) => {
-      const btn = ev.target.closest('button'); if (!btn) return;
-      setManageCategory(btn.dataset.manageCat);
-    });
+    // manageCategorySegmented's buttons are wired inline by
+    // setManageCategory() itself, same as historyCategorySegmented above.
     document.querySelectorAll('[data-action="add-exercise"]').forEach((btn) => btn.addEventListener('click', () => openExerciseForm(null)));
     document.querySelectorAll('[data-action="add-tracker"]').forEach((btn) => btn.addEventListener('click', () => openTrackerForm(null)));
     document.querySelectorAll('[data-action="add-cup"]').forEach((btn) => btn.addEventListener('click', () => openCupForm(null)));
     document.querySelectorAll('[data-action="add-saved-food"]').forEach((btn) => btn.addEventListener('click', () => openSavedFoodForm(null)));
-
-    document.getElementById('manageNutritionSubSegmented').addEventListener('click', (ev) => {
-      const btn = ev.target.closest('button'); if (!btn) return;
-      setManageNutritionSub(btn.dataset.nutritionSub);
-    });
 
     // Macro/goal toggle + amount rows are wired inside renderFoodManagePanel()
     // itself (event delegation on #macroGoalRows, built once) rather than
@@ -5497,10 +5560,30 @@
       renderDashboard();
     });
 
-    // Master on/off for Food (Manage -> Nutrition -> Food) — mirrors
-    // Water's own "off means zero cups" self-management: turning this off
-    // hides Food from the dashboard and from Log/History (see
-    // availableNutritionSubs), without touching any already-logged entries.
+    // Master on/off toggle, identical across all four Manage domains —
+    // turning one off hides that domain's tab from Log/History and its
+    // dashboard section (see availableDomainCategories/domainTracked),
+    // without touching any already-logged data. Each panel stays visible
+    // and clickable in Manage regardless (see renderDomainTrackToggle) —
+    // Manage is where a turned-off domain gets turned back on.
+    document.getElementById('trackWorkoutSegmented').addEventListener('click', (ev) => {
+      const btn = ev.target.closest('button'); if (!btn) return;
+      state.settings.trackWorkout = btn.dataset.boolChoice === 'on';
+      save();
+      renderAll();
+    });
+    document.getElementById('trackMeasurementsSegmented').addEventListener('click', (ev) => {
+      const btn = ev.target.closest('button'); if (!btn) return;
+      state.settings.trackMeasurements = btn.dataset.boolChoice === 'on';
+      save();
+      renderAll();
+    });
+    document.getElementById('trackWaterSegmented').addEventListener('click', (ev) => {
+      const btn = ev.target.closest('button'); if (!btn) return;
+      state.settings.trackWater = btn.dataset.boolChoice === 'on';
+      save();
+      renderAll();
+    });
     document.getElementById('trackFoodSegmented').addEventListener('click', (ev) => {
       const btn = ev.target.closest('button'); if (!btn) return;
       state.settings.trackFood = btn.dataset.boolChoice === 'on';

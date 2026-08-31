@@ -167,24 +167,25 @@ button { font-family: inherit; }
 #app.no-topbar #main { padding-top: calc(16px + env(safe-area-inset-top)); }
 .view { display: flex; flex-direction: column; gap: 16px; }
 
-/* Manage/Log sub-panel rhythm — the same fixed 16px `gap` as `.view` and
+/* Manage sub-panel rhythm — the same fixed 16px `gap` as `.view` and
    `.modal-sheet`, applied to every plain <div> that groups a handful of
    blocks (a section-head, a description paragraph, a card, an entry list)
-   one level below a `.view`: Log's Water/Food switcher panel, and Manage's
-   per-domain panels and their own Water/Food switcher panel one level
-   further in. These used to be plain, non-flex <div>s with no gap of their
-   own, so their contents (e.g. "Exercises" header sitting directly on top
-   of the exercise list, or Manage → Nutrition → Food's description
-   paragraph touching the card right below it) were cramped compared to
-   everything at the `.view` level — the exact opposite problem from the
-   double-margins fixed elsewhere on this page, but the same root cause:
-   spacing left to chance instead of one shared rule. */
-#logNutritionPanel,
+   one level below a `.view`: Manage's four domain panels, and each one's
+   `*TrackedFields` wrapper one level further in. These used to be plain,
+   non-flex <div>s with no gap of their own, so their contents (e.g.
+   "Exercises" header sitting directly on top of the exercise list, or
+   Food's description paragraph touching the card right below it) were
+   cramped compared to everything at the `.view` level — the exact opposite
+   problem from the double-margins fixed elsewhere on this page, but the
+   same root cause: spacing left to chance instead of one shared rule. */
 #manageExercisesPanel,
 #manageMeasurementsPanel,
-#manageNutritionPanel,
 #manageWaterPanel,
-#manageFoodPanel {
+#manageFoodPanel,
+#workoutTrackedFields,
+#measurementsTrackedFields,
+#waterTrackedFields,
+#foodTrackedFields {
   display: flex;
   flex-direction: column;
   gap: 16px;
@@ -247,19 +248,23 @@ button { font-family: inherit; }
 .prompt-row-name { font-size: 13.5px; font-weight: 600; }
 .prompt-row-sub { font-size: 11px; color: var(--muted); }
 
-/* ============ Domain tabs (Workout / Measurements / Nutrition) ============
+/* ============ Domain tabs (Workout / Body / Water / Food) ============
    Log/History/Manage's top-level category switcher used to be a small
    inline pill row squeezed next to the section title — on a narrow phone
-   three buttons plus "Measurements"/"Nutrition" text simply didn't fit,
-   and the last one ran off the edge of the screen instead of wrapping.
-   A fixed 3-column grid, on its own full-width row below the title, can't
-   overflow regardless of screen width, and the larger icon+label buttons
-   are both easier to hit and easier to tell apart at a glance than three
-   small text-only pills. Used identically (same 3 ids, same icons) across
-   all three tabs — see DOMAIN_TAB_ICONS in js/app.js. */
-.domain-tabs, .interest-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+   several buttons plus text labels simply didn't fit, and the last one ran
+   off the edge of the screen instead of wrapping. A full-width row below
+   the title, below, can't overflow regardless of screen width, and the
+   larger icon+label buttons are both easier to hit and easier to tell
+   apart at a glance than small text-only pills. Used identically (same 4
+   ids, same icons, same domainTabsHtml() markup) across all three tabs —
+   see DOMAIN_TAB_ICONS/domainTabsHtml in js/app.js. Flex rather than a
+   fixed grid because the child count actually varies: Log/History only
+   ever show the domains currently tracked (0 to 4), while Manage always
+   shows all 4 — a fixed column count would leave gaps or overflow
+   depending on which end of that range shows up. */
+.domain-tabs { display: flex; gap: 8px; }
 .domain-tab {
-  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  display: flex; flex: 1; flex-direction: column; align-items: center; gap: 4px;
   padding: 10px 2px 9px; min-width: 0;
   border: 1px solid var(--border); border-radius: var(--radius-md);
   background: var(--surface-1); color: var(--text-secondary);
@@ -269,15 +274,27 @@ button { font-family: inherit; }
 .domain-tab span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
 .domain-tab[aria-checked="true"] { background: var(--accent-track); border-color: var(--accent); color: var(--accent); }
 
-/* Setup wizard's interests step (renderSetupStepInterests) — same visual
-   language as .domain-tab above (same base class, reused rather than
-   duplicated), just a bigger icon/padding for a 2-row grid of 6 tiles, and
+/* Setup wizard's interests step (renderSetupStepInterests) — its own fixed
+   3-column grid (6 tiles, never a variable count, so a grid is simpler
+   than domain-tabs' flex needs to be), reusing .domain-tab's visual
+   language rather than duplicating it, just bigger icon/padding, and
    pressed-state coloring keyed to aria-pressed instead of aria-checked
    since these toggle independently rather than as one radiogroup. */
+.interest-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
 .interest-tile { padding: 14px 4px; }
 .interest-tile .icon { width: 24px; height: 24px; }
 .interest-tile .name { font-size: 12px; font-weight: 600; }
 .interest-tile[aria-pressed="true"] { background: var(--accent-track); border-color: var(--accent); color: var(--accent); }
+
+/* ============ Toggled-off / not-tracked visual state ============
+   Shared dimming used across Manage wherever something is switched off but
+   still meant to be clickable (per the user's ask, not a disabled control):
+   a domain tab for a domain whose master toggle is off, an archived
+   exercise/tracker row, an untracked macro chip. Deliberately just opacity
+   — no pointer-events change — so every one of these stays fully
+   interactive; the point is purely "this isn't active right now," not
+   "this can't be touched." */
+.is-toggled-off { opacity: 0.5; }
 
 /* ============ Summary row ============ */
 .summary-row {
@@ -661,7 +678,7 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 1p
    one lone `.setting-row` (Sex) sits among ordinary `.field`s rather than
    in a list of its own, so it should never get a stray divider above it. */
 .setting-row + .setting-row { border-top: 1px solid var(--gridline); }
-/* Manage → Nutrition → Food's per-macro goal list (#macroGoalRows) is the
+/* Manage → Food's per-macro daily-goals list (#macroGoalRows) is the
    one place that IS a plain list but doesn't satisfy the rule above: it
    interleaves a hidden `.field` (the goal-amount input) between every pair
    of `.setting-row`s, so each row's immediately-preceding sibling is
@@ -679,30 +696,10 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 1p
 }
 .segmented button[aria-checked="true"] { background: var(--surface-1); color: var(--text-primary); box-shadow: var(--shadow-1); }
 
-/* Nutrition's nested Water/Food sub-control, one level below the outer
-   Workout/Measurements/Nutrition segmented control on Log/History/Manage.
-   Spacing to what follows now comes from #logNutritionPanel/
-   #manageNutritionPanel's own gap (see "Manage/Log sub-panel rhythm"
-   below) — this used to carry its own margin-bottom:12px, which, now that
-   those panels lay out with a gap of their own, would have stacked with it
-   instead of being replaced by it.
-
-   Sized up from the plain .segmented pill above (icon + label, ~doubled
-   tap-target height) so it doesn't read as a smaller repeat of the outer
-   domain-tabs row right above it — still one clear step below that row,
-   not a duplicate of it. */
-.segmented-new { display: flex; background: var(--surface-2); border-radius: var(--radius-md); padding: 4px; gap: 4px; }
-.seg-new-btn {
-  flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px;
-  border: none; background: transparent; color: var(--text-secondary);
-  padding: 10px 12px; border-radius: 10px; font-size: 13.5px; font-weight: 600; cursor: pointer;
-}
-.seg-new-btn[aria-checked="true"] { background: var(--surface-1); color: var(--text-primary); box-shadow: var(--shadow-1); }
-.seg-new-btn .icon { width: 17px; height: 17px; }
-
-/* Chip picker — a row of discrete-choice tap targets (e.g. a 1-5 rating)
-   in place of a number input, sized like the other touch targets on this
-   page rather than a compact segmented control. */
+/* Chip picker — a row of discrete-choice tap targets (e.g. a 1-5 rating,
+   or which macros are tracked in Manage → Food) in place of a number input
+   or a full toggle row, sized like the other touch targets on this page
+   rather than a compact segmented control. */
 .chip-picker { display: flex; gap: 8px; flex-wrap: wrap; }
 .chip-option {
   min-width: 44px; height: 44px;

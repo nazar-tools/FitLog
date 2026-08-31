@@ -105,6 +105,9 @@
         <h2>Log</h2>
       </div>
       <div class="domain-tabs" id="logCategorySegmented" role="radiogroup" aria-label="What to log"></div>
+      <div id="logAllOffHint" class="empty-state" hidden>
+        <p>Every domain is turned off. Turn one back on in Manage to start logging.</p>
+      </div>
 
       <form id="logForm" class="card form-card">
         <label class="field">
@@ -153,39 +156,35 @@
         <button type="submit" class="btn btn-primary btn-block">Save entry</button>
       </form>
 
-      <div id="logNutritionPanel" hidden>
-        <div class="segmented-new" id="logNutritionSubSegmented" role="radiogroup" aria-label="Nutrition type"></div>
-
-        <div id="logWaterPanel" class="card form-card" hidden>
-          <span class="field-label">Tap a cup to log it for today</span>
-          <div id="waterCupButtons" class="cup-button-row"></div>
-          <label class="field">
-            <span class="field-label">Custom amount (<span id="logWaterUnitLabel"></span>)</span>
-            <div class="inline-time-fields">
-              <input type="number" step="any" min="0" id="logWaterCustomAmount" placeholder="e.g. 12" />
-              <button type="button" class="btn btn-secondary" id="logWaterCustomAddBtn">Add</button>
-            </div>
-          </label>
-        </div>
-
-        <div id="savedFoodsWrap" class="card form-card" hidden>
-          <span class="field-label">Saved foods — tap one to log it</span>
-          <div id="savedFoodLogList" class="entry-list"></div>
-        </div>
-
-        <form id="logFoodForm" class="card form-card" hidden>
-          <label class="field">
-            <span class="field-label">Date</span>
-            <input type="date" id="logFoodDate" required />
-          </label>
-          <div id="logFoodDynamicFields"></div>
-          <label class="field">
-            <span class="field-label">Note (optional)</span>
-            <input type="text" id="logFoodNote" placeholder="What was it?" maxlength="200" />
-          </label>
-          <button type="submit" class="btn btn-primary btn-block">Save entry</button>
-        </form>
+      <div id="logWaterPanel" class="card form-card" hidden>
+        <span class="field-label">Tap a cup to log it for today</span>
+        <div id="waterCupButtons" class="cup-button-row"></div>
+        <label class="field">
+          <span class="field-label">Custom amount (<span id="logWaterUnitLabel"></span>)</span>
+          <div class="inline-time-fields">
+            <input type="number" step="any" min="0" id="logWaterCustomAmount" placeholder="e.g. 12" />
+            <button type="button" class="btn btn-secondary" id="logWaterCustomAddBtn">Add</button>
+          </div>
+        </label>
       </div>
+
+      <div id="savedFoodsWrap" class="card form-card" hidden>
+        <span class="field-label">Saved foods — tap one to log it</span>
+        <div id="savedFoodLogList" class="entry-list"></div>
+      </div>
+
+      <form id="logFoodForm" class="card form-card" hidden>
+        <label class="field">
+          <span class="field-label">Date</span>
+          <input type="date" id="logFoodDate" required />
+        </label>
+        <div id="logFoodDynamicFields"></div>
+        <label class="field">
+          <span class="field-label">Note (optional)</span>
+          <input type="text" id="logFoodNote" placeholder="What was it?" maxlength="200" />
+        </label>
+        <button type="submit" class="btn btn-primary btn-block">Save entry</button>
+      </form>
 
       <div class="section-head">
         <h2>Recent entries</h2>
@@ -222,85 +221,89 @@
       <div class="section-head">
         <h2>All entries</h2>
       </div>
-      <!-- Kept as static markup (unlike Log's, which is rebuilt in JS since
-           its categories can appear/disappear) since History always offers
-           all three — but the icon markup must stay byte-for-byte identical
-           to Log's DOMAIN_TAB_ICONS and Manage's copy below it, so the same
-           domain always shows the same glyph everywhere it appears. -->
-      <div class="domain-tabs" id="historyCategorySegmented" role="radiogroup" aria-label="History category">
-        <button type="button" class="domain-tab" data-history-cat="workout" role="radio">
-          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.596 12.768a2 2 0 1 0 2.829-2.829l-1.768-1.767a2 2 0 0 0 2.828-2.829l-2.828-2.828a2 2 0 0 0-2.829 2.828l-1.767-1.768a2 2 0 1 0-2.829 2.829z"/><path d="m2.5 21.5 1.4-1.4"/><path d="m20.1 3.9 1.4-1.4"/><path d="M5.343 21.485a2 2 0 1 0 2.829-2.828l1.767 1.768a2 2 0 1 0 2.829-2.829l-6.364-6.364a2 2 0 1 0-2.829 2.829l1.768 1.767a2 2 0 0 0-2.828 2.829z"/><path d="m9.6 14.4 4.8-4.8"/></svg>
-          <span>Workout</span>
-        </button>
-        <button type="button" class="domain-tab" data-history-cat="measurement" role="radio">
-          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.3 15.3a2.4 2.4 0 0 1 0 3.4l-2.6 2.6a2.4 2.4 0 0 1-3.4 0L2.7 8.7a2.41 2.41 0 0 1 0-3.4l2.6-2.6a2.41 2.41 0 0 1 3.4 0Z"/><path d="m14.5 12.5 2-2"/><path d="m11.5 9.5 2-2"/><path d="m8.5 6.5 2-2"/><path d="m17.5 15.5 2-2"/></svg>
-          <span>Measurements</span>
-        </button>
-        <button type="button" class="domain-tab" data-history-cat="nutrition" role="radio">
-          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 2v7c0 1.1.9 2 2 2h4a2 2 0 0 0 2-2V2"/><path d="M7 2v20"/><path d="M21 15V2a5 5 0 0 0-5 5v6c0 1.1.9 2 2 2h3Zm0 0v7"/></svg>
-          <span>Nutrition</span>
-        </button>
-      </div>
+      <!-- Rebuilt in JS by renderHistoryCategorySegmented() via the shared
+           domainTabsHtml() helper — same component Log and Manage use, so
+           all three always show the identical glyph/label per domain. -->
+      <div class="domain-tabs" id="historyCategorySegmented" role="radiogroup" aria-label="History category"></div>
       <label class="field" id="historyFilterField">
         <span class="field-label">Filter by exercise</span>
         <select id="historyFilter"></select>
       </label>
-      <div class="field" id="historyNutritionSubField" hidden>
-        <span class="field-label">Nutrition type</span>
-        <div class="segmented-new" id="historyNutritionSubSegmented" role="radiogroup" aria-label="Nutrition type"></div>
-      </div>
       <div id="historyList" class="entry-list"></div>
       <div id="historyEmpty" class="empty-state" hidden>
         <p>No entries logged yet.</p>
       </div>
     </section>
 
-    <!-- MANAGE (exercises, body-measurement trackers, water setup) -->
+    <!-- MANAGE (four flat domain panels — Workout, Body, Water, Food — each
+         with the identical "Track this" master toggle) -->
     <section id="view-manage" class="view" data-view="manage" hidden>
       <div class="section-head">
         <h2>Manage</h2>
       </div>
-      <!-- Same domain-tabs component as Log/History, same icons — see the
-           note above historyCategorySegmented. Underlying category id stays
-           "exercises" (nothing else keys off a rename), only the visible
-           label reads "Workout" now, matching the other two tabs; the panel
-           itself still opens with its own "Exercises" heading. -->
-      <div class="domain-tabs" id="manageCategorySegmented" role="radiogroup" aria-label="Manage category">
-        <button type="button" class="domain-tab" data-manage-cat="exercises" role="radio">
-          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.596 12.768a2 2 0 1 0 2.829-2.829l-1.768-1.767a2 2 0 0 0 2.828-2.829l-2.828-2.828a2 2 0 0 0-2.829 2.828l-1.767-1.768a2 2 0 1 0-2.829 2.829z"/><path d="m2.5 21.5 1.4-1.4"/><path d="m20.1 3.9 1.4-1.4"/><path d="M5.343 21.485a2 2 0 1 0 2.829-2.828l1.767 1.768a2 2 0 1 0 2.829-2.829l-6.364-6.364a2 2 0 1 0-2.829 2.829l1.768 1.767a2 2 0 0 0-2.828 2.829z"/><path d="m9.6 14.4 4.8-4.8"/></svg>
-          <span>Workout</span>
-        </button>
-        <button type="button" class="domain-tab" data-manage-cat="measurements" role="radio">
-          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.3 15.3a2.4 2.4 0 0 1 0 3.4l-2.6 2.6a2.4 2.4 0 0 1-3.4 0L2.7 8.7a2.41 2.41 0 0 1 0-3.4l2.6-2.6a2.41 2.41 0 0 1 3.4 0Z"/><path d="m14.5 12.5 2-2"/><path d="m11.5 9.5 2-2"/><path d="m8.5 6.5 2-2"/><path d="m17.5 15.5 2-2"/></svg>
-          <span>Measurements</span>
-        </button>
-        <button type="button" class="domain-tab" data-manage-cat="nutrition" role="radio">
-          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 2v7c0 1.1.9 2 2 2h4a2 2 0 0 0 2-2V2"/><path d="M7 2v20"/><path d="M21 15V2a5 5 0 0 0-5 5v6c0 1.1.9 2 2 2h3Zm0 0v7"/></svg>
-          <span>Nutrition</span>
-        </button>
-      </div>
+      <!-- Rebuilt in JS by setManageCategory() via the shared
+           domainTabsHtml() helper — same component Log and History use.
+           Manage always shows all 4 regardless of tracked state (see
+           ALL_DOMAIN_CATEGORIES) since it's where a turned-off domain gets
+           turned back on. -->
+      <div class="domain-tabs" id="manageCategorySegmented" role="radiogroup" aria-label="Manage category"></div>
 
       <div id="manageExercisesPanel">
-        <div class="section-head">
-          <h2>Exercises</h2>
-          <button class="btn btn-secondary btn-sm btn-icon-label" data-action="add-exercise"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg><span>Add exercise</span></button>
+        <div class="card">
+          <div class="setting-row">
+            <span>Track this</span>
+            <div class="segmented" id="trackWorkoutSegmented" role="radiogroup" aria-label="Track workout">
+              <button type="button" data-bool-choice="off" role="radio">Off</button>
+              <button type="button" data-bool-choice="on" role="radio">On</button>
+            </div>
+          </div>
         </div>
-        <div id="exerciseManageList" class="entry-list"></div>
+        <p class="muted-text" id="trackWorkoutOffHint" hidden>Workout is off — hidden from the dashboard, Log, and History. Nothing already logged is lost; turn it back on to see it again.</p>
+
+        <div id="workoutTrackedFields">
+          <div class="section-head">
+            <h2>Exercises</h2>
+            <button class="btn btn-secondary btn-sm btn-icon-label" data-action="add-exercise"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg><span>Add exercise</span></button>
+          </div>
+          <div id="exerciseManageList" class="entry-list"></div>
+        </div>
       </div>
 
       <div id="manageMeasurementsPanel" hidden>
-        <div class="section-head">
-          <h2>Body &amp; wellness trackers</h2>
-          <button class="btn btn-secondary btn-sm btn-icon-label" data-action="add-tracker"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg><span>Add tracker</span></button>
+        <div class="card">
+          <div class="setting-row">
+            <span>Track this</span>
+            <div class="segmented" id="trackMeasurementsSegmented" role="radiogroup" aria-label="Track measurements">
+              <button type="button" data-bool-choice="off" role="radio">Off</button>
+              <button type="button" data-bool-choice="on" role="radio">On</button>
+            </div>
+          </div>
         </div>
-        <p class="muted-text">Anything you want a number and a trend line for — weight, body fat %, a circumference, sleep hours, calories, or anything else you think to add later.</p>
-        <div id="trackerManageList" class="entry-list"></div>
+        <p class="muted-text" id="trackMeasurementsOffHint" hidden>Body is off — hidden from the dashboard, Log, and History. Nothing already logged is lost; turn it back on to see it again.</p>
+
+        <div id="measurementsTrackedFields">
+          <div class="section-head">
+            <h2>Body &amp; wellness trackers</h2>
+            <button class="btn btn-secondary btn-sm btn-icon-label" data-action="add-tracker"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg><span>Add tracker</span></button>
+          </div>
+          <p class="muted-text">Anything you want a number and a trend line for — weight, body fat %, a circumference, sleep hours, calories, or anything else you think to add later.</p>
+          <div id="trackerManageList" class="entry-list"></div>
+        </div>
       </div>
 
-      <div id="manageNutritionPanel" hidden>
-        <div class="segmented-new" id="manageNutritionSubSegmented" role="radiogroup" aria-label="Nutrition type"></div>
+      <div id="manageWaterPanel" hidden>
+        <div class="card">
+          <div class="setting-row">
+            <span>Track this</span>
+            <div class="segmented" id="trackWaterSegmented" role="radiogroup" aria-label="Track water">
+              <button type="button" data-bool-choice="off" role="radio">Off</button>
+              <button type="button" data-bool-choice="on" role="radio">On</button>
+            </div>
+          </div>
+        </div>
+        <p class="muted-text" id="trackWaterOffHint" hidden>Water is off — hidden from the dashboard, Log, and History. Nothing already logged is lost; turn it back on to see it again.</p>
 
-        <div id="manageWaterPanel" hidden>
+        <div id="waterTrackedFields">
           <div class="section-head"><h2>Daily water goal</h2></div>
           <div class="card form-card">
             <label class="field">
@@ -315,67 +318,76 @@
           </div>
           <div id="cupManageList" class="entry-list"></div>
         </div>
+      </div>
 
-        <div id="manageFoodPanel" hidden>
-          <div class="card">
+      <div id="manageFoodPanel" hidden>
+        <div class="card">
+          <div class="setting-row">
+            <span>Track this</span>
+            <div class="segmented" id="trackFoodSegmented" role="radiogroup" aria-label="Track food">
+              <button type="button" data-bool-choice="off" role="radio">Off</button>
+              <button type="button" data-bool-choice="on" role="radio">On</button>
+            </div>
+          </div>
+        </div>
+        <p class="muted-text" id="trackFoodOffHint" hidden>Food is off — hidden from the dashboard, Log, and History. Nothing already logged is lost; turn it back on to see it again.</p>
+
+        <div id="foodTrackedFields">
+          <!-- Saved foods first — it's the feature actually used every day
+               (one-tap re-logging), so it leads the panel instead of
+               trailing after two setup-once sections. -->
+          <div class="section-head">
+            <h2>Saved foods</h2>
+            <button class="btn btn-secondary btn-sm btn-icon-label" data-action="add-saved-food"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg><span>Save a new food</span></button>
+          </div>
+          <p class="muted-text">Research a food's numbers once, save it here, then log it in one tap from Log &rarr; Food — optionally scaling the quantity.</p>
+          <div id="savedFoodManageList" class="entry-list"></div>
+
+          <div class="section-head"><h2>Tracked macros</h2></div>
+          <p class="muted-text">Calories is always tracked and required to log an entry. Tap a macro below to also track it — tap again to stop; nothing already logged is lost either way.</p>
+          <!-- Populated by renderMacroTrackChips() — a compact chip per
+               non-calorie MACRO_KEYS entry, replacing what used to be a full
+               toggle+label row per field; untracked chips get the shared
+               .is-toggled-off dimming. -->
+          <div class="chip-picker" id="macroTrackChips" role="group" aria-label="Tracked macros"></div>
+
+          <div class="section-head"><h2>Daily goals</h2></div>
+          <p class="muted-text">Add a goal to any tracked field to see progress against it on the dashboard. Calories is the one field with its own on/off here, since having a goal for it is optional even though tracking it never is.</p>
+          <!-- Populated by renderMacroGoalRows() — Calories keeps its own
+               toggle+amount row; every other row only appears once its
+               macro is turned on above. -->
+          <div class="card" id="macroGoalRows"></div>
+
+          <div class="section-head"><h2>Nutrition calculator</h2></div>
+          <p class="muted-text">Estimates daily calories and protein from your Profile, body weight, activity level, and goal (Mifflin-St Jeor formula) — apply it below.</p>
+          <div class="card" id="nutritionCalcCard">
             <div class="setting-row">
-              <span>Track food</span>
-              <div class="segmented" id="trackFoodSegmented" role="radiogroup" aria-label="Track food">
+              <span>Use calculator</span>
+              <div class="segmented" id="nutritionCalcEnabledSegmented" role="radiogroup" aria-label="Use nutrition calculator">
                 <button type="button" data-bool-choice="off" role="radio">Off</button>
                 <button type="button" data-bool-choice="on" role="radio">On</button>
               </div>
             </div>
-          </div>
-          <p class="muted-text" id="trackFoodOffHint" hidden>Food is off — hidden from the dashboard, Log, and History. Nothing already logged is lost; turn it back on to see it again.</p>
-
-          <div id="foodTrackedFields">
-            <div class="section-head"><h2>Nutrition calculator</h2></div>
-            <p class="muted-text">Estimates daily calories and protein from your Profile, body weight, activity level, and goal (Mifflin-St Jeor formula) — apply it below.</p>
-            <div class="card" id="nutritionCalcCard">
-              <div class="setting-row">
-                <span>Use calculator</span>
-                <div class="segmented" id="nutritionCalcEnabledSegmented" role="radiogroup" aria-label="Use nutrition calculator">
-                  <button type="button" data-bool-choice="off" role="radio">Off</button>
-                  <button type="button" data-bool-choice="on" role="radio">On</button>
+            <div id="nutritionCalcFields" hidden>
+              <div class="field">
+                <span class="field-label">Activity level</span>
+                <select id="nutritionActivityLevel"></select>
+              </div>
+              <div class="field">
+                <span class="field-label">Goal</span>
+                <div class="segmented" id="nutritionGoalSegmented" role="radiogroup" aria-label="Nutrition goal">
+                  <button type="button" data-goal-choice="lose" role="radio">Lose weight</button>
+                  <button type="button" data-goal-choice="maintain" role="radio">Maintain</button>
+                  <button type="button" data-goal-choice="gain" role="radio">Gain weight</button>
                 </div>
               </div>
-              <div id="nutritionCalcFields" hidden>
-                <div class="field">
-                  <span class="field-label">Activity level</span>
-                  <select id="nutritionActivityLevel"></select>
-                </div>
-                <div class="field">
-                  <span class="field-label">Goal</span>
-                  <div class="segmented" id="nutritionGoalSegmented" role="radiogroup" aria-label="Nutrition goal">
-                    <button type="button" data-goal-choice="lose" role="radio">Lose weight</button>
-                    <button type="button" data-goal-choice="maintain" role="radio">Maintain</button>
-                    <button type="button" data-goal-choice="gain" role="radio">Gain weight</button>
-                  </div>
-                </div>
-                <p class="muted-text field-hint" id="nutritionCalcMissing" hidden></p>
-                <div class="pr-grid" id="nutritionCalcPreview" hidden>
-                  <div class="pr-tile"><div class="value" id="nutritionCalcCalories">—</div><div class="label">Calories/day</div></div>
-                  <div class="pr-tile"><div class="value" id="nutritionCalcProtein">—</div><div class="label">Protein/day</div></div>
-                </div>
-                <button type="button" class="btn btn-primary btn-block" id="applyNutritionCalcBtn">Apply to daily goals</button>
+              <p class="muted-text field-hint" id="nutritionCalcMissing" hidden></p>
+              <div class="pr-grid" id="nutritionCalcPreview" hidden>
+                <div class="pr-tile"><div class="value" id="nutritionCalcCalories">—</div><div class="label">Calories/day</div></div>
+                <div class="pr-tile"><div class="value" id="nutritionCalcProtein">—</div><div class="label">Protein/day</div></div>
               </div>
+              <button type="button" class="btn btn-primary btn-block" id="applyNutritionCalcBtn">Apply to daily goals</button>
             </div>
-
-            <div class="section-head"><h2>Tracked macros</h2></div>
-            <p class="muted-text">Calories is always tracked and required to log an entry. Turn any other field on to start logging it — turning it back off hides it from the log form and today's totals, without losing anything already logged. Add a daily goal to any tracked field to see progress against it on the dashboard.</p>
-            <!-- Populated by renderFoodManagePanel() — one toggle+amount row
-                 per MACRO_KEYS entry, rather than one hardcoded row per field
-                 in markup, since that list has grown from 4 to 7 fields
-                 (sugar/sodium/caffeine) and is more likely to grow again than
-                 Water's fixed cup-size list is. -->
-            <div class="card" id="macroGoalRows"></div>
-
-            <div class="section-head">
-              <h2>Saved foods</h2>
-              <button class="btn btn-secondary btn-sm btn-icon-label" data-action="add-saved-food"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg><span>Save a new food</span></button>
-            </div>
-            <p class="muted-text">Research a food's numbers once, save it here, then log it in one tap from Log &rarr; Food — optionally scaling the quantity.</p>
-            <div id="savedFoodManageList" class="entry-list"></div>
           </div>
         </div>
       </div>
@@ -525,7 +537,7 @@
 
       <div class="section-head"><h2>About</h2></div>
       <div class="card">
-        <p class="muted-text">Fit Log v1.13 &middot; installed as a home-screen app, all data stored on-device.</p>
+        <p class="muted-text">Fit Log v1.14 &middot; installed as a home-screen app, all data stored on-device.</p>
       </div>
     </section>
 
