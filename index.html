@@ -213,7 +213,7 @@
         <div class="calendar-legend">
           <span><i class="cal-dot cal-dot-workout"></i>Workout</span>
           <span><i class="cal-dot cal-dot-water"></i>Water goal</span>
-          <span><i class="cal-dot cal-dot-body"></i>Measurements</span>
+          <span><i class="cal-dot cal-dot-body"></i>Body</span>
           <span><i class="cal-dot cal-dot-food"></i>Food</span>
         </div>
       </div>
@@ -414,18 +414,18 @@
         <p class="muted-text">Used only by the optional insight calculators below (BMI, strength level, pace level, nutrition calculator) — never required, and nothing here is used anywhere else in the app.</p>
         <div class="field" id="profileHeightFieldCm">
           <span class="field-label">Height (cm)</span>
-          <input type="number" step="any" min="0" id="profileHeightCm" placeholder="Not set" />
+          <input type="number" step="any" min="50" max="272" id="profileHeightCm" placeholder="Not set" />
         </div>
         <div class="field" id="profileHeightFieldFtIn">
           <span class="field-label">Height (ft/in)</span>
           <div class="inline-time-fields">
-            <input type="number" step="1" min="0" inputmode="numeric" id="profileHeightFt" placeholder="ft" />
+            <input type="number" step="1" min="0" max="8" inputmode="numeric" id="profileHeightFt" placeholder="ft" />
             <input type="number" step="1" min="0" max="11" inputmode="numeric" id="profileHeightIn" placeholder="in" />
           </div>
         </div>
         <div class="field" id="profileAgeField">
           <span class="field-label">Age <span class="muted-text">(optional — for nutrition advice)</span></span>
-          <input type="number" step="1" min="0" max="120" inputmode="numeric" id="profileAge" placeholder="Not set" />
+          <input type="number" step="1" min="1" max="120" inputmode="numeric" id="profileAge" placeholder="Not set" />
         </div>
         <div class="setting-row">
           <span>Sex <span class="muted-text">(for strength/pace benchmarks + nutrition calculator)</span></span>

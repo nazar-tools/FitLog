@@ -56,11 +56,25 @@ const Charts = (() => {
     const innerW = width - padL - padR;
     const innerH = height - padT - padB;
     const n = entries.length;
-    const points = entries.map((e, i) => ({
-      x: padL + (n === 1 ? innerW / 2 : (i / (n - 1)) * innerW),
-      y: padT + innerH - ((e.value - min) / (max - min)) * innerH,
-      raw: e,
-    }));
+    // X position by actual elapsed time between the first and last logged
+    // date, not by index — a plain index spacing put every entry the same
+    // distance apart regardless of when it was actually logged, so a run of
+    // daily entries followed by a two-week gap then one more looked exactly
+    // like perfectly even logging: the gap and the density were both
+    // flattened into identical spacing, distorting the very trend the chart
+    // exists to show. Falls back to even spacing only when every entry
+    // shares one date (totalSpan 0), where a time-proportional x is
+    // undefined anyway.
+    const firstTime = new Date(entries[0].date + 'T00:00:00').getTime();
+    const totalSpan = new Date(entries[n - 1].date + 'T00:00:00').getTime() - firstTime;
+    const points = entries.map((e, i) => {
+      const frac = n === 1 ? 0.5 : (totalSpan > 0 ? (new Date(e.date + 'T00:00:00').getTime() - firstTime) / totalSpan : i / (n - 1));
+      return {
+        x: padL + frac * innerW,
+        y: padT + innerH - ((e.value - min) / (max - min)) * innerH,
+        raw: e,
+      };
+    });
 
     const line = pathFromPoints(points);
     const area = areaPathFromPoints(points, padT + innerH);

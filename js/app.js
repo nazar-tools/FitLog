@@ -721,15 +721,27 @@
     }
   }
 
+  // Returns true on success, false on failure — every caller that follows a
+  // save with its own "X saved"/"X deleted"-style success toast (or closes
+  // a form modal as if the save is now durable) MUST check this and skip
+  // that success feedback on false, since save() already shows a failure
+  // toast itself here. Without that check, a failed write (quota exceeded,
+  // private-mode storage disabled, etc.) would still show "Entry saved" —
+  // the in-memory `state` mutation happened either way, but nothing durable
+  // actually happened, and telling the user otherwise is actively
+  // misleading (see the callers of this function for the `if (!save())
+  // return;` guard).
   function save() {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      return true;
     } catch (e) {
       // Most likely the browser's storage quota is full. This is rare for a
       // text-only app like this one, but fail loudly rather than silently
       // losing the entry the user thinks they just saved.
       console.error('Could not save to localStorage', e);
       toast('Could not save — your browser storage may be full. Try exporting a backup and freeing up space.');
+      return false;
     }
   }
 
@@ -743,6 +755,15 @@
   const KM_PER_MI = 1.609344;
   const CM_PER_IN = 2.54;
   const ML_PER_FLOZ = 29.5735295625;
+
+  // Sanity bounds for profile fields — generous enough to cover every real
+  // human (and then some) while still catching fat-fingered or garbage
+  // input like "999" years old or "40 ft" tall. Used by both the setup
+  // wizard's About step and Settings' Profile card so the two can't drift.
+  const MIN_AGE = 1;
+  const MAX_AGE = 120;
+  const MIN_HEIGHT_CM = 50;   // ~1'8"
+  const MAX_HEIGHT_CM = 272;  // ~8'11"
 
   // Data is saved in one fixed ("canonical") unit — pounds for weight, miles
   // for distance/pace — regardless of the current Settings toggle. `Units`
@@ -962,7 +983,20 @@
   // measure against; ignored for non-cardio kinds, which have one goal.
   function progressPct(exercise, metric) {
     const goal = exercise.kind === 'cardio' ? cardioGoalFor(exercise, metric || defaultCardioMetric(exercise)) : exercise.goal;
-    const b = best(exercise, metric);
+    // A bodyweight-standard goal (goalMode 'standard' — see
+    // computeStandardGoal) is a tier off LIFT_STANDARDS, and those tables
+    // are calibrated against an estimated 1RM (see strengthLevelInfo,
+    // which classifies a lift's tier the same way) — not the raw heaviest
+    // single set ever logged, which is what best() returns. Measuring
+    // progress toward that goal against the raw heaviest set instead of
+    // the 1RM estimate mixed two different numbers: a 185lb x 10 set is a
+    // far bigger lift than a 185lb single, but only the 1RM estimate
+    // reflects that, so the meter used to read as further from the goal
+    // than Strength level said the same lift actually was. A 'fixed' goal
+    // (a plain "hit N lb") isn't calibrated to 1RM at all, so it keeps
+    // using the raw heaviest set, same as ever.
+    const useOneRM = exercise.kind === 'weight' && exercise.goalMode === 'standard';
+    const b = useOneRM ? (bestEstimatedOneRM(exercise) || {}).oneRM ?? null : best(exercise, metric);
     if (b == null || !goal) return { pct: 0, achieved: false, best: b };
     let pct;
     if (isLowerBetter(exercise, metric)) {
@@ -1366,8 +1400,16 @@
     const sex = state.profile.sex;
     state.exercises.forEach((ex) => {
       if (ex.kind !== 'weight' || ex.goalMode !== 'standard' || !ex.liftType || !ex.goalTier) return;
-      const g = computeStandardGoal(ex.liftType, ex.goalTier, bw, sex);
-      if (g != null) ex.goal = g;
+      // computeStandardGoal() returns null once bodyweight or sex is
+      // missing (its own guard) — that null used to be silently ignored
+      // here (`if (g != null) ex.goal = g`), leaving ex.goal frozen at
+      // whatever it last computed to instead of reflecting that the goal
+      // can no longer actually be computed. Deleting your last bodyweight
+      // entry, or clearing your sex in Profile, left a stale absolute-lb
+      // goal behind that kept showing (and being progressed against) as
+      // if it were still current. Assigning the (possibly null) result
+      // directly keeps ex.goal honest either way.
+      ex.goal = computeStandardGoal(ex.liftType, ex.goalTier, bw, sex);
     });
   }
 
@@ -2115,18 +2157,31 @@
     });
   }
 
+  // RPE (rate of perceived exertion) is conventionally a 1-10 scale —
+  // shared here so the cardio and weight/bodyweight branches below (and
+  // their error text) can't drift apart.
+  const RPE_MIN = 1;
+  const RPE_MAX = 10;
+  function invalidRpe(rpe) { return !Number.isNaN(rpe) && (rpe < RPE_MIN || rpe > RPE_MAX); }
+
   function readDynamicFields(container, exercise) {
     if (exercise.kind === 'cardio') {
       const distV = parseFloat(container.querySelector('#cardioDistance').value);
-      const minV = parseFloat(container.querySelector('#cardioMin').value) || 0;
-      const secV = parseFloat(container.querySelector('#cardioSec').value) || 0;
+      const minV = parseFloat(container.querySelector('#cardioMin').value);
+      const secV = parseFloat(container.querySelector('#cardioSec').value);
       const rpeV = parseFloat(container.querySelector('#cardioRpe').value);
+      if (!Number.isNaN(distV) && distV < 0) return { error: 'Distance can’t be negative.' };
+      if ((!Number.isNaN(minV) && minV < 0) || (!Number.isNaN(secV) && secV < 0)) return { error: 'Time can’t be negative.' };
+      if (!Number.isNaN(secV) && secV >= 60) return { error: 'Seconds must be less than 60 — carry the rest over into minutes.' };
+      if (invalidRpe(rpeV)) return { error: `RPE must be between ${RPE_MIN} and ${RPE_MAX}.` };
       const hasDist = !Number.isNaN(distV) && distV > 0;
-      const hasTime = minV > 0 || secV > 0;
+      const minPart = Number.isNaN(minV) ? 0 : minV;
+      const secPart = Number.isNaN(secV) ? 0 : secV;
+      const hasTime = minPart > 0 || secPart > 0;
       if (!hasDist && !hasTime) return null;
       return {
         distance: hasDist ? Units.displayToMi(distV) : null,
-        duration: hasTime ? minV * 60 + secV : null,
+        duration: hasTime ? minPart * 60 + secPart : null,
         rpe: Number.isNaN(rpeV) ? null : rpeV,
       };
     }
@@ -2144,12 +2199,22 @@
         // in the missing side with 0 would silently write a fake 0lb or 0-rep
         // set into history, so a half-filled row is rejected instead.
         if (!hasW || !hasR) return { error: 'Each set needs both a weight and reps — fill in the missing value, or clear the row.' };
+        // Beyond "both present," each also has to be a sane value — a zero
+        // or negative weight, a fractional or non-positive rep count, or an
+        // RPE outside 1-10 isn't a half-filled row anymore, so it gets its
+        // own specific error rather than silently being written as-is.
+        if (w <= 0) return { error: 'Weight must be greater than zero.' };
+        if (r <= 0 || !Number.isInteger(r)) return { error: 'Reps must be a whole number greater than zero.' };
+        if (invalidRpe(rpe)) return { error: `RPE must be between ${RPE_MIN} and ${RPE_MAX}.` };
         sets.push({ weight: Units.displayToLb(w), reps: r, primary: row.dataset.primary === '1' || undefined, rpe: Number.isNaN(rpe) ? null : rpe });
       } else {
         const r = parseFloat(row.querySelector('.set-reps').value);
         const aw = parseFloat(row.querySelector('.set-addedweight').value);
         const rpe = parseFloat(row.querySelector('.set-rpe').value);
         if (Number.isNaN(r)) continue;
+        if (r <= 0 || !Number.isInteger(r)) return { error: 'Reps must be a whole number greater than zero.' };
+        if (!Number.isNaN(aw) && aw < 0) return { error: 'Added weight can’t be negative.' };
+        if (invalidRpe(rpe)) return { error: `RPE must be between ${RPE_MIN} and ${RPE_MAX}.` };
         sets.push({ reps: r, addedWeight: Number.isNaN(aw) ? 0 : Units.displayToLb(aw), rpe: Number.isNaN(rpe) ? null : rpe });
       }
     }
@@ -2473,8 +2538,16 @@
     const history = measurementsFor(tracker.id).slice().sort((a, c) => a.date.localeCompare(c.date));
     const chartPoints = chartPointsFor(history, (m) => m.value);
     const insights = (tracker.id === BODY_WEIGHT_TRACKER_ID && state.settings.showWeightInsights) ? weightInsights() : null;
+    // insights.trend.delta is in the canonical storage unit (lb) — see
+    // weightInsights(), which computes it straight from state.measurements
+    // — but the label right after it is Units.weightUnitLabel(), the
+    // user's *display* unit. Displaying the raw lb number next to a "kg"
+    // label was silently wrong by a factor of ~2.2 for anyone on kg; the
+    // conversion is a plain scale factor so it's safe to apply directly to
+    // the difference (same as converting either endpoint separately).
+    const deltaDisplay = insights && insights.trend ? Units.lbToDisplay(insights.trend.delta) : null;
     const deltaBadge = insights && insights.trend
-      ? `<div class="ex-card-delta is-${deltaSentiment(tracker, insights.trend.delta)}">${insights.trend.delta > 0 ? '+' : ''}${round(insights.trend.delta, 1)} ${Units.weightUnitLabel()} in ${humanizeDays(insights.trend.days)}</div>`
+      ? `<div class="ex-card-delta is-${deltaSentiment(tracker, insights.trend.delta)}">${deltaDisplay > 0 ? '+' : ''}${round(deltaDisplay, 1)} ${Units.weightUnitLabel()} in ${humanizeDays(insights.trend.days)}</div>`
       : '';
     // BMI itself moved off this card into the tracker detail modal's own
     // visual gauge (see bmiDetailHtml()) — same "keep the dashboard plain,
@@ -2486,6 +2559,18 @@
     const sleepBadge = sleep ? `<div class="ex-card-delta">Avg ${round(sleep.avgHours, 1)}h &middot; ${sleep.nights}n</div>` : '';
     const qualityLine = isSleep && latest && latest.quality != null
       ? `<div class="insight-line">Quality ${fmtQuality(latest.quality)}</div>` : '';
+    // A goal with nothing logged yet to measure it against (value == null —
+    // either a genuinely never-logged tracker, or Sleep specifically on a
+    // day it hasn't been logged, since its value is scoped to today only —
+    // see the comment above) isn't "0% progress," it's "no reading to show
+    // progress for." trackerProgressPct() still returns a defined pct: 0 in
+    // that case (so callers don't have to null-check it), but rendering
+    // that as a filled-in "0%" meter reads as "you measured zero," which is
+    // a different claim than "not logged." Gating the whole meter block on
+    // `value != null` too (not just tracker.goal != null) keeps the card
+    // silent instead of misleadingly precise until there's an actual
+    // reading to show progress against.
+    const hasProgress = tracker.goal != null && value != null;
     return `
       <div class="card ex-card" data-tracker-id="${tracker.id}">
         <div class="ex-card-top">
@@ -2496,10 +2581,11 @@
           <div class="ex-card-current">${fmtTrackerValue(tracker, value)}</div>
           ${tracker.goal != null ? `<div class="ex-card-goal">/ ${trackerGoalLabel(tracker).replace('Goal ', '')}</div>` : ''}
         </div>
-        ${tracker.goal != null ? `
+        ${hasProgress ? `
           <div class="meter"><div class="meter-fill ${achieved ? 'is-complete' : ''}" style="--fill:${fillPct}%"></div></div>
           <div class="ex-card-foot"><span class="ex-card-pct ${achieved ? 'is-complete' : ''}">${achieved ? '✓ Goal reached' : `${Math.round(pct)}%`}</span></div>
           ${!achieved && trackerProgressDeltaText(tracker, value) ? `<div class="insight-line muted-text">${trackerProgressDeltaText(tracker, value)}</div>` : ''}` : ''}
+        ${tracker.goal != null && value == null ? `<p class="muted-text field-hint">${isSleep ? 'Not logged today.' : 'Log a value to see your progress.'}</p>` : ''}
         ${chartPoints.length >= 2 ? `<div class="ex-card-chart">${Charts.lineChart(chartPoints, { goal: tracker.goal, width: 300, height: 96, formatValue: (v) => fmtTrackerValue(tracker, v) })}</div>` : ''}
         ${qualityLine}
       </div>`;
@@ -2508,7 +2594,9 @@
   function renderBodySection() {
     // Manage still lists every tracker regardless of this — hiding one from
     // the dashboard only declutters the daily view, it doesn't archive it.
-    const trackers = activeTrackers().filter((t) => t.showOnDashboard !== false);
+    // Body toggled off in Manage (Track this) hides this section entirely,
+    // same as Workout/Water/Food already do for theirs.
+    const trackers = domainTracked('measurements') ? activeTrackers().filter((t) => t.showOnDashboard !== false) : [];
     document.getElementById('bodySectionHead').hidden = trackers.length === 0;
     const wrap = document.getElementById('bodyCards');
     wrap.hidden = trackers.length === 0;
@@ -2532,7 +2620,7 @@
   function logWaterAmount(amountMl, cupId) {
     if (!amountMl || amountMl <= 0) { toast('Enter an amount greater than zero.'); return; }
     state.waterEntries.push({ id: genId('wtr'), date: todayISO(), amountMl, cupId: cupId || null });
-    save();
+    if (!save()) return;
     toast('Water logged');
     renderDashboard();
     renderRecentEntries();
@@ -2540,7 +2628,9 @@
   }
 
   function renderWaterSection() {
-    const hasCups = state.water.cups.length > 0;
+    // Water toggled off in Manage (Track this) hides this section entirely,
+    // regardless of whether any cups are defined.
+    const hasCups = domainTracked('water') && state.water.cups.length > 0;
     document.getElementById('waterSectionHead').hidden = !hasCups;
     const wrap = document.getElementById('waterDashboardWrap');
     wrap.hidden = !hasCups;
@@ -2583,9 +2673,11 @@
   // today's entry has landed yet; a tracker simply drops off this list the
   // moment it's logged, rather than jumping anywhere or duplicating itself.
   function renderTodayAttention() {
-    const pending = activeTrackers()
+    // Trackers are the Body domain — off there means no attention prompts
+    // for them either (same reasoning as renderBodySection below).
+    const pending = domainTracked('measurements') ? activeTrackers()
       .filter((t) => t.showOnDashboard !== false)
-      .filter((t) => !state.measurements.some((m) => m.trackerId === t.id && m.date === todayISO()));
+      .filter((t) => !state.measurements.some((m) => m.trackerId === t.id && m.date === todayISO())) : [];
     document.getElementById('todayAttentionSubhead').hidden = pending.length === 0;
     const wrap = document.getElementById('todayAttentionWrap');
     wrap.hidden = pending.length === 0;
@@ -2617,7 +2709,12 @@
   // prompted (or was, a moment ago) in Today.
   function renderDashboard() {
     renderSummary();
-    const all = activeExercises();
+    // Workout toggled off in Manage (Track this) means the whole domain is
+    // hidden here too, same as it already is in Log/History — an empty
+    // `all` naturally empties every workout-derived section below
+    // (goal cards, "Logged today" items, and Progress's exerciseCards).
+    const workoutTracked = domainTracked('workout');
+    const all = workoutTracked ? activeExercises() : [];
     const goalList = all.filter((e) => sectionOf(e) === 'goal');
     const dailyDefined = all.filter((e) => sectionOf(e) === 'daily');
     const isLoggedToday = (e) => entriesFor(e.id).some((en) => en.date === todayISO());
@@ -2632,7 +2729,9 @@
     // accessory exercises are intentionally omitted from the dashboard —
     // they're still fully logged/edited via the Log and History tabs.
 
-    document.getElementById('dashboardEmpty').hidden = (goalList.length + dailyDefined.length) > 0;
+    // Workout off should mean no "add your first exercise" nudge either —
+    // that's Manage's job to turn the domain back on, not the dashboard's.
+    document.getElementById('dashboardEmpty').hidden = !workoutTracked || (goalList.length + dailyDefined.length) > 0;
 
     renderTodayAttention();
 
@@ -3023,7 +3122,7 @@
     // A new bodyweight entry can move any lift's bodyweight-standard goal —
     // see recomputeStandardGoals(). A no-op for every other tracker.
     if (tracker.id === BODY_WEIGHT_TRACKER_ID) recomputeStandardGoals();
-    save();
+    if (!save()) return;
     toast('Entry saved');
     document.getElementById('logMeasurementValue').value = '';
     resetChipPicker(document.getElementById('logSleepQuality'));
@@ -3073,7 +3172,7 @@
     const date = document.getElementById('logFoodDate').value || todayISO();
     const note = document.getElementById('logFoodNote').value.trim();
     state.food.entries.push({ id: genId('food'), date, ...values, note: note || null });
-    save();
+    if (!save()) return;
     toast('Food logged');
     trackedMacroKeys().forEach((k) => { const el = document.getElementById(`logFood_${k}`); if (el) el.value = ''; });
     document.getElementById('logFoodNote').value = '';
@@ -3090,16 +3189,26 @@
   function renderLogView() {
     renderLogCategorySegmented();
     const cats = availableDomainCategories();
-    document.getElementById('logAllOffHint').hidden = cats.length > 0;
-    document.getElementById('logForm').hidden = logCategory !== 'workout';
-    document.getElementById('logMeasurementForm').hidden = logCategory !== 'measurements';
-    document.getElementById('logWaterPanel').hidden = logCategory !== 'water';
-    document.getElementById('logFoodForm').hidden = logCategory !== 'food';
-    document.getElementById('savedFoodsWrap').hidden = logCategory !== 'food' || !state.food.savedFoods.length;
-    if (logCategory === 'workout') renderLogForm();
-    if (logCategory === 'measurements') renderLogMeasurementForm();
-    if (logCategory === 'water') renderLogWaterPanel();
-    if (logCategory === 'food') { renderLogFoodForm(); renderSavedFoodLogList(); }
+    // Every domain off: renderLogCategorySegmented() deliberately leaves a
+    // stale `logCategory` alone when there's no cats[0] to fall back to
+    // (see its own comment), so this can't just key every form's `hidden`
+    // off `logCategory !== '<id>'` — that left whichever form matched the
+    // stale category (e.g. Food) visible right alongside logAllOffHint.
+    // `allOff` forces every form hidden regardless of what `logCategory`
+    // still happens to say.
+    const allOff = cats.length === 0;
+    document.getElementById('logAllOffHint').hidden = !allOff;
+    document.getElementById('logForm').hidden = allOff || logCategory !== 'workout';
+    document.getElementById('logMeasurementForm').hidden = allOff || logCategory !== 'measurements';
+    document.getElementById('logWaterPanel').hidden = allOff || logCategory !== 'water';
+    document.getElementById('logFoodForm').hidden = allOff || logCategory !== 'food';
+    document.getElementById('savedFoodsWrap').hidden = allOff || logCategory !== 'food' || !state.food.savedFoods.length;
+    if (!allOff) {
+      if (logCategory === 'workout') renderLogForm();
+      if (logCategory === 'measurements') renderLogMeasurementForm();
+      if (logCategory === 'water') renderLogWaterPanel();
+      if (logCategory === 'food') { renderLogFoodForm(); renderSavedFoodLogList(); }
+    }
     renderRecentEntries();
   }
 
@@ -3203,7 +3312,7 @@
       if (Number.isNaN(raw) || raw <= 0) { toast('Enter an amount greater than zero.'); return; }
       e.date = document.getElementById('editWaterDate').value || e.date;
       e.amountMl = Units.displayToMl(raw);
-      save();
+      if (!save()) return;
       closeModal();
       toast('Entry updated');
       renderRecentEntries(); renderDashboard(); renderHistory();
@@ -3211,7 +3320,7 @@
     document.getElementById('deleteWaterEntryBtn').addEventListener('click', () => {
       confirmDialog('Delete entry?', 'This can’t be undone.', 'Delete', () => {
         state.waterEntries = state.waterEntries.filter((x) => x.id !== entryId);
-        save();
+        if (!save()) return;
         toast('Entry deleted');
         renderRecentEntries(); renderDashboard(); renderHistory();
       }, true);
@@ -3268,7 +3377,7 @@
       e.date = document.getElementById('editFoodDate').value || e.date;
       Object.assign(e, values);
       e.note = document.getElementById('editFoodNote').value.trim() || null;
-      save();
+      if (!save()) return;
       closeModal();
       toast('Entry updated');
       renderRecentEntries(); renderDashboard(); renderHistory();
@@ -3276,7 +3385,7 @@
     document.getElementById('deleteFoodEntryBtn').addEventListener('click', () => {
       confirmDialog('Delete entry?', 'This can’t be undone.', 'Delete', () => {
         state.food.entries = state.food.entries.filter((x) => x.id !== entryId);
-        save();
+        if (!save()) return;
         toast('Entry deleted');
         renderRecentEntries(); renderDashboard(); renderHistory();
       }, true);
@@ -3353,7 +3462,7 @@
       } else {
         state.food.savedFoods.push({ id: genId('savedfood'), name, ...values });
       }
-      save();
+      if (!save()) return;
       closeModal();
       toast(editing ? 'Saved food updated' : 'Food saved');
       renderManage();
@@ -3363,7 +3472,7 @@
       document.getElementById('deleteSavedFoodBtn').addEventListener('click', () => {
         confirmDialog('Delete this saved food?', 'This can’t be undone. Food entries already logged from it aren’t affected.', 'Delete', () => {
           state.food.savedFoods = state.food.savedFoods.filter((f) => f.id !== foodId);
-          save();
+          if (!save()) return;
           closeModal();
           toast('Saved food deleted');
           renderManage();
@@ -3464,7 +3573,7 @@
     const values = scaledSavedFoodValues(food, qty);
     const date = document.getElementById('logFoodDate').value || todayISO();
     state.food.entries.push({ id: genId('food'), date, ...values, note: food.name });
-    save();
+    if (!save()) return;
     toast(`${food.name} logged`);
     expandedSavedFoodId = null;
     savedFoodQty = 1;
@@ -3486,7 +3595,7 @@
     const note = document.getElementById('logNote').value.trim();
     const entry = Object.assign({ id: genId('en'), exerciseId: ex.id, date, note: note || null }, fields);
     state.entries.push(entry);
-    save();
+    if (!save()) return;
     toast('Entry saved');
     document.getElementById('logNote').value = '';
     renderDynamicFields(document.getElementById('logDynamicFields'), ex);
@@ -3509,10 +3618,13 @@
   let calendarMonth = (() => { const d = new Date(); d.setDate(1); return d; })();
 
   function dayActivity(dateIso) {
-    const workout = state.entries.some((e) => e.date === dateIso);
-    const body = state.measurements.some((m) => m.date === dateIso);
-    const waterHit = !!(state.water.goalMl && waterTotalForDate(dateIso) >= state.water.goalMl);
-    const food = state.food.entries.some((e) => e.date === dateIso);
+    // A domain toggled off in Manage (Track this) shouldn't surface its dot
+    // here either — same "off means hidden, not just archived" rule the
+    // rest of the app applies (Log/History/Manage tabs, Dashboard sections).
+    const workout = domainTracked('workout') && state.entries.some((e) => e.date === dateIso);
+    const body = domainTracked('measurements') && state.measurements.some((m) => m.date === dateIso);
+    const waterHit = domainTracked('water') && !!(state.water.goalMl && waterTotalForDate(dateIso) >= state.water.goalMl);
+    const food = domainTracked('food') && state.food.entries.some((e) => e.date === dateIso);
     return { workout, body, waterHit, food };
   }
 
@@ -3552,10 +3664,12 @@
   // clickable straight into its own existing edit/delete modal — the
   // calendar's "click a day to see or edit its history" affordance.
   function openDayDetail(dateIso) {
-    const workoutEntries = state.entries.filter((e) => e.date === dateIso).sort((a, b) => a.id.localeCompare(b.id));
-    const measurements = state.measurements.filter((m) => m.date === dateIso).sort((a, b) => a.id.localeCompare(b.id));
-    const waterEntries = state.waterEntries.filter((e) => e.date === dateIso).sort((a, b) => a.id.localeCompare(b.id));
-    const foodEntries = state.food.entries.filter((e) => e.date === dateIso).sort((a, b) => a.id.localeCompare(b.id));
+    // Same domain gating as dayActivity() above — a toggled-off domain's
+    // entries still exist in state, but shouldn't surface here.
+    const workoutEntries = domainTracked('workout') ? state.entries.filter((e) => e.date === dateIso).sort((a, b) => a.id.localeCompare(b.id)) : [];
+    const measurements = domainTracked('measurements') ? state.measurements.filter((m) => m.date === dateIso).sort((a, b) => a.id.localeCompare(b.id)) : [];
+    const waterEntries = domainTracked('water') ? state.waterEntries.filter((e) => e.date === dateIso).sort((a, b) => a.id.localeCompare(b.id)) : [];
+    const foodEntries = domainTracked('food') ? state.food.entries.filter((e) => e.date === dateIso).sort((a, b) => a.id.localeCompare(b.id)) : [];
     const nothingLogged = !workoutEntries.length && !measurements.length && !waterEntries.length && !foodEntries.length;
 
     const dateLabel = new Date(dateIso + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
@@ -3696,7 +3810,7 @@
       entry.date = document.getElementById('editEntryDate').value || entry.date;
       entry.note = document.getElementById('editEntryNote').value.trim() || null;
       Object.assign(entry, fields);
-      save();
+      if (!save()) return;
       closeModal();
       toast('Entry updated');
       renderRecentEntries(); renderDashboard(); renderHistory();
@@ -3704,7 +3818,7 @@
     document.getElementById('deleteEntryBtn').addEventListener('click', () => {
       confirmDialog('Delete entry?', 'This can’t be undone.', 'Delete', () => {
         state.entries = state.entries.filter((e) => e.id !== entryId);
-        save();
+        if (!save()) return;
         toast('Entry deleted');
         renderRecentEntries(); renderDashboard(); renderHistory();
       }, true);
@@ -3845,7 +3959,7 @@
     document.getElementById('logEntryFromDetailBtn').addEventListener('click', () => logExerciseFromDetail(ex.id));
     document.getElementById('archiveExerciseBtn').addEventListener('click', () => {
       ex.archived = !ex.archived;
-      save();
+      if (!save()) return;
       closeModal();
       toast(ex.archived ? 'Exercise archived' : 'Exercise unarchived');
       renderAll();
@@ -4146,7 +4260,7 @@
         if (selectedKind === 'cardio') { newEx.distanceGoal = distanceGoal; newEx.paceGoal = paceGoal; }
         state.exercises.push(newEx);
       }
-      save();
+      if (!save()) return;
       closeModal();
       toast(editing ? 'Exercise updated' : 'Exercise added');
       renderAll();
@@ -4161,7 +4275,7 @@
       // this anymore."
       document.getElementById('archiveToggleBtn').addEventListener('click', () => {
         ex.archived = !ex.archived;
-        save();
+        if (!save()) return;
         closeModal();
         toast(ex.archived ? 'Exercise archived' : 'Exercise unarchived');
         renderAll();
@@ -4174,7 +4288,8 @@
         confirmDialog('Delete exercise permanently?', body, 'Delete', () => {
           state.exercises = state.exercises.filter((e) => e.id !== exId);
           state.entries = state.entries.filter((e) => e.exerciseId !== exId);
-          save(); closeModal(); toast('Exercise deleted'); renderAll();
+          if (!save()) return;
+          closeModal(); toast('Exercise deleted'); renderAll();
         }, true);
       });
     }
@@ -4230,7 +4345,7 @@
       if (isSleep) m.quality = clampQuality(document.getElementById('editMeasurementQuality').dataset.value);
       m.note = document.getElementById('editMeasurementNote').value.trim() || null;
       if (m.trackerId === BODY_WEIGHT_TRACKER_ID) recomputeStandardGoals();
-      save();
+      if (!save()) return;
       closeModal();
       toast('Entry updated');
       renderRecentEntries(); renderDashboard(); renderHistory();
@@ -4239,7 +4354,7 @@
       confirmDialog('Delete entry?', 'This can’t be undone.', 'Delete', () => {
         state.measurements = state.measurements.filter((x) => x.id !== measurementId);
         if (m.trackerId === BODY_WEIGHT_TRACKER_ID) recomputeStandardGoals();
-        save();
+        if (!save()) return;
         toast('Entry deleted');
         renderRecentEntries(); renderDashboard(); renderHistory();
       }, true);
@@ -4325,7 +4440,7 @@
     document.getElementById('logEntryFromDetailBtn').addEventListener('click', () => logTrackerFromDetail(tracker.id));
     document.getElementById('archiveTrackerBtn').addEventListener('click', () => {
       tracker.archived = !tracker.archived;
-      save();
+      if (!save()) return;
       closeModal();
       toast(tracker.archived ? 'Tracker archived' : 'Tracker unarchived');
       renderAll();
@@ -4470,7 +4585,7 @@
       } else {
         state.trackers.push(Object.assign({ id: genId('trk'), name, archived: false, kind: 'metric', baseline: null, createdAt: new Date().toISOString() }, fields, { goal: canonicalGoal }));
       }
-      save();
+      if (!save()) return;
       closeModal();
       toast(editing ? 'Tracker updated' : 'Tracker added');
       renderAll();
@@ -4479,7 +4594,7 @@
     if (editing) {
       document.getElementById('archiveTrackerToggleBtn').addEventListener('click', () => {
         tracker.archived = !tracker.archived;
-        save();
+        if (!save()) return;
         closeModal();
         toast(tracker.archived ? 'Tracker archived' : 'Tracker unarchived');
         renderAll();
@@ -4492,7 +4607,8 @@
         confirmDialog('Delete tracker permanently?', body, 'Delete', () => {
           state.trackers = state.trackers.filter((t) => t.id !== trackerId);
           state.measurements = state.measurements.filter((m) => m.trackerId !== trackerId);
-          save(); closeModal(); toast('Tracker deleted'); renderAll();
+          if (!save()) return;
+          closeModal(); toast('Tracker deleted'); renderAll();
         }, true);
       });
     }
@@ -4539,7 +4655,7 @@
       } else {
         state.water.cups.push({ id: genId('cup'), name, amountMl });
       }
-      save();
+      if (!save()) return;
       closeModal();
       toast(editing ? 'Cup updated' : 'Cup added');
       renderManage();
@@ -4550,7 +4666,7 @@
       document.getElementById('deleteCupBtn').addEventListener('click', () => {
         confirmDialog('Delete this cup?', 'This can’t be undone. Past water entries already logged aren’t affected.', 'Delete', () => {
           state.water.cups = state.water.cups.filter((c) => c.id !== cupId);
-          save();
+          if (!save()) return;
           closeModal();
           toast('Cup deleted');
           renderManage();
@@ -4665,7 +4781,7 @@
         if (!btn) return;
         const info = macroGoalInfo(btn.dataset.macroChip);
         info.enabled = !info.enabled;
-        save();
+        if (!save()) return;
         renderMacroTrackChips();
         renderMacroGoalRows();
         renderDashboard();
@@ -4710,7 +4826,7 @@
         if (!toggle) return;
         const k = toggle.dataset.macroGoalToggle;
         macroGoalInfo(k).enabled = btn.dataset.boolChoice === 'on';
-        save();
+        if (!save()) return;
         renderMacroGoalRows();
         renderDashboard();
       });
@@ -4720,7 +4836,7 @@
         const k = input.dataset.macroGoalInput;
         const raw = parseFloat(input.value);
         macroGoalInfo(k).goal = (!Number.isNaN(raw) && raw > 0) ? raw : null;
-        save();
+        if (!save()) return;
         renderDashboard();
       });
     }
@@ -4776,7 +4892,7 @@
       const ex = exerciseById(btn.dataset.id);
       if (!ex) return;
       ex.archived = false;
-      save();
+      if (!save()) return;
       toast('Exercise unarchived');
       renderAll();
     }));
@@ -4805,7 +4921,7 @@
       const t = trackerById(btn.dataset.id);
       if (!t) return;
       t.archived = false;
-      save();
+      if (!save()) return;
       toast('Tracker unarchived');
       renderAll();
     }));
@@ -4937,6 +5053,50 @@
       if (parsed.profile.age != null && !isNumOrNull(parsed.profile.age)) return 'Invalid age value in profile.';
     }
 
+    // Food was a complete gap here — every field below is read directly by
+    // name (macroGoalInfo(), foodTotalsForDate(), the Log/Manage food
+    // forms) with no defensive checks of its own, the same way exercises/
+    // trackers/water above assume validateBackupShape already screened
+    // them out.
+    if (parsed.food != null) {
+      if (!isPlainObject(parsed.food)) return 'Invalid food data.';
+      if (parsed.food.entries != null) {
+        if (!Array.isArray(parsed.food.entries)) return 'Invalid food-entry list.';
+        for (const f of parsed.food.entries) {
+          if (!isPlainObject(f) || typeof f.id !== 'string') return 'One of the food entries is malformed.';
+          if (typeof f.date !== 'string' || !ISO_DATE_RE.test(f.date)) return 'One of the food entries has an invalid date.';
+          for (const k of MACRO_KEYS) { if (!isNumOrNull(f[k])) return 'One of the food entries has an invalid nutrition value.'; }
+        }
+      }
+      if (parsed.food.savedFoods != null) {
+        if (!Array.isArray(parsed.food.savedFoods)) return 'Invalid saved-foods list.';
+        for (const f of parsed.food.savedFoods) {
+          if (!isPlainObject(f) || typeof f.id !== 'string' || typeof f.name !== 'string') return 'One of the saved foods is malformed.';
+          for (const k of MACRO_KEYS) { if (!isNumOrNull(f[k])) return `Saved food "${f.name}" has an invalid nutrition value.`; }
+        }
+      }
+    }
+
+    // settings.macroGoals/nutritionCalc are the two settings sub-objects
+    // every render path dereferences straight through (macroGoalInfo()
+    // does `state.settings.macroGoals[key].enabled` with no guard at all —
+    // see its own comment), so a wrong-shaped value here doesn't fail
+    // softly, it throws deep in a render call. Everything else in
+    // `settings` is either a plain flag/string switched on defensively
+    // elsewhere or gets papered over by DEFAULT_SETTINGS's own
+    // Object.assign in importBackup(), so this stays scoped to the two
+    // fields that actually crash.
+    if (parsed.settings != null) {
+      if (!isPlainObject(parsed.settings)) return 'Invalid settings data.';
+      if (parsed.settings.macroGoals != null) {
+        if (!isPlainObject(parsed.settings.macroGoals)) return 'Invalid macro-goal settings.';
+        for (const [k, v] of Object.entries(parsed.settings.macroGoals)) {
+          if (!isPlainObject(v) || !isNumOrNull(v.goal)) return `Invalid macro-goal setting for "${k}".`;
+        }
+      }
+      if (parsed.settings.nutritionCalc != null && !isPlainObject(parsed.settings.nutritionCalc)) return 'Invalid nutrition-calculator settings.';
+    }
+
     return null;
   }
 
@@ -4965,12 +5125,38 @@
         const shapeError = validateBackupShape(parsed);
         if (shapeError) { toast(`Can't import: ${shapeError}`); return; }
         confirmDialog('Replace all data?', 'Importing will overwrite everything currently in the app with this backup file.', 'Import', () => {
+          // Kept so a failed write below can put things back exactly as
+          // they were rather than leaving the in-memory state (and
+          // everything rendered from it) pointed at data that was never
+          // actually persisted — a plain "importing failed" isn't enough
+          // here since a whole-data replace has much more to lose than a
+          // single entry does.
+          const previousState = state;
           parsed.settings = Object.assign({}, DEFAULT_SETTINGS, parsed.settings || {});
+          // The Object.assign above is shallow — a backup whose settings
+          // has a `macroGoals` object at all (even one missing keys, e.g.
+          // hand-edited, or from a version where a key was optional)
+          // replaces DEFAULT_SETTINGS.macroGoals wholesale rather than
+          // filling gaps in it. Normally that gap gets backfilled by the
+          // version-gated migrations (see MIGRATIONS[8]/[9]), but those
+          // only run for a backup whose declared version predates them —
+          // one carrying the CURRENT version with a key missing anyway
+          // (validateBackupShape above only checks the keys that ARE
+          // present, not that every key is present) would skip every
+          // migration and reach macroGoalInfo()'s unguarded
+          // `state.settings.macroGoals[key].enabled` with a hole in it.
+          // Doing the same per-key backfill here, unconditionally, closes
+          // that gap regardless of the backup's declared version.
+          parsed.settings.macroGoals = Object.assign({}, DEFAULT_SETTINGS.macroGoals, parsed.settings.macroGoals || {});
+          MACRO_KEYS.forEach((k) => {
+            if (!isPlainObject(parsed.settings.macroGoals[k])) parsed.settings.macroGoals[k] = DEFAULT_SETTINGS.macroGoals[k];
+          });
+          parsed.settings.nutritionCalc = Object.assign({}, DEFAULT_SETTINGS.nutritionCalc, parsed.settings.nutritionCalc || {});
           // Run the same migration pipeline load() uses — a backup exported
           // from an older version of the app is brought up to the current
           // shape the same way, additively, instead of being rejected.
           state = runMigrations(parsed);
-          save();
+          if (!save()) { state = previousState; return; }
           applyTheme();
           renderAll();
           toast('Backup imported');
@@ -5131,11 +5317,11 @@
       <div class="form-card">
         ${cm ? `
         <label class="field"><span class="field-label">Height (cm)</span>
-          <input type="number" step="any" min="0" id="setupHeightCm" value="${escapeHtml(setupAnswers.heightCm)}" placeholder="Not set" /></label>
+          <input type="number" step="any" min="50" max="272" id="setupHeightCm" value="${escapeHtml(setupAnswers.heightCm)}" placeholder="Not set" /></label>
         ` : `
         <div class="field"><span class="field-label">Height (ft/in)</span>
           <div class="inline-time-fields">
-            <input type="number" step="1" min="0" inputmode="numeric" id="setupHeightFt" value="${escapeHtml(setupAnswers.heightFt)}" placeholder="ft" />
+            <input type="number" step="1" min="0" max="8" inputmode="numeric" id="setupHeightFt" value="${escapeHtml(setupAnswers.heightFt)}" placeholder="ft" />
             <input type="number" step="1" min="0" max="11" inputmode="numeric" id="setupHeightIn" value="${escapeHtml(setupAnswers.heightIn)}" placeholder="in" />
           </div>
         </div>
@@ -5143,7 +5329,7 @@
         <label class="field"><span class="field-label">Weight (${Units.weightUnitLabel()})</span>
           <input type="number" step="any" min="0" id="setupWeight" value="${escapeHtml(setupAnswers.weight)}" placeholder="Not set" /></label>
         <label class="field"><span class="field-label">Age <span class="muted-text">(for nutrition advice)</span></span>
-          <input type="number" step="1" min="0" max="120" inputmode="numeric" id="setupAge" value="${escapeHtml(setupAnswers.age)}" placeholder="Not set" /></label>
+          <input type="number" step="1" min="1" max="120" inputmode="numeric" id="setupAge" value="${escapeHtml(setupAnswers.age)}" placeholder="Not set" /></label>
         <div class="setting-row">
           <span>Sex <span class="muted-text">(for strength/pace benchmarks + nutrition calculator)</span></span>
           <div class="segmented" id="setupSexSegmented" role="radiogroup" aria-label="Sex">
@@ -5307,10 +5493,12 @@
   function heightCmFromSetup() {
     if (state.settings.lengthUnit === 'cm') {
       const cmVal = parseFloat(setupAnswers.heightCm);
-      return (!Number.isNaN(cmVal) && cmVal > 0) ? cmVal : null;
+      return (!Number.isNaN(cmVal) && cmVal >= MIN_HEIGHT_CM && cmVal <= MAX_HEIGHT_CM) ? cmVal : null;
     }
     const totalIn = (parseFloat(setupAnswers.heightFt) || 0) * 12 + (parseFloat(setupAnswers.heightIn) || 0);
-    return totalIn > 0 ? Units.displayToCm(totalIn) : null;
+    if (totalIn <= 0) return null;
+    const cm = Units.displayToCm(totalIn);
+    return (cm >= MIN_HEIGHT_CM && cm <= MAX_HEIGHT_CM) ? cm : null;
   }
 
   // Builds the real starting `state` from every answer collected above —
@@ -5390,7 +5578,7 @@
     }
 
     const rawAge = parseInt(setupAnswers.age, 10);
-    state.profile.age = (!Number.isNaN(rawAge) && rawAge > 0) ? rawAge : null;
+    state.profile.age = (!Number.isNaN(rawAge) && rawAge >= MIN_AGE && rawAge <= MAX_AGE) ? rawAge : null;
     state.profile.heightCm = heightCm;
     state.profile.sex = sex;
     state.exercises = exercises;
@@ -5411,7 +5599,10 @@
     state.settings.trackWater = i.water;
     state.settings.trackFood = i.food;
 
-    save();
+    // On failure, stay on the wizard rather than declaring victory and
+    // switching away from it — save() already surfaced why, and the
+    // answers are still sitting in setupAnswers/state for another attempt.
+    if (!save()) return;
     showAppChrome();
     switchTab('dashboard');
     renderAll();
@@ -5465,6 +5656,17 @@
   }
 
   function openSettings() {
+    // The header gear button lives outside <main> (see index.html), so it
+    // stays visible and clickable even while the Settings view is already
+    // open — nothing in switchTab() hides it. Pressing it again in that
+    // state used to re-run the "remember where I came from" capture below,
+    // but by then none of the bottom tabs carry aria-current="page" (Settings
+    // isn't one of them), so activeTab came back null and clobbered
+    // lastTabBeforeSettings to the 'dashboard' fallback — silently changing
+    // where the close (X) button would return to, out from under whatever
+    // tab was actually active before Settings was first opened. Settings
+    // already being open is exactly the state that must NOT re-capture it.
+    if (!document.getElementById('view-settings').hidden) return;
     const activeTab = document.querySelector('.tab[aria-current="page"]');
     lastTabBeforeSettings = activeTab ? activeTab.dataset.tab : 'dashboard';
     switchTab('settings');
@@ -5554,7 +5756,7 @@
     document.getElementById('saveWaterGoalBtn').addEventListener('click', () => {
       const raw = parseFloat(document.getElementById('waterGoalInput').value);
       state.water.goalMl = (!Number.isNaN(raw) && raw > 0) ? Units.displayToMl(raw) : null;
-      save();
+      if (!save()) return;
       toast('Water goal saved');
       renderManage();
       renderDashboard();
@@ -5569,25 +5771,25 @@
     document.getElementById('trackWorkoutSegmented').addEventListener('click', (ev) => {
       const btn = ev.target.closest('button'); if (!btn) return;
       state.settings.trackWorkout = btn.dataset.boolChoice === 'on';
-      save();
+      if (!save()) return;
       renderAll();
     });
     document.getElementById('trackMeasurementsSegmented').addEventListener('click', (ev) => {
       const btn = ev.target.closest('button'); if (!btn) return;
       state.settings.trackMeasurements = btn.dataset.boolChoice === 'on';
-      save();
+      if (!save()) return;
       renderAll();
     });
     document.getElementById('trackWaterSegmented').addEventListener('click', (ev) => {
       const btn = ev.target.closest('button'); if (!btn) return;
       state.settings.trackWater = btn.dataset.boolChoice === 'on';
-      save();
+      if (!save()) return;
       renderAll();
     });
     document.getElementById('trackFoodSegmented').addEventListener('click', (ev) => {
       const btn = ev.target.closest('button'); if (!btn) return;
       state.settings.trackFood = btn.dataset.boolChoice === 'on';
-      save();
+      if (!save()) return;
       renderAll();
     });
 
@@ -5598,25 +5800,25 @@
     document.getElementById('nutritionCalcEnabledSegmented').addEventListener('click', (ev) => {
       const btn = ev.target.closest('button'); if (!btn) return;
       state.settings.nutritionCalc.enabled = btn.dataset.boolChoice === 'on';
-      save();
+      if (!save()) return;
       renderManage();
     });
     document.getElementById('nutritionActivityLevel').addEventListener('change', (ev) => {
       state.settings.nutritionCalc.activityLevel = ev.target.value;
-      save();
+      if (!save()) return;
       renderManage();
     });
     document.getElementById('nutritionGoalSegmented').addEventListener('click', (ev) => {
       const btn = ev.target.closest('button'); if (!btn) return;
       state.settings.nutritionCalc.goal = btn.dataset.goalChoice;
-      save();
+      if (!save()) return;
       renderManage();
     });
     document.getElementById('applyNutritionCalcBtn').addEventListener('click', () => {
       const calc = state.settings.nutritionCalc;
       const applied = applyNutritionCalcTargets(calc.activityLevel, calc.goal);
       if (!applied) { toast('Set your height, age, sex, and a logged body weight first.'); return; }
-      save();
+      if (!save()) return;
       toast('Calorie and protein goals applied');
       renderManage();
       renderDashboard();
@@ -5624,47 +5826,81 @@
 
     document.getElementById('themeSegmented').addEventListener('click', (ev) => {
       const btn = ev.target.closest('button'); if (!btn) return;
-      state.settings.theme = btn.dataset.themeChoice; save(); applyTheme(); renderSettings();
+      state.settings.theme = btn.dataset.themeChoice;
+      if (!save()) return;
+      applyTheme(); renderSettings();
     });
     document.getElementById('weightUnitSegmented').addEventListener('click', (ev) => {
       const btn = ev.target.closest('button'); if (!btn) return;
-      state.settings.weightUnit = btn.dataset.unitChoice; save(); renderAll();
+      state.settings.weightUnit = btn.dataset.unitChoice;
+      if (!save()) return;
+      renderAll();
     });
     document.getElementById('distanceUnitSegmented').addEventListener('click', (ev) => {
       const btn = ev.target.closest('button'); if (!btn) return;
-      state.settings.distanceUnit = btn.dataset.unitChoice; save(); renderAll();
+      state.settings.distanceUnit = btn.dataset.unitChoice;
+      if (!save()) return;
+      renderAll();
     });
     document.getElementById('lengthUnitSegmented').addEventListener('click', (ev) => {
       const btn = ev.target.closest('button'); if (!btn) return;
-      state.settings.lengthUnit = btn.dataset.unitChoice; save(); renderAll();
+      state.settings.lengthUnit = btn.dataset.unitChoice;
+      if (!save()) return;
+      renderAll();
       syncProfileHeightInputs(); // unit switch changes which fields show — this one has to resync
     });
     document.getElementById('volumeUnitSegmented').addEventListener('click', (ev) => {
       const btn = ev.target.closest('button'); if (!btn) return;
-      state.settings.volumeUnit = btn.dataset.unitChoice; save(); renderAll();
+      state.settings.volumeUnit = btn.dataset.unitChoice;
+      if (!save()) return;
+      renderAll();
     });
 
     document.getElementById('profileSexSegmented').addEventListener('click', (ev) => {
       const btn = ev.target.closest('button'); if (!btn) return;
       state.profile.sex = btn.dataset.sexChoice || null;
       recomputeStandardGoals();
-      save(); renderAll();
+      if (!save()) return;
+      renderAll();
     });
     document.getElementById('saveProfileBtn').addEventListener('click', () => {
       let heightCm = null;
+      let heightOutOfRange = false;
       if (state.settings.lengthUnit === 'cm') {
         const raw = parseFloat(document.getElementById('profileHeightCm').value);
-        heightCm = (!Number.isNaN(raw) && raw > 0) ? raw : null;
+        if (!Number.isNaN(raw) && raw > 0) {
+          if (raw >= MIN_HEIGHT_CM && raw <= MAX_HEIGHT_CM) heightCm = raw;
+          else heightOutOfRange = true;
+        }
       } else {
         const ft = parseFloat(document.getElementById('profileHeightFt').value) || 0;
         const inch = parseFloat(document.getElementById('profileHeightIn').value) || 0;
         const totalIn = ft * 12 + inch;
-        heightCm = totalIn > 0 ? Units.displayToCm(totalIn) : null;
+        if (totalIn > 0) {
+          const cm = Units.displayToCm(totalIn);
+          if (cm >= MIN_HEIGHT_CM && cm <= MAX_HEIGHT_CM) heightCm = cm;
+          else heightOutOfRange = true;
+        }
+      }
+      const rawAge = parseInt(document.getElementById('profileAge').value, 10);
+      let ageOutOfRange = false;
+      let age = null;
+      if (!Number.isNaN(rawAge)) {
+        if (rawAge >= MIN_AGE && rawAge <= MAX_AGE) age = rawAge;
+        else ageOutOfRange = true;
+      }
+      // Reject the whole save rather than silently clamping/clearing an
+      // out-of-range field — a P1 data-integrity bug was users getting no
+      // feedback at all when e.g. "999" years old or "40 ft" tall just got
+      // quietly dropped to blank on save.
+      if (heightOutOfRange || ageOutOfRange) {
+        const what = heightOutOfRange && ageOutOfRange ? 'Height and age' : heightOutOfRange ? 'Height' : 'Age';
+        toast(`${what} looks out of range — please check the value before saving.`);
+        return;
       }
       state.profile.heightCm = heightCm;
-      const rawAge = parseInt(document.getElementById('profileAge').value, 10);
-      state.profile.age = (!Number.isNaN(rawAge) && rawAge > 0) ? rawAge : null;
-      save();
+      state.profile.age = age;
+      if (!save()) return;
       toast('Profile saved');
       // Height/age both feed the nutrition calculator's live preview (see
       // computeNutritionTargets()) — renderAll() re-renders Manage -> Food's
@@ -5678,31 +5914,45 @@
 
     document.getElementById('dashboardChartScaleSegmented').addEventListener('click', (ev) => {
       const btn = ev.target.closest('button'); if (!btn) return;
-      state.settings.chartScale = btn.dataset.scaleChoice; save(); renderAll();
+      state.settings.chartScale = btn.dataset.scaleChoice;
+      if (!save()) return;
+      renderAll();
     });
     document.getElementById('insightsWindowSegmented').addEventListener('click', (ev) => {
       const btn = ev.target.closest('button'); if (!btn) return;
-      state.settings.insightsWindowDays = parseInt(btn.dataset.windowChoice, 10); save(); renderAll();
+      state.settings.insightsWindowDays = parseInt(btn.dataset.windowChoice, 10);
+      if (!save()) return;
+      renderAll();
     });
     document.getElementById('showWeightInsightsSegmented').addEventListener('click', (ev) => {
       const btn = ev.target.closest('button'); if (!btn) return;
-      state.settings.showWeightInsights = btn.dataset.boolChoice === 'on'; save(); renderAll();
+      state.settings.showWeightInsights = btn.dataset.boolChoice === 'on';
+      if (!save()) return;
+      renderAll();
     });
     document.getElementById('showStrengthLevelSegmented').addEventListener('click', (ev) => {
       const btn = ev.target.closest('button'); if (!btn) return;
-      state.settings.showStrengthLevel = btn.dataset.boolChoice === 'on'; save(); renderAll();
+      state.settings.showStrengthLevel = btn.dataset.boolChoice === 'on';
+      if (!save()) return;
+      renderAll();
     });
     document.getElementById('showPaceLevelSegmented').addEventListener('click', (ev) => {
       const btn = ev.target.closest('button'); if (!btn) return;
-      state.settings.showPaceLevel = btn.dataset.boolChoice === 'on'; save(); renderAll();
+      state.settings.showPaceLevel = btn.dataset.boolChoice === 'on';
+      if (!save()) return;
+      renderAll();
     });
     document.getElementById('showSleepInsightsSegmented').addEventListener('click', (ev) => {
       const btn = ev.target.closest('button'); if (!btn) return;
-      state.settings.showSleepInsights = btn.dataset.boolChoice === 'on'; save(); renderAll();
+      state.settings.showSleepInsights = btn.dataset.boolChoice === 'on';
+      if (!save()) return;
+      renderAll();
     });
     document.getElementById('showMacroGuidanceSegmented').addEventListener('click', (ev) => {
       const btn = ev.target.closest('button'); if (!btn) return;
-      state.settings.showMacroGuidance = btn.dataset.boolChoice === 'on'; save(); renderAll();
+      state.settings.showMacroGuidance = btn.dataset.boolChoice === 'on';
+      if (!save()) return;
+      renderAll();
     });
 
     document.getElementById('exportBtn').addEventListener('click', exportBackup);
