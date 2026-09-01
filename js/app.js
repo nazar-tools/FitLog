@@ -2814,6 +2814,16 @@
     const calc = state.settings.nutritionCalc;
     const suggestion = calc.enabled ? computeNutritionTargets(calc.activityLevel, calc.goal) : null;
     const trackedKeys = trackedMacroKeys();
+    // Daily-value guidance (Settings -> Insights -> Macro guidance) used to
+    // be a second table repeating this same macro list with just "value +
+    // %DV" — right below a table that already showed that macro's value.
+    // With guidance off that duplication wasn't visible, but with it on the
+    // two tables said almost the same thing twice. Folding the %DV suffix
+    // into this row instead (only when guidance is on) keeps one line per
+    // macro either way: value alone, value/goal·pct when a personal goal is
+    // set, and now optionally ·pct%DV appended to either.
+    const guidanceOn = state.settings.showMacroGuidance;
+    let anyDvShown = false;
     const rows = trackedKeys.map((k) => {
       const goalInfo = macroGoalInfo(k);
       const hasGoal = goalInfo.enabled && goalInfo.goal != null;
@@ -2823,32 +2833,21 @@
         const pct = value != null ? Math.round(Math.min(100, (value / goalInfo.goal) * 100)) : null;
         rightText += ` / ${fmtMacroValue(k, goalInfo.goal)}${pct != null ? ` &middot; ${pct}%` : ''}`;
       }
-      return `<div class="standards-preview-row"><span>${MACRO_LABELS[k]}</span><span>${rightText}</span></div>`;
+      const hasDv = guidanceOn && MACRO_DV[k] != null;
+      const over = hasDv && macroDvOver(k, value);
+      if (hasDv) {
+        anyDvShown = true;
+        const dvPct = macroDvPct(k, value);
+        rightText += ` <span class="pct">&middot; ${dvPct != null ? `${dvPct}% DV` : '— DV'}</span>`;
+      }
+      return `<div class="standards-preview-row${over ? ' over' : ''}"><span>${MACRO_LABELS[k]}</span><span>${rightText}</span></div>`;
     }).join('');
-
-    // "Daily value guidance" — a second, toggleable table (Settings ->
-    // Insights -> Macro guidance) rather than folded into the totals table
-    // above: mixing a personal goal ("1850 / 2600 kcal") and a generic FDA
-    // reference value ("58g of 78g DV") on the same row read as two
-    // different kinds of number competing for the same line. Row text is
-    // deliberately just "value + %DV", not a sentence ("61g over the 50g
-    // added-sugar DV") — the caveats that sentence used to carry (added
-    // sugar vs. total sugar, caffeine's guidance vs. a real DV) live once,
-    // below the table, instead of repeated per row.
-    const guidanceKeys = trackedKeys.filter((k) => MACRO_DV[k] != null);
-    const guidanceHtml = (state.settings.showMacroGuidance && guidanceKeys.length) ? `
-      <div class="card">
-        <div class="section-head"><h2>Daily value guidance</h2></div>
-        <div class="standards-preview">
-          ${guidanceKeys.map((k) => {
-            const value = totals[k];
-            const pct = macroDvPct(k, value);
-            const over = macroDvOver(k, value);
-            return `<div class="standards-preview-row${over ? ' over' : ''}"><span>${MACRO_LABELS[k]}</span><span>${fmtMacroValue(k, value)} <span class="pct">${pct != null ? `${pct}% DV` : '—'}</span></span></div>`;
-          }).join('')}
-        </div>
-        <p class="muted-text field-hint">General adult reference values for a 2,000-calorie diet, not personalized. Sugar's DV is for <i>added</i> sugar specifically — Fit Log logs one total, so treat that comparison as an upper bound. Caffeine has no official DV; 400mg is the FDA's general guidance, shown the same way.</p>
-      </div>` : '';
+    // Same caveats the old separate table carried once below it, now below
+    // this merged one instead — only relevant, so only shown, once guidance
+    // is actually on and at least one tracked macro has a DV to show.
+    const guidanceNoteHtml = anyDvShown
+      ? `<p class="muted-text field-hint">DV = % of a general adult daily value for a 2,000-calorie diet, not personalized. Sugar's DV is for <i>added</i> sugar specifically — Fit Log logs one total, so treat that comparison as an upper bound. Caffeine has no official DV; 400mg is the FDA's general guidance, shown the same way.</p>`
+      : '';
 
     let calcHtml;
     if (!calc.enabled) {
@@ -2881,8 +2880,8 @@
       <div class="card">
         <div class="section-head"><h2>Today's totals</h2></div>
         <div class="standards-preview">${rows}</div>
+        ${guidanceNoteHtml}
       </div>
-      ${guidanceHtml}
       ${calcHtml}
       <div class="btn-row">
         <button class="btn btn-secondary" id="adjustFoodGoalsBtn">Adjust goals</button>
