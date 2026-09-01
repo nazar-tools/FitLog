@@ -2809,7 +2809,44 @@
   // Nutrition), and quick actions to log food or adjust goals, rather than
   // leaving the dashboard card as the only place to see today's food and a
   // separate trip to Manage as the only way to act on it.
-  function openFoodDetail() {
+  // Ascending {date, value} pairs — one per day that actually has a logged
+  // value for this macro — feeding the Food detail modal's Trend chart.
+  // Built fresh from state.food.entries rather than kept as running state,
+  // same as foodTotalsForDate(); a day with no food logged at all, or where
+  // this specific macro wasn't filled in on any of that day's entries, is
+  // left out entirely (Charts.lineChart treats a gap as "not logged", not
+  // as zero) rather than plotted as a misleading 0.
+  function foodChartEntriesFor(key) {
+    const dates = Array.from(new Set(state.food.entries.map((e) => e.date))).sort();
+    return dates
+      .map((date) => ({ date, value: foodTotalsForDate(date)[key] }))
+      .filter((p) => p.value != null);
+  }
+
+  // "+180 kcal vs last week" style trend footer text — the average of the
+  // most recent up to 7 logged days for this macro vs. the 7 logged days
+  // before that. Returns '' (nothing shown) once there isn't a full
+  // previous week of history yet to compare against, rather than a
+  // misleading comparison against a partial week.
+  //
+  // Deliberately left uncolored (no is-good/is-bad, unlike
+  // .ex-card-delta elsewhere) — whether more or less of a given macro is
+  // "good" depends entirely on the user's own goal (bulking wants calories
+  // up, cutting wants them down; more protein reads as good, more sodium
+  // doesn't), which Fit Log has no notion of here. Same "neutral when
+  // direction isn't known" call as deltaSentiment() makes for open-ended
+  // tracker goals.
+  function foodTrendDeltaText(key, chartEntries) {
+    const last7 = chartEntries.slice(-7);
+    const prev7 = chartEntries.slice(-14, -7);
+    if (!prev7.length) return '';
+    const avg = (arr) => arr.reduce((s, p) => s + p.value, 0) / arr.length;
+    const diff = Math.round(avg(last7) - avg(prev7));
+    if (diff === 0) return 'No change vs last week';
+    return `${diff > 0 ? '+' : ''}${fmtMacroValue(key, diff)} vs last week`;
+  }
+
+  function openFoodDetail(chartMetric) {
     const totals = foodTotalsForDate(todayISO());
     const calc = state.settings.nutritionCalc;
     const suggestion = calc.enabled ? computeNutritionTargets(calc.activityLevel, calc.goal) : null;
@@ -2874,6 +2911,29 @@
         </div>`;
     }
 
+    // Trend — the same "chart with a metric switcher" vocabulary as an
+    // exercise's own Trend section (renderExerciseDetail), extended with a
+    // metric segmented control since food has several trackable numbers
+    // instead of one. Lives in this same modal (right below Today's totals)
+    // rather than on the dashboard or a separate tab, so the numbers and
+    // the trend behind them are never more than the one tap it already
+    // takes to get here.
+    const activeMetric = trackedKeys.includes(chartMetric) ? chartMetric : trackedKeys[0];
+    const chartEntries = foodChartEntriesFor(activeMetric);
+    const chartGoalInfo = macroGoalInfo(activeMetric);
+    const chartGoal = chartGoalInfo.enabled ? chartGoalInfo.goal : null;
+    const metricSegHtml = trackedKeys.length > 1 ? `
+      <div class="segmented" id="foodChartMetricSegmented" role="radiogroup" aria-label="Chart metric">
+        ${trackedKeys.map((k) => `<button type="button" data-metric="${k}" role="radio">${MACRO_LABELS[k]}</button>`).join('')}
+      </div>` : '';
+    const lastPoint = chartEntries[chartEntries.length - 1];
+    const deltaText = lastPoint ? foodTrendDeltaText(activeMetric, chartEntries) : '';
+    const trendFootHtml = lastPoint ? `
+      <div class="ex-card-foot">
+        <div class="ex-card-current">${fmtMacroValue(activeMetric, lastPoint.value)}</div>
+        ${deltaText ? `<div class="ex-card-delta">${deltaText}</div>` : ''}
+      </div>` : '';
+
     openModal(`
       <div class="modal-title-row"><h2>Food today</h2><button class="modal-close" data-action="close-modal">${CLOSE_ICON_SVG}</button></div>
       <button type="button" class="btn btn-primary btn-block" id="logFoodFromDetailBtn">Log food</button>
@@ -2882,6 +2942,12 @@
         <div class="standards-preview">${rows}</div>
         ${guidanceNoteHtml}
       </div>
+      <div class="card">
+        <div class="section-head"><h2>Trend</h2></div>
+        ${metricSegHtml}
+        <div class="chart-wrap">${Charts.lineChart(chartEntries, { goal: chartGoal, formatValue: (v) => fmtMacroValue(activeMetric, v) })}</div>
+        ${trendFootHtml}
+      </div>
       ${calcHtml}
       <div class="btn-row">
         <button class="btn btn-secondary" id="adjustFoodGoalsBtn">Adjust goals</button>
@@ -2889,6 +2955,13 @@
     `, { tall: true });
     document.getElementById('logFoodFromDetailBtn').addEventListener('click', logFoodFromDetail);
     document.getElementById('adjustFoodGoalsBtn').addEventListener('click', openFoodGoalsFromDetail);
+    const metricSeg = document.getElementById('foodChartMetricSegmented');
+    if (metricSeg) {
+      metricSeg.querySelectorAll('button').forEach((btn) => {
+        btn.setAttribute('aria-checked', String(btn.dataset.metric === activeMetric));
+        btn.addEventListener('click', () => openFoodDetail(btn.dataset.metric));
+      });
+    }
   }
 
   // Jumps to the Log tab's Food form, same "quick access" pattern as

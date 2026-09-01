@@ -690,10 +690,16 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 1p
    sibling's class gets it the same divider without affecting Profile's
    lone row above. */
 #macroGoalRows .setting-row:not(:first-child) { border-top: 1px solid var(--gridline); }
-.segmented { display: inline-flex; background: var(--surface-2); border-radius: 999px; padding: 3px; gap: 2px; }
+/* max-width + overflow-x: auto only matter once a segmented control has
+   more options than fit its container — e.g. the Food detail's Trend
+   metric switcher, which can list up to 7 macros (Calories plus every
+   optional one turned on in Manage). A 2-3 button segmented control never
+   overflows, so this is a no-op there; button `flex: none` keeps buttons
+   at their natural width instead of squeezing/wrapping their labels. */
+.segmented { display: inline-flex; max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; background: var(--surface-2); border-radius: 999px; padding: 3px; gap: 2px; }
 .segmented button {
-  border: none; background: transparent; color: var(--text-secondary);
-  padding: 6px 12px; border-radius: 999px; font-size: 13px; font-weight: 600; cursor: pointer;
+  flex: none; border: none; background: transparent; color: var(--text-secondary);
+  padding: 6px 12px; border-radius: 999px; font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap;
 }
 .segmented button[aria-checked="true"] { background: var(--surface-1); color: var(--text-primary); box-shadow: var(--shadow-1); }
 
