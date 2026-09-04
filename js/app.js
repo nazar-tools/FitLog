@@ -586,21 +586,31 @@
   const DEFAULT_SETTINGS = {
     theme: 'system', weightUnit: 'lb', distanceUnit: 'mi', lengthUnit: 'in', volumeUnit: 'flOz',
     // Dashboard/detail chart default range, and the optional insight
-    // calculators (see the "Insights & standards" section) — all off by
-    // default, since they're extras layered on top of the core tracking,
-    // not something to spring on an existing install unasked.
+    // calculators (see the "Insights & standards" section) — on by default.
+    // These used to default off on the theory that they were extras layered
+    // on top of the core tracking, not something to spring on an existing
+    // install unasked — but that same reasoning was quietly hiding real
+    // information from every new install too, not just protecting old ones,
+    // and each of these already degrades gracefully to a "log X to see
+    // this" hint when its prerequisite data isn't there yet (see e.g.
+    // computeNutritionTargets's `missing` list) rather than cluttering the
+    // screen. Turning any of these back off stays one tap away in Settings
+    // -> Insights. (An *existing* install that already saved `false` here
+    // keeps it — this only changes what a fresh install starts with; see
+    // maybeOfferSetupReview() below for how an existing lightly-used
+    // install gets a chance to reconsider these explicitly instead.)
     chartScale: 'last10', insightsWindowDays: 90,
-    showWeightInsights: false, showStrengthLevel: false, showPaceLevel: false,
+    showWeightInsights: true, showStrengthLevel: true, showPaceLevel: true,
     // Sleep is logged per-night rather than persisting like weight, so its
     // dashboard card always resets to "not logged" for a fresh day (see
     // trackerCardHtml()) regardless of this toggle — this only gates the
     // separate, optional trailing-nights average/category insight
-    // (sleepInsights()), same off-by-default treatment as every other one.
-    showSleepInsights: false,
+    // (sleepInsights()), same on-by-default treatment as every other one.
+    showSleepInsights: true,
     // Daily-value guidance card (Fat/Sugar/Sodium/etc. vs. published FDA
-    // reference values) in the Food detail modal — off by default, same
-    // off-by-default treatment as every other insight above.
-    showMacroGuidance: false,
+    // reference values) in the Food detail modal — on by default, same
+    // on-by-default treatment as every other insight above.
+    showMacroGuidance: true,
     // Each of the four Manage domains (Workout, Body/measurements, Water,
     // Food) has the identical "Track this" master toggle — the setup
     // wizard's interest tiles write these; each one's own Manage panel
@@ -637,6 +647,15 @@
     // other macro goal (same dashboard display, same manual override if the
     // calculator is turned back off) once applied.
     nutritionCalc: { enabled: false, activityLevel: 'moderate', goal: 'maintain' },
+    // Whether the "Review your tracking" dashboard nudge (see
+    // shouldOfferSetupReview() below) has already been shown and acted on
+    // (or explicitly dismissed) once — false only ever means "never
+    // resolved yet," never "should show again." A brand-new install starts
+    // false but won't actually be offered the prompt for a few days (see
+    // SETUP_REVIEW_MIN_INSTALL_DAYS) — this flag only stops it from
+    // reappearing once it HAS been shown, it isn't what decides whether to
+    // show it in the first place.
+    setupReviewPromptSeen: false,
   };
 
   // A brand-new install's starting Food state — always empty; there's no
@@ -1880,6 +1899,90 @@
     return Array.from(container.querySelectorAll('a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'));
   }
 
+  /* ===== Back-button / swipe-back step navigation =========================
+   * Fit Log is a plain single-page app with no router and — until now — no
+   * History API entries of its own. With nothing pushed, Android's back
+   * gesture/button has no "previous page" *within* the app to step back
+   * through, so it falls straight through to the browser/PWA chrome and
+   * exits; the broken/black frame some phones show right before that is the
+   * transition animation reaching for a "previous page" that was never
+   * there. Pushing one history entry per level below Dashboard turns Back
+   * into a step-wise "go up one level" action instead, the way a native
+   * app's back stack behaves: close the topmost modal, then return to
+   * Dashboard from any other tab or Settings, then ask for one more press
+   * before actually letting the app (and this history entry) go.
+   *
+   * navPushModal()/navPopModal() and the tab-level push/pop in switchTab()
+   * below are the only places that touch history.pushState/back — every
+   * other call site (the ~30 openModal()/closeModal() call sites, tab-bar
+   * clicks, the Settings gear icon) is untouched and just keeps calling
+   * those functions exactly as before.
+   *
+   * Two re-entrancy guards keep the browser's real history and the app's
+   * own DOM state from fighting each other:
+   *   - suppressNextPopHandling: set right before *we* call history.back()
+   *     ourselves (from navPopModal() or the Dashboard tab tap), so the
+   *     popstate that call triggers doesn't get treated as a fresh user
+   *     back-press.
+   *   - handlingPopState: set for the duration of the popstate handler, so
+   *     the closeModal()/switchTab()/closeSettings() calls it makes to
+   *     unwind one level don't ALSO try to push/pop history — the browser
+   *     already did that natively.
+   */
+  const NAV_MODAL = 'modal';
+  const NAV_TAB = 'tab';
+  let suppressNextPopHandling = false;
+  let handlingPopState = false;
+  let exitWarningArmed = false;
+  let exitWarningTimer = null;
+
+  function navPop() {
+    suppressNextPopHandling = true;
+    history.back();
+  }
+  function navPushModal() {
+    if (handlingPopState) return;
+    history.pushState({ nav: NAV_MODAL }, '');
+  }
+  function navPopModal() {
+    if (handlingPopState) return;
+    if ((history.state || {}).nav === NAV_MODAL) navPop();
+  }
+  // Only the four bottom tabs + Settings participate — the first-run setup
+  // wizard and the corrupt-data recovery screen are blocking, pre-app
+  // states with no "Dashboard" to fall back to, so they're left alone.
+  const NAV_TRACKED_TABS = new Set(['dashboard', 'log', 'history', 'manage', 'settings']);
+  function navOnSwitchTab(tab) {
+    if (handlingPopState || !NAV_TRACKED_TABS.has(tab)) return;
+    if (tab === 'dashboard') {
+      if ((history.state || {}).nav === NAV_TAB) navPop();
+    } else if ((history.state || {}).nav !== NAV_TAB) {
+      history.pushState({ nav: NAV_TAB }, '');
+    }
+  }
+
+  window.addEventListener('popstate', () => {
+    if (suppressNextPopHandling) { suppressNextPopHandling = false; return; }
+    handlingPopState = true;
+    try {
+      if (!modalRoot().hidden) { closeModal(); return; }
+      if (!document.getElementById('view-settings').hidden) { closeSettings(); return; }
+      const activeTab = document.querySelector('.tab[aria-current="page"]');
+      if (activeTab && activeTab.dataset.tab !== 'dashboard') { switchTab('dashboard'); return; }
+      // Already at Dashboard with nothing open — this back-press would
+      // otherwise exit the app. Warn once and re-arm the trap; a second
+      // press within the window is let through instead of re-trapped.
+      if (exitWarningArmed) return;
+      exitWarningArmed = true;
+      toast('Press back again to exit');
+      history.pushState({ nav: 'exit-guard' }, '');
+      clearTimeout(exitWarningTimer);
+      exitWarningTimer = setTimeout(() => { exitWarningArmed = false; }, 2000);
+    } finally {
+      handlingPopState = false;
+    }
+  });
+
   // Escape closes; Tab/Shift+Tab cycle within the sheet instead of escaping
   // to the (hidden-behind-the-backdrop, but still technically tabbable)
   // page underneath.
@@ -1899,6 +2002,13 @@
   // form — see the `.is-detail-sheet` comment in styles.css for why a
   // fixed height instead of the usual shrink-to-content matters there.
   function openModal(html, { tall = false } = {}) {
+    // A handful of call sites open a new modal while one is already showing
+    // (e.g. a food entry's "Save as a saved food" button opens the saved-
+    // food form right over it) — there's no real stacking here, just this
+    // one sheet's content getting replaced, so that case is still only ONE
+    // level as far as Back is concerned; only a genuinely fresh open (see
+    // navPushModal() below) counts as entering a new level.
+    const wasOpen = !modalRoot().hidden;
     const sheet = modalSheet();
     sheet.style.transform = '';
     sheet.classList.remove('is-dragging');
@@ -1931,6 +2041,7 @@
     if (target) target.focus();
     else { sheet.tabIndex = -1; sheet.focus(); }
     sheet.scrollTop = 0;
+    if (!wasOpen) navPushModal();
   }
   function closeModal() {
     modalRoot().hidden = true;
@@ -1938,6 +2049,7 @@
     document.removeEventListener('keydown', handleModalKeydown);
     if (modalLastFocusedEl && document.body.contains(modalLastFocusedEl)) modalLastFocusedEl.focus();
     modalLastFocusedEl = null;
+    navPopModal();
   }
 
   // Makes the little bar at the top of every modal sheet (`.modal-handle`)
@@ -2694,6 +2806,125 @@
     });
   }
 
+  /* ============================== Returning-user setup review ==============================
+     Every one of the tracking choices below (per-domain "Track this",
+     which macros are tracked, which insight cards show) already had a
+     value saved for an existing install the moment it was first created —
+     either whatever the setup wizard asked at the time, or DEFAULT_SETTINGS'
+     value for anything added later that install never got asked about.
+     Bumping DEFAULT_SETTINGS (see the comment there) only changes what a
+     BRAND-NEW install starts with; it does nothing for someone who already
+     has a saved `false` sitting in their data from before these existed.
+
+     Someone who logged only a couple of things and hasn't been back since
+     is exactly the account most likely running on stale, never-reconsidered
+     defaults — but also the account it's easiest to needlessly annoy, so
+     this only ever offers a look, once, rather than assuming anything
+     should change. It is NOT a re-run of the first-run wizard: finishSetup()
+     wholesale replaces state.exercises/entries/trackers/measurements, which
+     is correct for a truly empty install but would silently erase the very
+     "couple of things" this account already logged. Nothing below touches
+     any of that — it only flips the same plain settings booleans Manage and
+     Settings already expose, the same way those screens themselves do. */
+
+  const SETUP_REVIEW_MAX_ENTRIES = 3; // "lightly used" — a handful of logged items or fewer, total, across every domain
+  const SETUP_REVIEW_MIN_INSTALL_DAYS = 3; // give a fresh install a few days before treating light use as "gone stale" rather than "just started"
+
+  function totalLoggedItemCount() {
+    return state.entries.length + state.food.entries.length + state.waterEntries.length + state.measurements.length;
+  }
+
+  // Earliest createdAt across exercises/trackers stands in for "when this
+  // install was first set up" — every exercise/tracker gets one the moment
+  // it's created (setup wizard or Manage), and nothing else in this app's
+  // data records an install date directly.
+  function installedAtEstimate() {
+    const stamps = [...state.exercises, ...state.trackers].map((x) => x.createdAt).filter(Boolean);
+    return stamps.length ? stamps.reduce((a, b) => (a < b ? a : b)) : null;
+  }
+
+  function shouldOfferSetupReview() {
+    if (state.settings.setupReviewPromptSeen) return false;
+    if (totalLoggedItemCount() > SETUP_REVIEW_MAX_ENTRIES) return false; // meaningfully used already — this isn't for an active user
+    const installedAt = installedAtEstimate();
+    if (!installedAt) return false;
+    const daysSinceInstall = (Date.now() - new Date(installedAt).getTime()) / 86400000;
+    return daysSinceInstall >= SETUP_REVIEW_MIN_INSTALL_DAYS;
+  }
+
+  function renderSetupReviewBanner() {
+    document.getElementById('setupReviewBanner').hidden = !shouldOfferSetupReview();
+  }
+
+  // "Not now" — resolves the prompt without changing a single tracking
+  // setting, same as just closing it would functionally do, but explicit
+  // and permanent rather than something that would reappear next visit.
+  function dismissSetupReviewPrompt() {
+    state.settings.setupReviewPromptSeen = true;
+    if (!save()) return;
+    renderSetupReviewBanner();
+  }
+
+  // The review screen itself — a plain checklist over LIVE settings
+  // (state.settings directly, not a separate draft the way the first-run
+  // wizard's setupAnswers is), using the exact same setupBoolRowHtml/
+  // wireSetupBoolRow row widget the wizard uses. Each toggle takes effect
+  // immediately (save() + renderAll()), same as flipping it from Manage or
+  // Settings would — this screen is just a curated shortcut to those same
+  // switches, not a separate settings store of its own.
+  function openSetupReviewModal() {
+    const s = state.settings;
+    const macroRowHtml = (k) => setupBoolRowHtml(`review_macro_${k}`, MACRO_LABELS[k], macroGoalInfo(k).enabled);
+    openModal(`
+      <div class="modal-title-row"><h2>Review your tracking</h2><button class="modal-close" data-action="close-modal">${CLOSE_ICON_SVG}</button></div>
+      <p class="muted-text">Fit Log has added tracking options and insight cards since you started — here's a chance to double check what's on. Nothing you've already logged changes either way.</p>
+      <div class="card form-card">
+        <div class="section-head"><h2>What do you track?</h2></div>
+        ${setupBoolRowHtml('review_trackWorkout', 'Workout', s.trackWorkout)}
+        ${setupBoolRowHtml('review_trackMeasurements', 'Body', s.trackMeasurements)}
+        ${setupBoolRowHtml('review_trackWater', 'Water', s.trackWater)}
+        ${setupBoolRowHtml('review_trackFood', 'Food', s.trackFood)}
+      </div>
+      ${s.trackFood ? `<div class="card form-card">
+        <div class="section-head"><h2>Nutrition extras</h2></div>
+        ${macroRowHtml('sugar')}
+        ${macroRowHtml('sodium')}
+        ${macroRowHtml('caffeine')}
+      </div>` : ''}
+      <div class="card form-card">
+        <div class="section-head"><h2>Insights &amp; guidance</h2></div>
+        ${setupBoolRowHtml('review_showWeightInsights', 'Body weight insights', s.showWeightInsights)}
+        ${setupBoolRowHtml('review_showStrengthLevel', 'Strength level', s.showStrengthLevel)}
+        ${setupBoolRowHtml('review_showPaceLevel', 'Pace level', s.showPaceLevel)}
+        ${setupBoolRowHtml('review_showSleepInsights', 'Sleep insights', s.showSleepInsights)}
+        ${setupBoolRowHtml('review_showMacroGuidance', 'Daily-value guidance', s.showMacroGuidance)}
+      </div>
+      <button type="button" class="btn btn-primary btn-block" id="setupReviewDoneBtn">Done</button>
+    `, { tall: true });
+
+    const rerender = () => openSetupReviewModal();
+    wireSetupBoolRow('review_trackWorkout', (v) => { s.trackWorkout = v; if (!save()) return; renderAll(); rerender(); });
+    wireSetupBoolRow('review_trackMeasurements', (v) => { s.trackMeasurements = v; if (!save()) return; renderAll(); rerender(); });
+    wireSetupBoolRow('review_trackWater', (v) => { s.trackWater = v; if (!save()) return; renderAll(); rerender(); });
+    wireSetupBoolRow('review_trackFood', (v) => { s.trackFood = v; if (!save()) return; renderAll(); rerender(); });
+    ['sugar', 'sodium', 'caffeine'].forEach((k) => {
+      if (document.getElementById(`review_macro_${k}`)) {
+        wireSetupBoolRow(`review_macro_${k}`, (v) => { macroGoalInfo(k).enabled = v; if (!save()) return; renderAll(); rerender(); });
+      }
+    });
+    wireSetupBoolRow('review_showWeightInsights', (v) => { s.showWeightInsights = v; if (!save()) return; renderAll(); rerender(); });
+    wireSetupBoolRow('review_showStrengthLevel', (v) => { s.showStrengthLevel = v; if (!save()) return; renderAll(); rerender(); });
+    wireSetupBoolRow('review_showPaceLevel', (v) => { s.showPaceLevel = v; if (!save()) return; renderAll(); rerender(); });
+    wireSetupBoolRow('review_showSleepInsights', (v) => { s.showSleepInsights = v; if (!save()) return; renderAll(); rerender(); });
+    wireSetupBoolRow('review_showMacroGuidance', (v) => { s.showMacroGuidance = v; if (!save()) return; renderAll(); rerender(); });
+
+    document.getElementById('setupReviewDoneBtn').addEventListener('click', () => {
+      dismissSetupReviewPrompt();
+      closeModal();
+      toast('Preferences updated');
+    });
+  }
+
   // Dashboard layout: "Today" (what's happening right now) above
   // "Progress" (the lifetime picture) — see the section-head comment in
   // index.html. Today holds, in order: needs-attention tracker prompts
@@ -2708,6 +2939,7 @@
   // thing, so it doesn't disappear from Progress just because it's also
   // prompted (or was, a moment ago) in Today.
   function renderDashboard() {
+    renderSetupReviewBanner();
     renderSummary();
     // Workout toggled off in Manage (Track this) means the whole domain is
     // hidden here too, same as it already is in Log/History — an empty
@@ -3416,6 +3648,19 @@
     });
   }
 
+  // Whether this entry is, for all practical purposes, already a saved
+  // food — its note matches a saved food's name (case-insensitive,
+  // trimmed). Logging a saved food stamps note = food.name exactly (see
+  // logSavedFood), so this reliably catches that case; it also catches a
+  // hand-typed entry whose note happens to match one, which is the right
+  // call too — no reason to offer a near-duplicate. Used only to hide the
+  // "Save as a saved food" button below, never to block anything.
+  function foodEntryAlreadySaved(entry) {
+    if (!entry.note) return false;
+    const name = entry.note.trim().toLowerCase();
+    return state.food.savedFoods.some((f) => f.name.trim().toLowerCase() === name);
+  }
+
   // Edit modal only shows currently-tracked macro fields (see
   // trackedMacroKeys) — a field that's off doesn't render an input at all,
   // so `Object.assign(e, values)` below only ever touches tracked keys and
@@ -3423,6 +3668,12 @@
   function openFoodEntryModal(entryId) {
     const e = state.food.entries.find((x) => x.id === entryId);
     if (!e) return;
+    // "Save as a saved food" turns a food that was only ever typed by hand
+    // into a one-tap Saved Food from now on, without retyping its numbers —
+    // see openSavedFoodForm's `prefill` param. Hidden once it's already
+    // effectively saved (foodEntryAlreadySaved) so it doesn't invite a
+    // near-duplicate every time this same food gets logged and re-opened.
+    const offerSaveAsFood = !foodEntryAlreadySaved(e);
     openModal(`
       <div class="modal-title-row"><h2>Edit food entry</h2><button class="modal-close" data-action="close-modal">${CLOSE_ICON_SVG}</button></div>
       <div class="form-card">
@@ -3434,6 +3685,7 @@
           <input type="number" step="any" min="0" id="editFood_${k}" value="${e[k] != null ? e[k] : ''}" ${req ? 'required' : ''} /></label>`;
         }).join('')}
         <label class="field"><span class="field-label">Note</span><input type="text" id="editFoodNote" value="${e.note ? escapeHtml(e.note) : ''}" maxlength="200" /></label>
+        ${offerSaveAsFood ? `<button type="button" class="btn btn-secondary btn-block" id="saveAsSavedFoodBtn">Save as a saved food</button>` : ''}
         <div class="btn-row"><button class="btn btn-primary btn-block" id="saveFoodEntryBtn">Save changes</button></div>
         <button class="btn btn-danger btn-block" id="deleteFoodEntryBtn">Delete entry</button>
       </div>
@@ -3454,6 +3706,14 @@
       toast('Entry updated');
       renderRecentEntries(); renderDashboard(); renderHistory();
     });
+    const saveAsSavedFoodBtn = document.getElementById('saveAsSavedFoodBtn');
+    if (saveAsSavedFoodBtn) {
+      saveAsSavedFoodBtn.addEventListener('click', () => {
+        const prefill = { name: e.note || '' };
+        trackedMacroKeys().forEach((k) => { prefill[k] = e[k]; });
+        openSavedFoodForm(null, prefill);
+      });
+    }
     document.getElementById('deleteFoodEntryBtn').addEventListener('click', () => {
       confirmDialog('Delete entry?', 'This can’t be undone.', 'Delete', () => {
         state.food.entries = state.food.entries.filter((x) => x.id !== entryId);
@@ -3478,10 +3738,11 @@
   function savedFoodById(id) { return state.food.savedFoods.find((f) => f.id === id); }
 
   function savedFoodRowHtml(food) {
+    const cat = SAVED_FOOD_CATEGORIES.find((c) => c.value === (food.category || 'other'));
     return `
       <div class="entry-row is-manage" data-saved-food-id="${food.id}">
         <div class="entry-row-main">
-          <div class="entry-row-title">${escapeHtml(food.name)}</div>
+          <div class="entry-row-title">${escapeHtml(food.name)} ${cat ? `<span class="chip">${cat.label}</span>` : ''}</div>
           <div class="entry-row-sub">${macroSummaryText(food)}</div>
         </div>
         <div class="entry-row-actions">
@@ -3500,24 +3761,61 @@
   // Only currently-tracked macros are asked for (same fields as the log
   // form itself, Calories required) — a saved food is just a template for
   // a food entry, so it follows the same tracking rules one would.
-  function openSavedFoodForm(foodId) {
+  //
+  // `prefill` (only used when `foodId` is null, i.e. creating a new saved
+  // food) seeds the name/macro fields from something other than a blank
+  // form — specifically, an existing food entry's own values, via the
+  // "Save as a saved food" button on openFoodEntryModal below, so someone
+  // who typed a food's numbers by hand once doesn't have to retype them to
+  // also have it as a one-tap saved food from then on. Same shape as a
+  // saved food minus its id: `{ name, calories, protein, ... }`.
+  // Every saved food has a category — one of SAVED_FOOD_CATEGORIES — so the
+  // Log → Food list can be filtered down (see renderSavedFoodLogList()).
+  // 'other' is the default for anything saved before this field existed, so
+  // nothing already-saved becomes invisible under the new filter chips.
+  const SAVED_FOOD_CATEGORIES = [
+    { value: 'meal', label: 'Meal' },
+    { value: 'snack', label: 'Snack' },
+    { value: 'drink', label: 'Drink' },
+    { value: 'other', label: 'Other' },
+  ];
+
+  function openSavedFoodForm(foodId, prefill) {
     const editing = !!foodId;
     const food = editing ? savedFoodById(foodId) : null;
+    const seed = food || prefill || null;
+    let selectedCategory = (seed && seed.category) || 'other';
     openModal(`
       <div class="modal-title-row"><h2>${editing ? 'Edit saved food' : 'Save a new food'}</h2><button class="modal-close" data-action="close-modal">${CLOSE_ICON_SVG}</button></div>
       <div class="form-card">
         <label class="field"><span class="field-label">Name</span>
-          <input type="text" id="savedFoodName" value="${food ? escapeHtml(food.name) : ''}" placeholder="e.g. Chicken breast, 6oz" maxlength="60" /></label>
+          <input type="text" id="savedFoodName" value="${seed && seed.name ? escapeHtml(seed.name) : ''}" placeholder="e.g. Chicken breast, 6oz" maxlength="60" /></label>
+        <div class="field">
+          <span class="field-label">Category</span>
+          <div class="segmented" id="savedFoodCategorySegmentedForm" role="radiogroup" aria-label="Category">
+            ${SAVED_FOOD_CATEGORIES.map((c) => `<button type="button" data-category="${c.value}" role="radio">${c.label}</button>`).join('')}
+          </div>
+        </div>
         ${trackedMacroKeys().map((k) => {
           const req = k === 'calories';
           return `
         <label class="field"><span class="field-label">${MACRO_LABELS[k]}${MACRO_UNITS[k] ? ` (${MACRO_UNITS[k]})` : ''} ${req ? '<span class="req-mark">*</span>' : '<span class="muted-text">(optional)</span>'}</span>
-          <input type="number" step="any" min="0" id="savedFood_${k}" value="${food && food[k] != null ? food[k] : ''}" ${req ? 'required' : ''} /></label>`;
+          <input type="number" step="any" min="0" id="savedFood_${k}" value="${seed && seed[k] != null ? seed[k] : ''}" ${req ? 'required' : ''} /></label>`;
         }).join('')}
         <button type="button" class="btn btn-primary btn-block" id="saveSavedFoodBtn">${editing ? 'Save changes' : 'Save food'}</button>
         ${editing ? `<button type="button" class="btn-text-danger" id="deleteSavedFoodBtn">Delete saved food</button>` : ''}
       </div>
     `);
+    function setCategoryUI(val) {
+      selectedCategory = val;
+      document.querySelectorAll('#savedFoodCategorySegmentedForm button').forEach((btn) => {
+        btn.setAttribute('aria-checked', String(btn.dataset.category === val));
+      });
+    }
+    setCategoryUI(selectedCategory);
+    document.querySelectorAll('#savedFoodCategorySegmentedForm button').forEach((btn) => {
+      btn.addEventListener('click', () => setCategoryUI(btn.dataset.category));
+    });
     document.getElementById('saveSavedFoodBtn').addEventListener('click', () => {
       const name = document.getElementById('savedFoodName').value.trim();
       if (!name) { toast('Give it a name.'); return; }
@@ -3530,9 +3828,10 @@
       if (values.calories == null) { toast('Enter calories to save this food.'); return; }
       if (editing) {
         food.name = name;
+        food.category = selectedCategory;
         Object.assign(food, values);
       } else {
-        state.food.savedFoods.push({ id: genId('savedfood'), name, ...values });
+        state.food.savedFoods.push({ id: genId('savedfood'), name, category: selectedCategory, ...values });
       }
       if (!save()) return;
       closeModal();
@@ -3563,6 +3862,11 @@
   let savedFoodQty = 1;
   const SAVED_FOOD_QTY_PRESETS = [0.5, 0.75, 1, 1.5, 2];
 
+  // Which category chip is active above the saved-foods list on Log → Food.
+  // 'all' shows everything; otherwise one of SAVED_FOOD_CATEGORIES' values.
+  // Also transient UI state, not saved.
+  let savedFoodCategoryFilter = 'all';
+
   // Every tracked macro on `food`, scaled by `qty` and rounded to one
   // decimal place — e.g. 1.5x on 280 cal / 53g protein logs 420 cal /
   // 79.5g protein. A macro the saved food has no value for stays null, same
@@ -3576,10 +3880,27 @@
   function renderSavedFoodLogList() {
     const wrap = document.getElementById('savedFoodsWrap');
     const list = document.getElementById('savedFoodLogList');
+    const chipsWrap = document.getElementById('savedFoodCategorySegmented');
     const foods = state.food.savedFoods;
     wrap.hidden = foods.length === 0;
-    if (!foods.length) { list.innerHTML = ''; return; }
-    list.innerHTML = foods.map((food) => {
+    if (!foods.length) { list.innerHTML = ''; if (chipsWrap) chipsWrap.innerHTML = ''; return; }
+    if (chipsWrap) {
+      chipsWrap.innerHTML = `<button type="button" data-cat-filter="all" role="radio" aria-checked="${savedFoodCategoryFilter === 'all'}">All</button>` +
+        SAVED_FOOD_CATEGORIES.map((c) => `<button type="button" data-cat-filter="${c.value}" role="radio" aria-checked="${savedFoodCategoryFilter === c.value}">${c.label}${c.value === 'meal' || c.value === 'snack' || c.value === 'drink' ? 's' : ''}</button>`).join('');
+      chipsWrap.querySelectorAll('button').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          savedFoodCategoryFilter = btn.dataset.catFilter;
+          expandedSavedFoodId = null;
+          renderSavedFoodLogList();
+        });
+      });
+    }
+    const visibleFoods = savedFoodCategoryFilter === 'all' ? foods : foods.filter((f) => (f.category || 'other') === savedFoodCategoryFilter);
+    if (!visibleFoods.length) {
+      list.innerHTML = `<p class="muted-text field-hint">No saved foods in this category.</p>`;
+      return;
+    }
+    list.innerHTML = visibleFoods.map((food) => {
       const expanded = expandedSavedFoodId === food.id;
       const isCustomQty = !SAVED_FOOD_QTY_PRESETS.includes(savedFoodQty);
       return `
@@ -3685,9 +4006,18 @@
   // .cal-dot-* in styles.css): green for any workout logged, blue for
   // hitting that day's water goal (not just for drinking anything — the
   // dot means "goal met"), purple for any body measurement logged. Tapping
-  // a day opens everything logged that day, editable in place.
+  // a day toggles it as the selected date, filtering the "All entries" list
+  // below (within whatever domain tab is active) down to just that day's
+  // entries — tapping the same day again clears the filter. It never opens
+  // a separate view; the calendar and the list below it stay on one screen.
 
   let calendarMonth = (() => { const d = new Date(); d.setDate(1); return d; })();
+
+  // Which date the "All entries" list below the calendar is filtered to —
+  // null means no filter (show everything for the active domain tab).
+  // Defaults to today, so the History screen opens showing just what's been
+  // recorded today rather than the whole history at once.
+  let historySelectedDate = todayISO();
 
   function dayActivity(dateIso) {
     // A domain toggled off in Manage (Track this) shouldn't surface its dot
@@ -3721,55 +4051,19 @@
         food ? '<span class="cal-dot cal-dot-food"></span>' : '',
       ].join('');
       html += `
-        <button type="button" class="calendar-day ${dateIso === todayIso ? 'is-today' : ''}" data-date="${dateIso}">
+        <button type="button" class="calendar-day ${dateIso === todayIso ? 'is-today' : ''} ${dateIso === historySelectedDate ? 'is-selected' : ''}" data-date="${dateIso}" aria-pressed="${dateIso === historySelectedDate}">
           <span>${day}</span>
           <span class="calendar-day-dots">${dots}</span>
         </button>`;
     }
     document.getElementById('calendarGrid').innerHTML = html;
     document.querySelectorAll('#calendarGrid .calendar-day[data-date]').forEach((btn) => {
-      btn.addEventListener('click', () => openDayDetail(btn.dataset.date));
+      btn.addEventListener('click', () => {
+        const date = btn.dataset.date;
+        historySelectedDate = historySelectedDate === date ? null : date;
+        renderHistory();
+      });
     });
-  }
-
-  // Everything logged on one day, across all four categories, each row
-  // clickable straight into its own existing edit/delete modal — the
-  // calendar's "click a day to see or edit its history" affordance.
-  function openDayDetail(dateIso) {
-    // Same domain gating as dayActivity() above — a toggled-off domain's
-    // entries still exist in state, but shouldn't surface here.
-    const workoutEntries = domainTracked('workout') ? state.entries.filter((e) => e.date === dateIso).sort((a, b) => a.id.localeCompare(b.id)) : [];
-    const measurements = domainTracked('measurements') ? state.measurements.filter((m) => m.date === dateIso).sort((a, b) => a.id.localeCompare(b.id)) : [];
-    const waterEntries = domainTracked('water') ? state.waterEntries.filter((e) => e.date === dateIso).sort((a, b) => a.id.localeCompare(b.id)) : [];
-    const foodEntries = domainTracked('food') ? state.food.entries.filter((e) => e.date === dateIso).sort((a, b) => a.id.localeCompare(b.id)) : [];
-    const nothingLogged = !workoutEntries.length && !measurements.length && !waterEntries.length && !foodEntries.length;
-
-    const dateLabel = new Date(dateIso + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
-
-    openModal(`
-      <div class="modal-title-row"><h2>${dateLabel}</h2><button class="modal-close" data-action="close-modal">${CLOSE_ICON_SVG}</button></div>
-      ${nothingLogged ? '<p class="muted-text">Nothing logged on this day.</p>' : ''}
-      ${workoutEntries.length ? `
-        <div class="section-head"><h2>Workouts</h2></div>
-        <div class="entry-list" id="dayWorkoutList">${workoutEntries.map(entryRowHtml).join('')}</div>` : ''}
-      ${measurements.length ? `
-        <div class="section-head"><h2>Body</h2></div>
-        <div class="entry-list" id="dayMeasurementList">${measurements.map(measurementRowHtml).join('')}</div>` : ''}
-      ${waterEntries.length ? `
-        <div class="section-head"><h2>Water</h2></div>
-        <div class="entry-list" id="dayWaterList">${waterEntries.map(waterEntryRowHtml).join('')}</div>` : ''}
-      ${foodEntries.length ? `
-        <div class="section-head"><h2>Food <span class="muted-text">— ${macroSummaryText(foodTotalsForDate(dateIso))}</span></h2></div>
-        <div class="entry-list" id="dayFoodList">${foodEntries.map(foodEntryRowHtml).join('')}</div>` : ''}
-    `);
-    const workoutList = document.getElementById('dayWorkoutList');
-    if (workoutList) wireEntryRowClicks(workoutList);
-    const measurementList = document.getElementById('dayMeasurementList');
-    if (measurementList) wireMeasurementRowClicks(measurementList);
-    const waterList = document.getElementById('dayWaterList');
-    if (waterList) wireWaterEntryRowClicks(waterList);
-    const foodList = document.getElementById('dayFoodList');
-    if (foodList) wireFoodEntryRowClicks(foodList);
   }
 
   function renderHistoryFilter() {
@@ -3800,9 +4094,30 @@
     document.getElementById('historyFilterField').hidden = historyCategory !== 'workout' || !cats.length;
   }
 
+  // "Today" / a formatted date / "All entries" depending on whether the
+  // calendar has a day selected — keeps the list's heading honest about
+  // what's actually filtered below it.
+  function historyListHeadingText() {
+    if (!historySelectedDate) return 'All entries';
+    if (historySelectedDate === todayISO()) return 'Today';
+    return new Date(historySelectedDate + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
+  }
+
+  // Sets #historyEmpty's visibility and wording together — "nothing logged
+  // today" reads very differently from "nothing logged yet" when a
+  // calendar day is selected, so the empty state should say which is true.
+  function setHistoryEmpty(isEmpty) {
+    document.getElementById('historyEmpty').hidden = !isEmpty;
+    if (!isEmpty) return;
+    const textEl = document.getElementById('historyEmptyText');
+    if (textEl) textEl.textContent = historySelectedDate ? `Nothing logged for ${historyListHeadingText().toLowerCase() === 'today' ? 'today' : 'this day'}.` : 'No entries logged yet.';
+  }
+
   function renderHistory() {
     renderHistoryCalendar();
     renderHistoryCategorySegmented();
+    const headingEl = document.getElementById('historyListHeading');
+    if (headingEl) headingEl.textContent = historyListHeadingText();
     const wrap = document.getElementById('historyList');
     const cats = availableDomainCategories();
 
@@ -3812,15 +4127,21 @@
       return;
     }
     if (historyCategory === 'measurements') {
-      const list = state.measurements.slice().sort((a, b) => (b.date + b.id).localeCompare(a.date + a.id));
-      document.getElementById('historyEmpty').hidden = list.length > 0;
+      const list = state.measurements
+        .filter((m) => !historySelectedDate || m.date === historySelectedDate)
+        .slice()
+        .sort((a, b) => (b.date + b.id).localeCompare(a.date + a.id));
+      setHistoryEmpty(list.length === 0);
       wrap.innerHTML = list.map((m) => measurementRowHtml(m)).join('');
       wireMeasurementRowClicks(wrap);
       return;
     }
     if (historyCategory === 'water') {
-      const list = state.waterEntries.slice().sort((a, b) => (b.date + b.id).localeCompare(a.date + a.id));
-      document.getElementById('historyEmpty').hidden = list.length > 0;
+      const list = state.waterEntries
+        .filter((e) => !historySelectedDate || e.date === historySelectedDate)
+        .slice()
+        .sort((a, b) => (b.date + b.id).localeCompare(a.date + a.id));
+      setHistoryEmpty(list.length === 0);
       wrap.innerHTML = list.map((e) => waterEntryRowHtml(e)).join('');
       wireWaterEntryRowClicks(wrap);
       return;
@@ -3829,10 +4150,12 @@
       // Grouped by date with each day's totals as a header, rather than one
       // flat list — "total everything by day" is the whole point of the
       // feature, so History is where those totals actually live, not just
-      // the dashboard's "today" card.
-      document.getElementById('historyEmpty').hidden = state.food.entries.length > 0;
+      // the dashboard's "today" card. When a day is selected on the
+      // calendar, that collapses to just the one date's group.
+      const relevantEntries = state.food.entries.filter((e) => !historySelectedDate || e.date === historySelectedDate);
+      setHistoryEmpty(relevantEntries.length === 0);
       const byDate = {};
-      state.food.entries.forEach((e) => { (byDate[e.date] = byDate[e.date] || []).push(e); });
+      relevantEntries.forEach((e) => { (byDate[e.date] = byDate[e.date] || []).push(e); });
       const dates = Object.keys(byDate).sort().reverse();
       wrap.innerHTML = dates.map((date) => {
         const dayEntries = byDate[date].sort((a, b) => b.id.localeCompare(a.id));
@@ -3847,9 +4170,10 @@
     const filter = document.getElementById('historyFilter').value || '__all__';
     const list = state.entries
       .filter((e) => filter === '__all__' || e.exerciseId === filter)
+      .filter((e) => !historySelectedDate || e.date === historySelectedDate)
       .slice()
       .sort((a, b) => (b.date + b.id).localeCompare(a.date + a.id));
-    document.getElementById('historyEmpty').hidden = list.length > 0;
+    setHistoryEmpty(list.length === 0);
     wrap.innerHTML = list.map((e) => entryRowHtml(e)).join('');
     wireEntryRowClicks(wrap);
   }
@@ -4644,13 +4968,28 @@
       const fields = { unitKind: selectedUnitKind, unitLabel, ratingMax: selectedUnitKind === 'rating' ? selectedRatingMax : null, direction: selectedDirection, showOnDashboard: selectedShowOnDashboard };
       const canonicalGoal = hasGoal ? trackerCanonicalFromDisplay(Object.assign({}, tracker, fields), rawGoal) : null;
       if (editing) {
-        // A goal newly set on a tracker that doesn't already have a
-        // baseline gets one now — the point it's starting from — so
-        // trackerProgressPct() has something to measure movement against
-        // instead of falling back to a plain (and misleading) ratio.
-        const gettingFirstGoal = tracker.goal == null && canonicalGoal != null && tracker.baseline == null;
+        // A baseline means "where you started, toward THIS goal" —
+        // trackerProgressPct() measures the fraction of (baseline -> goal)
+        // already covered, which only means something for the goal/
+        // direction it was captured under. Editing to a genuinely
+        // DIFFERENT goal number, or flipping direction (Higher/Lower is
+        // better), changes what "toward this goal" even means; keeping the
+        // OLD baseline around for a NEW goal is what let the percentage go
+        // nonsensical (e.g. 267%, or negative-reading) once that stale
+        // baseline ended up on the wrong side of the new goal — e.g. a
+        // "lose weight" baseline left in place after switching to "gain
+        // weight." So a changed goal or direction recaptures the baseline
+        // from the latest logged value, exactly like a goal set for the
+        // first time already did; removing the goal entirely clears it
+        // (nothing left to measure progress toward).
+        const prevGoal = tracker.goal;
+        const prevDirection = tracker.direction || 'up';
+        const goalOrDirectionChanged = canonicalGoal != null
+          && (tracker.baseline == null || canonicalGoal !== prevGoal || fields.direction !== prevDirection);
         Object.assign(tracker, { name }, fields, { goal: canonicalGoal });
-        if (gettingFirstGoal) {
+        if (canonicalGoal == null) {
+          tracker.baseline = null;
+        } else if (goalOrDirectionChanged) {
           const latest = latestMeasurement(trackerId);
           tracker.baseline = latest ? latest.value : null;
         }
@@ -5278,7 +5617,10 @@
     waterGoal: '',
     weightGoalEnabled: false,
     weightGoalValue: '',
-    insightsEnabled: false,
+    // On by default, same reasoning as DEFAULT_SETTINGS.showWeightInsights
+    // etc. above — these are general published benchmarks, not something
+    // that needs an opt-in.
+    insightsEnabled: true,
   };
 
   // Recomputed on every render rather than fixed at wizard start — its
@@ -5693,11 +6035,22 @@
   // leaves every tab unhighlighted, which is the desired look for a screen
   // layered on top rather than a sixth peer tab.
   function switchTab(tab) {
+    navOnSwitchTab(tab);
     document.querySelectorAll('.view').forEach((v) => { v.hidden = v.dataset.view !== tab; });
     document.querySelectorAll('.tab').forEach((t) => {
       if (t.dataset.tab === tab) t.setAttribute('aria-current', 'page');
       else t.removeAttribute('aria-current');
     });
+    // The page itself scrolls (#app/#main have no overflow of their own —
+    // see styles.css), and every .view is a sibling sharing that one
+    // window scroll position rather than a scroll container of its own. So
+    // switching which .view is visible used to leave the window exactly
+    // where it was on the PREVIOUS tab — scroll to the bottom of Dashboard,
+    // tap Log, and Log would silently open scrolled down too, rather than
+    // at its own top. Every tab should start at its own top on arrival,
+    // same as switching screens in any native app (and the same call
+    // openModal already makes for the modal sheet's own scroll position).
+    window.scrollTo(0, 0);
     if (tab === 'dashboard') renderDashboard();
     if (tab === 'log') renderLogView();
     if (tab === 'history') renderHistory();
@@ -5772,6 +6125,9 @@
 
     document.getElementById('openSettingsBtn').addEventListener('click', openSettings);
     document.querySelectorAll('[data-action="close-settings"]').forEach((btn) => btn.addEventListener('click', closeSettings));
+
+    document.getElementById('dismissSetupReviewBtn').addEventListener('click', dismissSetupReviewPrompt);
+    document.getElementById('openSetupReviewBtn').addEventListener('click', openSetupReviewModal);
 
     document.getElementById('logExercise').addEventListener('change', (ev) => {
       if (ev.target.value === '__add_new__') {
@@ -6081,6 +6437,16 @@
   /* ============================== Init ============================== */
 
   function init() {
+    // Tag the page's own initial history entry, then push one guard entry
+    // on top of it so there's always at least one poppable entry for a
+    // Back press to land on — without it, a Back press on a freshly loaded
+    // Dashboard (nothing else open, nothing pushed yet) would have nowhere
+    // to pop TO within the page and would exit immediately, silently
+    // skipping the "press back again to exit" warning below. See the
+    // "Back-button / swipe-back step navigation" comment above switchTab()/
+    // openModal() for the rest of this mechanism.
+    history.replaceState({ nav: 'base' }, '');
+    history.pushState({ nav: 'exit-guard' }, '');
     load();
     // wireEvents() only ever attaches listeners (nothing here reads `state`
     // synchronously), so it's safe to wire even in recovery mode — that's

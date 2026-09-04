@@ -71,6 +71,15 @@
          (the lifetime goal cards + tracker trends) — see renderDashboard()
          in app.js for the exact split/sort logic. -->
     <section id="view-dashboard" class="view" data-view="dashboard">
+      <div id="setupReviewBanner" class="card" hidden>
+        <h3>New tracking options are available</h3>
+        <p class="muted-text">Fit Log has added extra macros, insight cards, and per-domain on/off switches since you started. Take a look?</p>
+        <div class="btn-row">
+          <button type="button" class="btn btn-ghost" id="dismissSetupReviewBtn">Not now</button>
+          <button type="button" class="btn btn-primary" id="openSetupReviewBtn">Review tracking</button>
+        </div>
+      </div>
+
       <div id="summaryRow" class="summary-row"></div>
 
       <div class="section-head"><h2>Today</h2></div>
@@ -168,11 +177,6 @@
         </label>
       </div>
 
-      <div id="savedFoodsWrap" class="card form-card" hidden>
-        <span class="field-label">Saved foods — tap one to log it</span>
-        <div id="savedFoodLogList" class="entry-list"></div>
-      </div>
-
       <form id="logFoodForm" class="card form-card" hidden>
         <label class="field">
           <span class="field-label">Date</span>
@@ -185,6 +189,14 @@
         </label>
         <button type="submit" class="btn btn-primary btn-block">Save entry</button>
       </form>
+
+      <div id="savedFoodsWrap" class="card form-card" hidden>
+        <div class="field">
+          <span class="field-label">Saved foods — tap one to log it</span>
+          <div class="segmented" id="savedFoodCategorySegmented" role="radiogroup" aria-label="Filter saved foods"></div>
+        </div>
+        <div id="savedFoodLogList" class="entry-list"></div>
+      </div>
 
       <div class="section-head">
         <h2>Recent entries</h2>
@@ -219,7 +231,7 @@
       </div>
 
       <div class="section-head">
-        <h2>All entries</h2>
+        <h2 id="historyListHeading">All entries</h2>
       </div>
       <!-- Rebuilt in JS by renderHistoryCategorySegmented() via the shared
            domainTabsHtml() helper — same component Log and Manage use, so
@@ -231,7 +243,7 @@
       </label>
       <div id="historyList" class="entry-list"></div>
       <div id="historyEmpty" class="empty-state" hidden>
-        <p>No entries logged yet.</p>
+        <p id="historyEmptyText">No entries logged yet.</p>
       </div>
     </section>
 
