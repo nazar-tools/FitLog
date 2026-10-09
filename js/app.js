@@ -933,8 +933,7 @@
     const done = entriesFor(ex.id).filter((e) => e.date === todayISO()).length;
     return `
       <div class="habit-panel">
-        <div class="habit-count">${done}<span class="muted-text"> / ${goal}</span></div>
-        <div class="muted-text">times today</div>
+        <div class="habit-count">${done}<span class="muted-text"> / ${goal} ${goal === 1 ? 'time' : 'times'} today</span></div>
         <div class="habit-dots">${Array.from({ length: Math.min(goal, 6) }, (_, i) => `<span class="habit-dot${i < done ? ' on' : ''}"></span>`).join('')}</div>
       </div>`;
   }

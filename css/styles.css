@@ -126,9 +126,6 @@ button { font-family: inherit; }
 
 /* ============ Topbar ============ */
 .topbar {
-  position: sticky;
-  top: 0;
-  z-index: 5;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -231,6 +228,8 @@ button { font-family: inherit; }
 /* 16px gap minus 6 = a heading sits 10px above its card, 24px below the previous one. */
 .section-head { margin-bottom: -6px; }
 .section-head h2 { font-size: 16px; font-weight: 700; }
+/* Home: "Today" and the date sit just under the title, on the left; the streak card follows with more room. */
+.section-head.home-head { justify-content: flex-start; gap: 8px; margin-top: -10px; margin-bottom: 0; }
 
 /* ============ Domain tabs (Workout / Body / Water / Food) ============
    Log/History/Manage's top-level category switcher used to be a small
@@ -293,7 +292,7 @@ button { font-family: inherit; }
 /* ============ Home: streak card ============
    One button for the streak and the last 7 days; opens History. Lit with a
    warm glow while a streak is alive, plain gray at zero. */
-.streak-card { display: block; width: 100%; padding: 18px 16px 16px; text-align: left; font: inherit; color: inherit; cursor: pointer; background: var(--surface-1); border: 1px solid var(--border); border-radius: var(--radius-lg); }
+.streak-card { display: block; width: 100%; margin-top: 8px; padding: 18px 16px 16px; text-align: left; font: inherit; color: inherit; cursor: pointer; background: var(--surface-1); border: 1px solid var(--border); border-radius: var(--radius-lg); }
 .streak-card.is-hot {
   background: linear-gradient(160deg, color-mix(in srgb, var(--warning) 22%, transparent), color-mix(in srgb, var(--streak) 16%, transparent) 55%, color-mix(in srgb, var(--streak) 4%, transparent)), var(--surface-1);
   border-color: color-mix(in srgb, var(--streak) 38%, transparent);
@@ -370,10 +369,10 @@ button { font-family: inherit; }
 .icon-cell[aria-checked="true"] { color: var(--accent); background: var(--accent-track); border: 2px solid var(--accent); }
 
 /* ============ Habit (Log screen) ============ */
-.habit-panel { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 8px 0 16px; text-align: center; }
+.habit-panel { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 0 12px; }
 .habit-hint { margin-top: 10px; text-align: center; }
-.habit-count { font-size: 40px; font-weight: 800; line-height: 1; }
-.habit-count .muted-text { font-size: 18px; font-weight: 500; }
+.habit-count { font-size: 24px; font-weight: 800; line-height: 1.2; }
+.habit-count .muted-text { font-size: 14px; font-weight: 400; }
 .habit-dots { display: flex; gap: 8px; }
 .habit-dot { width: 12px; height: 12px; border-radius: 50%; background: var(--accent-track); }
 .habit-dot.on { background: var(--accent); }
@@ -712,26 +711,11 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 1p
    optional one turned on in Manage). A 2-3 button segmented control never
    overflows, so this is a no-op there; button `flex: none` keeps buttons
    at their natural width instead of squeezing/wrapping their labels. */
-.segmented { --seg-line: color-mix(in srgb, var(--text-primary) 14%, var(--surface-2)); display: inline-flex; max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; border-radius: var(--radius-sm); }
-.segmented button {
-  position: relative; flex: none; border: none; border-radius: 0; background: var(--surface-2); color: var(--text-primary);
-  box-shadow: inset 0 0 0 1px var(--seg-line);
-  min-width: 52px; padding: 7px 14px; font-size: 14px; font-weight: 600; cursor: pointer; white-space: nowrap;
-}
-.segmented button + button { margin-left: -1px; }
-.segmented button:first-child { border-radius: var(--radius-sm) 0 0 var(--radius-sm); }
-.segmented button:last-child { border-radius: 0 var(--radius-sm) var(--radius-sm) 0; }
-.segmented button:only-child { border-radius: var(--radius-sm); }
-.segmented button[aria-checked="true"] { z-index: 1; background: var(--accent-track); color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
-/* Many choices: one bar that wraps into rows of three, sharing its borders. */
+.segmented { display: inline-flex; gap: 1px; max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; background: var(--border) padding-box; border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.segmented button { flex: none; border: none; border-radius: 0; background: var(--surface-2); color: var(--text-primary); min-width: 52px; padding: 7px 14px; font-size: 14px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+.segmented button[aria-checked="true"] { background: var(--accent-track); color: var(--accent); }
+/* Many choices: one bar that wraps into rows of three. */
 .segmented.segmented-grid, .field > .segmented.segmented-grid { display: grid; grid-template-columns: repeat(3, 1fr); }
-.segmented.segmented-grid button { margin: 0; border-radius: 0; }
-.segmented.segmented-grid button:not(:nth-child(3n+1)) { margin-left: -1px; }
-.segmented.segmented-grid button:nth-child(n+4) { margin-top: -1px; }
-.segmented.segmented-grid button:nth-child(1) { border-top-left-radius: var(--radius-sm); }
-.segmented.segmented-grid button:nth-child(3) { border-top-right-radius: var(--radius-sm); }
-.segmented.segmented-grid button:nth-child(4) { border-bottom-left-radius: var(--radius-sm); }
-.segmented.segmented-grid button:nth-child(6) { border-bottom-right-radius: var(--radius-sm); }
 /* In a form, a segmented control fills the row and splits it evenly, so long labels wrap instead of clipping. */
 .form-card > .segmented, .field > .segmented { display: flex; }
 .form-card > .segmented button, .field > .segmented button { flex: 1 1 0; min-width: 0; min-height: 44px; padding: 8px; white-space: normal; line-height: 1.2; }
