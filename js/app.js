@@ -1948,10 +1948,10 @@
     if (handlingPopState) return;
     if ((history.state || {}).nav === NAV_MODAL) navPop();
   }
-  // Only the four bottom tabs + Settings participate — the first-run setup
+  // Only the bottom tabs + Settings participate — the first-run setup
   // wizard and the corrupt-data recovery screen are blocking, pre-app
   // states with no "Dashboard" to fall back to, so they're left alone.
-  const NAV_TRACKED_TABS = new Set(['dashboard', 'log', 'history', 'manage', 'settings']);
+  const NAV_TRACKED_TABS = new Set(['dashboard', 'progress', 'log', 'history', 'manage', 'settings']);
   function navOnSwitchTab(tab) {
     if (handlingPopState || !NAV_TRACKED_TABS.has(tab)) return;
     if (tab === 'dashboard') {
@@ -2939,53 +2939,51 @@
   // it was just logged — a tracker's card is a trend, not a today-only
   // thing, so it doesn't disappear from Progress just because it's also
   // prompted (or was, a moment ago) in Today.
+  // Home and Progress share the same data, so every call site just refreshes
+  // both through this one entry point.
   function renderDashboard() {
+    renderHome();
+    renderProgress();
+  }
+
+  // Home: what needs doing or is happening today.
+  function renderHome() {
     renderSetupReviewBanner();
     renderSummary();
-    // Workout toggled off in Manage (Track this) means the whole domain is
-    // hidden here too, same as it already is in Log/History — an empty
-    // `all` naturally empties every workout-derived section below
-    // (goal cards, "Logged today" items, and Progress's exerciseCards).
-    const workoutTracked = domainTracked('workout');
-    const all = workoutTracked ? activeExercises() : [];
-    const goalList = all.filter((e) => sectionOf(e) === 'goal');
-    const dailyDefined = all.filter((e) => sectionOf(e) === 'daily');
+    // Workout toggled off in Manage (Track this) hides the whole domain, so
+    // an empty `all` empties every workout-derived section below.
+    const all = domainTracked('workout') ? activeExercises() : [];
     const isLoggedToday = (e) => entriesFor(e.id).some((en) => en.date === todayISO());
-    const goalsToday = goalList.filter(isLoggedToday);
-    const goalsRemaining = goalList.filter((e) => !isLoggedToday(e));
-    // A daily target only earns a spot on the dashboard once you've
-    // actually logged it today — otherwise it'd be a standing reminder
-    // cluttering the goals page every day whether or not you got to it.
-    // It's still fully definable/loggable/editable via Log/History/Manage
-    // even on a day it doesn't show here.
-    const dailyToday = dailyDefined.filter(isLoggedToday);
-    // accessory exercises are intentionally omitted from the dashboard —
-    // they're still fully logged/edited via the Log and History tabs.
-
-    // Workout off should mean no "add your first exercise" nudge either —
-    // that's Manage's job to turn the domain back on, not the dashboard's.
-    document.getElementById('dashboardEmpty').hidden = !workoutTracked || (goalList.length + dailyDefined.length) > 0;
+    // A daily target only earns a spot once it's been logged today —
+    // otherwise it'd be a standing reminder whether or not you got to it.
+    // Accessory exercises are never shown here; Log and History cover them.
+    const todayItems = all
+      .filter((e) => (sectionOf(e) === 'goal' || sectionOf(e) === 'daily') && isLoggedToday(e))
+      .sort((a, b) => latestTodayEntryId(b.id).localeCompare(latestTodayEntryId(a.id)));
 
     renderTodayAttention();
 
-    const todayItems = [...goalsToday, ...dailyToday]
-      .sort((a, b) => latestTodayEntryId(b.id).localeCompare(latestTodayEntryId(a.id)));
     document.getElementById('todayActivitySubhead').hidden = todayItems.length === 0;
     const todayWrap = document.getElementById('todayActivityList');
     todayWrap.hidden = todayItems.length === 0;
     todayWrap.innerHTML = todayItems.map((e) => sectionOf(e) === 'goal' ? goalCardHtml(e) : dailyRowHtml(e)).join('');
-    todayWrap.querySelectorAll('.ex-card[data-exercise-id]').forEach((card) => {
-      wireOpenable(card, () => openExerciseDetail(card.getAttribute('data-exercise-id')));
-    });
-    todayWrap.querySelectorAll('.daily-row').forEach((row) => {
-      wireOpenable(row, () => openExerciseDetail(row.getAttribute('data-exercise-id')));
+    todayWrap.querySelectorAll('.ex-card[data-exercise-id], .daily-row').forEach((el) => {
+      wireOpenable(el, () => openExerciseDetail(el.getAttribute('data-exercise-id')));
     });
 
     renderWaterSection();
     renderFoodDashboardSection();
+  }
+
+  // Progress: every goal card (including ones also shown on Home today),
+  // then the body & wellness trends.
+  function renderProgress() {
+    const all = domainTracked('workout') ? activeExercises() : [];
+    const goalList = all.filter((e) => sectionOf(e) === 'goal');
+    document.getElementById('dashboardEmpty').hidden = !domainTracked('workout') || (goalList.length + all.filter((e) => sectionOf(e) === 'daily').length) > 0;
 
     const cardsWrap = document.getElementById('exerciseCards');
-    cardsWrap.innerHTML = goalsRemaining.map(goalCardHtml).join('');
+    cardsWrap.innerHTML = goalList.map(goalCardHtml).join('');
     cardsWrap.querySelectorAll('.ex-card[data-exercise-id]').forEach((card) => {
       wireOpenable(card, () => openExerciseDetail(card.getAttribute('data-exercise-id')));
     });
@@ -6069,7 +6067,8 @@
     // same as switching screens in any native app (and the same call
     // openModal already makes for the modal sheet's own scroll position).
     window.scrollTo(0, 0);
-    if (tab === 'dashboard') renderDashboard();
+    if (tab === 'dashboard') renderHome();
+    if (tab === 'progress') renderProgress();
     if (tab === 'log') renderLogView();
     if (tab === 'history') renderHistory();
     if (tab === 'manage') renderManage();

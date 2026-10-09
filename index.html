@@ -65,11 +65,9 @@
       </div>
     </section>
 
-    <!-- DASHBOARD — "Today" (what's happening right now: unlogged check-ins
-         to nudge, then whatever's already been logged today, then Water/
-         Food since both are inherently day-scoped) sits above "Progress"
-         (the lifetime goal cards + tracker trends) — see renderDashboard()
-         in app.js for the exact split/sort logic. -->
+    <!-- HOME (internally "dashboard") — what needs doing or is happening today:
+         streak tiles, unlogged check-ins, today's logged items, water, food.
+         Goals and trends live in the Progress view below. -->
     <section id="view-dashboard" class="view" data-view="dashboard">
       <div id="setupReviewBanner" class="card" hidden>
         <h3>New tracking options are available</h3>
@@ -96,6 +94,10 @@
       <div class="section-head" id="foodSectionHead" hidden><h2>Today's food</h2></div>
       <div id="foodDashboardWrap" hidden></div>
 
+    </section>
+
+    <!-- PROGRESS — every goal card plus the body & wellness trends -->
+    <section id="view-progress" class="view" data-view="progress" hidden>
       <div class="section-head"><h2>Progress</h2></div>
       <div id="exerciseCards" class="card-grid"></div>
 
@@ -527,11 +529,15 @@
 
   <nav class="tabbar" id="tabbar">
     <button class="tab" data-tab="dashboard" aria-current="page">
-      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v16a2 2 0 0 0 2 2h16"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg>
-      <span>Goals</span>
+      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8"/><path d="M3 10a2 2 0 0 1 .709-1.528l7-5.999a2 2 0 0 1 2.582 0l7 5.999A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+      <span>Home</span>
     </button>
-    <button class="tab" data-tab="log">
-      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M8 12h8"/><path d="M12 8v8"/></svg>
+    <button class="tab" data-tab="progress">
+      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 7h6v6"/><path d="m22 7-8.5 8.5-5-5L2 17"/></svg>
+      <span>Progress</span>
+    </button>
+    <button class="tab tab-log" data-tab="log" aria-label="Log">
+      <span class="tab-log-badge"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg></span>
       <span>Log</span>
     </button>
     <button class="tab" data-tab="history">
