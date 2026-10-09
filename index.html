@@ -66,7 +66,7 @@
     </section>
 
     <!-- HOME (internally "dashboard") — what needs doing or is happening today:
-         streak tiles, unlogged check-ins, today's logged items, water, food.
+         streak card, unlogged check-ins, daily targets, today's logged items, water and food.
          Goals and trends live in the Progress view below. -->
     <section id="view-dashboard" class="view" data-view="dashboard">
       <div id="setupReviewBanner" class="card" hidden>
@@ -78,21 +78,21 @@
         </div>
       </div>
 
-      <div id="summaryRow" class="summary-row"></div>
+      <div class="section-head"><h2>Today</h2><span class="muted-text" id="todayDate"></span></div>
 
-      <div class="section-head"><h2>Today</h2></div>
+      <button type="button" id="streakCard" class="streak-card" aria-label="Open history"></button>
 
-      <div class="subhead" id="todayAttentionSubhead" hidden>Needs attention</div>
-      <div id="todayAttentionWrap" class="prompt-list" hidden></div>
+      <div class="section-head" id="todayAttentionHead" hidden><h2>To log today</h2><span class="muted-text" id="todayAttentionCount"></span></div>
+      <div id="todayAttentionWrap" class="card card-list" hidden></div>
 
-      <div class="subhead" id="todayActivitySubhead" hidden>Logged today</div>
-      <div id="todayActivityList" class="card-grid" hidden></div>
+      <div class="section-head" id="dailyTargetsHead" hidden><h2>Daily targets</h2><span class="muted-text">Resets at midnight</span></div>
+      <div id="dailyTargetsWrap" class="card card-list" hidden></div>
 
-      <div class="section-head" id="waterSectionHead" hidden><h2>Water</h2></div>
-      <div id="waterDashboardWrap" hidden></div>
+      <div class="section-head" id="todayActivityHead" hidden><h2>Logged today</h2></div>
+      <div id="todayActivityList" class="card card-list" hidden></div>
 
-      <div class="section-head" id="foodSectionHead" hidden><h2>Today's food</h2></div>
-      <div id="foodDashboardWrap" hidden></div>
+      <div class="section-head" id="waterFoodHead" hidden><h2>Water &amp; food</h2></div>
+      <div id="waterFoodWrap" class="card card-list" hidden></div>
 
     </section>
 
@@ -487,23 +487,23 @@
           </div>
         </div>
         <div class="setting-row">
-          <span class="setting-row-label"><span class="setting-icon" data-icon="scale"></span><span>Body weight insights <span class="muted-text">Trend + BMI</span></span></span>
+          <span class="setting-row-label"><span class="setting-icon" data-icon="scale"></span><span>Body weight insights <span class="muted-text">(trend + BMI)</span></span></span>
           <button type="button" class="switch" id="showWeightInsightsSwitch" role="switch" aria-checked="false" aria-label="Body weight insights"><span class="switch-track"><span class="switch-thumb"></span></span></button>
         </div>
         <div class="setting-row">
-          <span class="setting-row-label"><span class="setting-icon" data-icon="trophy"></span><span>Strength level <span class="muted-text">Lifts vs. bodyweight</span></span></span>
+          <span class="setting-row-label"><span class="setting-icon" data-icon="trophy"></span><span>Strength level <span class="muted-text">(lifts vs. bodyweight)</span></span></span>
           <button type="button" class="switch" id="showStrengthLevelSwitch" role="switch" aria-checked="false" aria-label="Strength level"><span class="switch-track"><span class="switch-thumb"></span></span></button>
         </div>
         <div class="setting-row">
-          <span class="setting-row-label"><span class="setting-icon" data-icon="footprints"></span><span>Pace level <span class="muted-text">For runs</span></span></span>
+          <span class="setting-row-label"><span class="setting-icon" data-icon="footprints"></span><span>Pace level <span class="muted-text">(runs)</span></span></span>
           <button type="button" class="switch" id="showPaceLevelSwitch" role="switch" aria-checked="false" aria-label="Pace level"><span class="switch-track"><span class="switch-thumb"></span></span></button>
         </div>
         <div class="setting-row">
-          <span class="setting-row-label"><span class="setting-icon" data-icon="moon"></span><span>Sleep insights <span class="muted-text">Trend over last 7 nights</span></span></span>
+          <span class="setting-row-label"><span class="setting-icon" data-icon="moon"></span><span>Sleep insights <span class="muted-text">(trend over last 7 nights)</span></span></span>
           <button type="button" class="switch" id="showSleepInsightsSwitch" role="switch" aria-checked="false" aria-label="Sleep insights"><span class="switch-track"><span class="switch-thumb"></span></span></button>
         </div>
         <div class="setting-row">
-          <span class="setting-row-label"><span class="setting-icon" data-icon="apple"></span><span>Macro guidance <span class="muted-text">%DV for fat, sodium, etc.</span></span></span>
+          <span class="setting-row-label"><span class="setting-icon" data-icon="apple"></span><span>Macro guidance <span class="muted-text">(%DV for Fat, Sugar, Sodium, etc.)</span></span></span>
           <button type="button" class="switch" id="showMacroGuidanceSwitch" role="switch" aria-checked="false" aria-label="Macro guidance"><span class="switch-track"><span class="switch-thumb"></span></span></button>
         </div>
         <p class="muted-text field-hint">Strength and pace levels use published benchmarks, split by sex (set in Profile above).</p>

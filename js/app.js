@@ -903,6 +903,42 @@
   function sectionOf(ex) { return ex.section || 'goal'; }
   const SECTION_LABELS = { goal: 'Goals', daily: 'Daily targets', accessory: 'Other exercises' };
 
+  // A habit is a daily target with no weight or reps: something done N times
+  // a day (`goal` = N), logged with one tap. `repeat` says how often its day
+  // comes around.
+  const HABIT_REPEATS = [['daily', 'Every day', 1], ['every-other', 'Every other day', 2], ['weekly', 'Weekly', 7]];
+  function habitRepeatDays(ex) { return (HABIT_REPEATS.find((r) => r[0] === ex.repeat) || HABIT_REPEATS[0])[2]; }
+  function dayGap(fromISO, toISO) { return Math.round((new Date(toISO + 'T00:00:00') - new Date(fromISO + 'T00:00:00')) / 86400000); }
+  // Whether a habit belongs on today's Home: always for a daily one; for the
+  // others, once enough days have passed since it was last done (or while
+  // it's already been started today).
+  function habitDueToday(ex) {
+    const gap = habitRepeatDays(ex);
+    if (gap === 1) return true;
+    const dates = entriesFor(ex.id).map((e) => e.date).sort();
+    return !dates.length || dates.includes(todayISO()) || dayGap(dates[dates.length - 1], todayISO()) >= gap;
+  }
+  function logHabit(exId) {
+    const ex = exerciseById(exId);
+    if (!ex) return;
+    state.entries.push({ id: genId('en'), exerciseId: ex.id, date: todayISO(), time: new Date().toTimeString().slice(0, 5), note: null });
+    if (!save()) return;
+    toast(`${ex.name} done`);
+    if (document.getElementById('logExercise').value === ex.id) renderLogForm();
+    if (document.getElementById('habitDoneBtn')) renderHabitDetail(ex);
+    renderRecentEntries(); renderDashboard(); renderHistory();
+  }
+  function habitPanelHtml(ex) {
+    const goal = ex.goal || 1;
+    const done = entriesFor(ex.id).filter((e) => e.date === todayISO()).length;
+    return `
+      <div class="habit-panel">
+        <div class="habit-count">${done}<span class="muted-text"> / ${goal}</span></div>
+        <div class="muted-text">times today</div>
+        <div class="habit-dots">${Array.from({ length: Math.min(goal, 6) }, (_, i) => `<span class="habit-dot${i < done ? ' on' : ''}"></span>`).join('')}</div>
+      </div>`;
+  }
+
   // The single best/most-recent set of an entry, used both for trend values
   // and for the progressive-overload suggestion (which needs reps/RPE too,
   // not just the scalar entryValue()).
@@ -1050,6 +1086,10 @@
   // pace goal are listed), one clause for everything else, or a plain "no
   // goal set" when nothing is configured yet.
   function exerciseGoalSummary(exercise) {
+    if (exercise.kind === 'habit') {
+      const repeat = HABIT_REPEATS.find((r) => r[0] === exercise.repeat);
+      return ` · ${exercise.goal || 1}× a day${repeat && repeat[2] > 1 ? ` · ${repeat[1].toLowerCase()}` : ''}`;
+    }
     if (exercise.kind === 'cardio') {
       const metrics = cardioMetricsOf(exercise);
       if (!metrics.length) return ' · no goal set';
@@ -1203,6 +1243,7 @@
   function kindBadge(exercise) {
     if (exercise.kind === 'weight') return 'Lift';
     if (exercise.kind === 'reps') return 'Bodyweight';
+    if (exercise.kind === 'habit') return 'Habit';
     if (exercise.kind === 'cardio') {
       const metrics = cardioMetricsOf(exercise);
       if (metrics.length === 2) return 'Run · distance & pace';
@@ -2220,7 +2261,16 @@
   }
 
   function renderDynamicFields(container, exercise, existingEntry) {
+    const form = container.closest('#logForm');
+    if (form) form.classList.toggle('is-habit', !!exercise && exercise.kind === 'habit');
     if (!exercise) { container.innerHTML = ''; return; }
+    if (exercise.kind === 'habit') {
+      // Logged in one tap, so there is nothing to fill in (and nothing to edit but date and note).
+      container.innerHTML = existingEntry ? '' : `${habitPanelHtml(exercise)}<button type="button" class="btn btn-primary btn-block" data-action="habit-done">Done</button><p class="muted-text habit-hint">One tap saves an entry with the time.</p>`;
+      const done = container.querySelector('[data-action="habit-done"]');
+      if (done) done.addEventListener('click', () => logHabit(exercise.id));
+      return;
+    }
     if (exercise.kind === 'cardio') {
       container.innerHTML = `<div class="sets-wrap">${cardioFieldsHtml(existingEntry)}</div>`;
       return;
@@ -2277,6 +2327,7 @@
   function invalidRpe(rpe) { return !Number.isNaN(rpe) && (rpe < RPE_MIN || rpe > RPE_MAX); }
 
   function readDynamicFields(container, exercise) {
+    if (exercise.kind === 'habit') return {};
     if (exercise.kind === 'cardio') {
       const distV = parseFloat(container.querySelector('#cardioDistance').value);
       const minV = parseFloat(container.querySelector('#cardioMin').value);
@@ -2348,37 +2399,30 @@
     return streak;
   }
 
-  // Dropped the old "Goals reached" tally tile — whether a goal is hit is
-  // already visible on that goal's own dashboard card (its meter fills and
-  // reads "✓ Goal reached"), so a third summary number just duplicated
-  // that instead of adding anything. The two tiles that remain lean into
-  // what they actually are: a currently-burning streak (a flame, lit only
-  // while the streak is alive) and a pattern of the last 7 days (a small
-  // heat strip alongside the raw count), rather than three plain numbers
-  // in equal boxes.
+  // The streak card at the top of Home: the current streak (lit while it's
+  // alive, gray at zero) over a dot for each of the last 7 days. The whole
+  // card is a button that opens History.
   function renderSummary() {
     const days = new Set(state.entries.map((e) => e.date));
     const today = new Date(todayISO() + 'T00:00:00');
-    const weekDots = [];
+    const week = [];
     for (let i = 6; i >= 0; i--) {
       const d = new Date(today);
       d.setDate(d.getDate() - i);
-      weekDots.push(days.has(localDateISO(d)));
+      week.push({ on: days.has(localDateISO(d)), label: d.toLocaleDateString(undefined, { weekday: 'narrow' }) });
     }
-    const sessionsThisWeek = weekDots.filter(Boolean).length;
     const streak = computeStreak();
-
-    document.getElementById('summaryRow').innerHTML = `
-      <div class="stat-tile">
-        <div class="value">${sessionsThisWeek}</div>
-        <div class="label">Days logged this week</div>
-        <div class="heat-strip">${weekDots.map((on) => `<span class="heat-day${on ? ' on' : ''}"></span>`).join('')}</div>
-      </div>
-      <div class="stat-tile${streak > 0 ? ' is-streak-hot' : ''}">
-        <div class="value">${streak > 0 ? FLAME_ICON_SVG : ''}<span>${streak}</span></div>
-        <div class="label">Day streak</div>
-      </div>
-    `;
+    const card = document.getElementById('streakCard');
+    card.classList.toggle('is-hot', streak > 0);
+    card.innerHTML = `
+      <span class="streak-top">
+        <span class="streak-main">${FLAME_ICON_SVG}<span class="streak-num">${streak}</span><span class="streak-label">day streak</span></span>
+        <span class="streak-week-text">${week.filter((d) => d.on).length} of 7 days this week${CHEVRON_RIGHT_SVG}</span>
+      </span>
+      <span class="streak-week">
+        ${week.map((d) => `<span class="streak-day">${d.label}<span class="streak-dot${d.on ? ' on' : ''}">${d.on ? CHECK_ICON_SVG : ''}</span></span>`).join('')}
+      </span>`;
+    document.getElementById('todayDate').textContent = today.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
   }
 
   // One goal's worth of current-value/goal-label/meter, shared by the
@@ -2567,7 +2611,7 @@
     return `
       <div class="card ex-card" data-exercise-id="${ex.id}">
         <div class="ex-card-top">
-          <div class="ex-card-name">${escapeHtml(ex.name)}</div>
+          <div class="ex-card-name">${exerciseIconHtml(ex, true)}${escapeHtml(ex.name)}</div>
           <div class="ex-card-badge">${kindBadge(ex)}</div>
         </div>
         ${progressHtml}
@@ -2575,41 +2619,87 @@
       </div>`;
   }
 
-  // A "Daily target" exercise (push-ups, pull-ups, crunches — whatever
-  // you're aiming to do every day) gets a compact, low-emphasis row
-  // instead of a full goal card. Unlike a goal card, this row is only ever
-  // rendered for a day it's actually been logged (see renderDashboard) —
-  // it's a same-day confirmation of what you did, not a standing reminder
-  // that clutters the dashboard on days you haven't gotten to it — so
-  // "today" rather than "lifetime" is the number front and center here.
-  function dailyRowHtml(ex) {
-    const entries = entriesFor(ex.id).slice().sort((a, c) => a.date.localeCompare(c.date));
-    const todayEntries = entries.filter((e) => e.date === todayISO());
-    const lifetimeTotal = entries.reduce((sum, e) => sum + (e.sets || []).reduce((m, s) => m + (s.reps || 0), 0), 0);
-    // Cardio exercises are rare as a daily target (it's meant for WFH
-    // bodyweight work), but if one lands here it still needs a sane
-    // fallback rather than assuming reps-shaped data.
-    if (ex.kind === 'cardio') {
-      const metrics = cardioMetricsOf(ex);
-      const metric = metrics[0];
-      const todayVal = todayEntries.length ? Math.max(...todayEntries.map((e) => entryValue(ex, e, metric)).filter((v) => v != null)) : null;
-      return `
-        <div class="daily-row" data-exercise-id="${ex.id}">
-          <div class="daily-row-main">
-            <div class="daily-row-name">${escapeHtml(ex.name)}</div>
-            <div class="daily-row-sub">Logged today · ${entries.length} session${entries.length === 1 ? '' : 's'} lifetime</div>
-          </div>
-          ${metric && todayVal != null ? `<div class="daily-row-goal">${formatValueForExercise(ex, todayVal, metric)}</div>` : ''}
-        </div>`;
+  /* ---- Home rows ----
+     Every Home section is a card of `.glance-row`s: icon, name, value, a thin
+     meter and an optional action. */
+
+  // Today's progress toward one daily target, as display text plus a 0-100+
+  // percentage (null when the exercise has no goal to measure against).
+  function todayProgressOf(ex) {
+    const today = entriesFor(ex.id).filter((e) => e.date === todayISO());
+    if (ex.kind === 'habit') {
+      const goal = ex.goal || 1;
+      return { curText: String(today.length), goalText: `/ ${goal} today`, pct: (today.length / goal) * 100 };
     }
-    const todayTotal = todayEntries.reduce((sum, e) => sum + (e.sets || []).reduce((m, s) => m + (s.reps || 0), 0), 0);
+    if (ex.kind === 'cardio') {
+      const metric = cardioMetricsOf(ex)[0] || 'distance';
+      const vals = today.map((e) => entryValue(ex, e, metric)).filter((v) => v != null);
+      const cur = vals.length ? (isLowerBetter(ex, metric) ? Math.min(...vals) : Math.max(...vals)) : null;
+      const goal = cardioGoalFor(ex, metric);
+      const pct = cur == null || !goal ? 0 : (isLowerBetter(ex, metric) ? (goal / cur) * 100 : (cur / goal) * 100);
+      return { curText: cur == null ? '0' : formatValueForExercise(ex, cur, metric), goalText: goal ? `/ ${goalLabelForExercise(ex, metric).replace('Goal ', '')}` : '', pct: goal ? pct : null };
+    }
+    if (ex.kind === 'weight') {
+      const vals = today.map((e) => entryValue(ex, e)).filter((v) => v != null);
+      const cur = vals.length ? Math.max(...vals) : null;
+      return { curText: cur == null ? '0' : fmtWeight(cur), goalText: ex.goal ? `/ ${fmtWeight(ex.goal)}` : '', pct: ex.goal ? ((cur || 0) / ex.goal) * 100 : null };
+    }
+    const cur = today.reduce((sum, e) => sum + (e.sets || []).reduce((m, st) => m + (st.reps || 0), 0), 0);
+    return { curText: String(cur), goalText: ex.goal ? `/ ${Math.round(ex.goal)} reps` : 'reps', pct: ex.goal ? (cur / ex.goal) * 100 : null };
+  }
+
+  function glanceMeterHtml(ex, pct) {
+    if (ex.kind === 'habit') {
+      const goal = Math.min(ex.goal || 1, 6);
+      const done = entriesFor(ex.id).filter((e) => e.date === todayISO()).length;
+      return `<div class="meter-segs">${Array.from({ length: goal }, (_, i) => `<span class="meter-seg${i < done ? ' on' : ''}"></span>`).join('')}</div>`;
+    }
+    if (pct == null) return '';
+    return `<div class="meter meter-sm"><div class="meter-fill ${pct >= 100 ? 'is-complete' : ''}" style="--fill:${Math.min(100, pct)}%"></div></div>`;
+  }
+
+  // One row of Home's "Daily targets": a habit is logged in one tap
+  // ("Done", then "+1" once its count is met); everything else opens Log.
+  // The button stays after the target is met so more can still be added.
+  function dailyTargetRowHtml(ex) {
+    const prog = todayProgressOf(ex);
+    const complete = prog.pct != null && prog.pct >= 100;
+    const isHabit = ex.kind === 'habit';
     return `
-      <div class="daily-row" data-exercise-id="${ex.id}">
-        <div class="daily-row-main">
-          <div class="daily-row-name">${escapeHtml(ex.name)}</div>
-          <div class="daily-row-sub">${lifetimeTotal.toLocaleString()} lifetime reps</div>
+      <div class="glance-row${complete ? ' is-complete' : ''}" data-exercise-id="${ex.id}">
+        <div class="glance-open">
+          ${exerciseIconHtml(ex)}
+          <div class="glance-main">
+            <div class="glance-line">
+              <span class="glance-name">${escapeHtml(ex.name)}</span>
+              <span class="glance-value">${complete ? CHECK_ICON_SVG : ''}<span>${prog.curText}<span class="muted-text"> ${prog.goalText}</span></span></span>
+            </div>
+            ${glanceMeterHtml(ex, prog.pct)}
+          </div>
         </div>
-        <div class="daily-row-goal">${todayTotal}${ex.goal ? `<span class="muted-text">/${Math.round(ex.goal)}</span>` : ''}</div>
+        <button type="button" class="btn btn-secondary btn-sm glance-btn" data-action="${isHabit ? 'log-habit' : 'log-daily'}">${isHabit ? (complete ? '+1' : 'Done') : 'Add'}</button>
+      </div>`;
+  }
+
+  // One row of Home's "Logged today": a goal exercise trained today, with
+  // its all-time best against its goal.
+  function loggedTodayRowHtml(ex) {
+    const metric = ex.kind === 'cardio' ? (cardioMetricsOf(ex)[0] || 'distance') : undefined;
+    const { pct, best: b } = progressPct(ex, metric);
+    const goal = ex.kind === 'cardio' ? cardioGoalFor(ex, metric) : ex.goal;
+    return `
+      <div class="glance-row${goal && pct >= 100 ? ' is-complete' : ''}" data-exercise-id="${ex.id}">
+        <div class="glance-open">
+          ${exerciseIconHtml(ex)}
+          <div class="glance-main">
+            <div class="glance-line">
+              <span class="glance-name">${escapeHtml(ex.name)}</span>
+              <span class="glance-value">${formatValueForExercise(ex, b, metric)}${goal ? `<span class="muted-text"> / ${goalLabelForExercise(ex, metric).replace('Goal ', '')}</span>` : ''}</span>
+            </div>
+            ${goal ? glanceMeterHtml(ex, pct) : ''}
+          </div>
+          ${CHEVRON_RIGHT_SVG}
+        </div>
       </div>`;
   }
 
@@ -2687,7 +2777,7 @@
     return `
       <div class="card ex-card" data-tracker-id="${tracker.id}">
         <div class="ex-card-top">
-          <div class="ex-card-name">${escapeHtml(tracker.name)}</div>
+          <div class="ex-card-name">${trackerIconHtml(tracker, true)}${escapeHtml(tracker.name)}</div>
           ${deltaBadge}${sleepBadge}
         </div>
         <div class="ex-card-values">
@@ -2722,7 +2812,7 @@
   function cupButtonsHtml() {
     return state.water.cups.map((cup) => `
       <button type="button" class="btn btn-secondary cup-btn" data-cup-id="${cup.id}">
-        <span class="cup-btn-name-row">${WATER_DROP_ICON_SVG}<span>${escapeHtml(cup.name)}</span></span>
+        <span class="cup-btn-name-row">${itemIconSvg(cupIconKey(cup))}<span>${escapeHtml(cup.name)}</span></span>
         <span class="cup-btn-amount">${fmtVolume(cup.amountMl)}</span>
       </button>`).join('');
   }
@@ -2740,31 +2830,72 @@
     renderHistory();
   }
 
-  function renderWaterSection() {
-    // Water toggled off in Manage (Track this) hides this section entirely,
-    // regardless of whether any cups are defined.
-    const hasCups = domainTracked('water') && state.water.cups.length > 0;
-    document.getElementById('waterSectionHead').hidden = !hasCups;
-    const wrap = document.getElementById('waterDashboardWrap');
-    wrap.hidden = !hasCups;
-    if (!hasCups) { wrap.innerHTML = ''; return; }
-    const { pct, achieved, total } = waterProgressPct(todayISO());
-    const fillPct = Math.min(100, pct);
-    wrap.innerHTML = `
-      <div class="card">
-        <div class="ex-card-values">
-          <div class="ex-card-current">${fmtVolume(total)}</div>
-          ${state.water.goalMl ? `<div class="ex-card-goal">/ ${fmtVolume(state.water.goalMl)} today</div>` : ''}
+  // Home's "Water & food": one row each. Water shows today's total against
+  // its goal with a one-tap button per cup; Food shows calories (against
+  // their goal, if set) with the other tracked macros underneath, and opens
+  // the food detail.
+  function waterRowHtml() {
+    const { pct, total } = waterProgressPct(todayISO());
+    const goal = state.water.goalMl;
+    return `
+      <div class="glance-row glance-row-stack${goal && pct >= 100 ? ' is-complete' : ''}">
+        <div class="glance-head">
+          ${itemIconHtml('droplets')}
+          <div class="glance-main">
+            <div class="glance-line">
+              <span class="glance-name">Water</span>
+              <span class="glance-value">${goal && pct >= 100 ? CHECK_ICON_SVG : ''}<span>${fmtVolume(total)}${goal ? `<span class="muted-text"> / ${fmtVolume(goal)}</span>` : ''}</span></span>
+            </div>
+            ${goal ? glanceMeterHtml({}, pct) : ''}
+          </div>
         </div>
-        ${state.water.goalMl ? `
-          <div class="meter"><div class="meter-fill ${achieved ? 'is-complete' : ''}" style="--fill:${fillPct}%"></div></div>
-          <div class="ex-card-foot"><span class="ex-card-pct ${achieved ? 'is-complete' : ''}">${achieved ? '✓ Goal reached' : `${Math.round(pct)}%`}</span></div>` : ''}
-        <div class="cup-button-row">${cupButtonsHtml()}</div>
+        <div class="glance-actions">
+          ${state.water.cups.map((cup) => `<button type="button" class="btn btn-secondary" data-cup-id="${cup.id}">+ ${escapeHtml(cup.name)} · ${fmtVolume(cup.amountMl)}</button>`).join('')}
+        </div>
       </div>`;
-    wrap.querySelectorAll('.cup-btn').forEach((btn) => btn.addEventListener('click', () => {
+  }
+
+  function foodRowHtml() {
+    const totals = foodTotalsForDate(todayISO());
+    const cal = macroGoalInfo('calories');
+    const hasGoal = cal.enabled && cal.goal != null;
+    const pct = hasGoal ? ((totals.calories || 0) / cal.goal) * 100 : null;
+    const others = trackedMacroKeys().filter((k) => k !== 'calories').map((k) => {
+      const info = macroGoalInfo(k);
+      const goalText = info.enabled && info.goal != null ? ` / ${fmtMacroValue(k, info.goal)}` : '';
+      const over = state.settings.showMacroGuidance && macroDvOver(k, totals[k]);
+      return `<span${over ? ' class="is-over-dv"' : ''}>${MACRO_LABELS[k]} ${fmtMacroValue(k, totals[k])}${goalText}</span>`;
+    });
+    return `
+      <div class="glance-row${hasGoal && pct >= 100 ? ' is-complete' : ''}">
+        <div class="glance-open" id="foodGlance">
+          ${itemIconHtml('apple')}
+          <div class="glance-main">
+            <div class="glance-line">
+              <span class="glance-name">Calories</span>
+              <span class="glance-value">${hasGoal && pct >= 100 ? CHECK_ICON_SVG : ''}<span>${totals.calories == null ? '0' : fmtMacroValue('calories', totals.calories)}${hasGoal ? `<span class="muted-text"> / ${fmtMacroValue('calories', cal.goal)} cal</span>` : '<span class="muted-text"> cal</span>'}</span></span>
+            </div>
+            ${hasGoal ? glanceMeterHtml({}, pct) : ''}
+            ${others.length ? `<div class="glance-sub">${others.join(' · ')}</div>` : ''}
+          </div>
+          ${CHEVRON_RIGHT_SVG}
+        </div>
+      </div>`;
+  }
+
+  function renderWaterFood() {
+    const hasWater = domainTracked('water') && state.water.cups.length > 0;
+    const hasFood = state.settings.trackFood;
+    document.getElementById('waterFoodHead').hidden = !(hasWater || hasFood);
+    const wrap = document.getElementById('waterFoodWrap');
+    wrap.hidden = !(hasWater || hasFood);
+    wrap.innerHTML = (hasWater ? waterRowHtml() : '') + (hasFood ? foodRowHtml() : '');
+    wrap.querySelectorAll('[data-cup-id]').forEach((btn) => btn.addEventListener('click', () => {
       const cup = cupById(btn.dataset.cupId);
       if (cup) logWaterAmount(cup.amountMl, cup.id);
     }));
+    const food = document.getElementById('foodGlance');
+    if (food) wireOpenable(food, openFoodDetail);
   }
 
   // The id of exId's most-recently-logged entry for today, or '' if it
@@ -2778,30 +2909,33 @@
       .reduce((max, en) => (en.id > max ? en.id : max), '');
   }
 
-  // The dashboard's "Today" needs-attention prompts — one compact row per
-  // dashboard-visible tracker (Weight, Sleep, or any custom one) that
-  // hasn't been logged yet today. This is deliberately just a prompt, not
-  // that tracker's full card — the full card (with its chart/trend/goal
-  // meter) keeps living in Progress via renderBodySection whether or not
-  // today's entry has landed yet; a tracker simply drops off this list the
-  // moment it's logged, rather than jumping anywhere or duplicating itself.
+  // Home's "To log today": one row per dashboard-visible tracker (Weight,
+  // Sleep, or any custom one) that hasn't been logged yet today — just a
+  // prompt, not the tracker's card (that lives in Progress). A tracker drops
+  // off this list the moment it's logged.
   function renderTodayAttention() {
-    // Trackers are the Body domain — off there means no attention prompts
-    // for them either (same reasoning as renderBodySection below).
+    // Trackers are the Body domain — off there means no prompts for them either.
     const pending = domainTracked('measurements') ? activeTrackers()
       .filter((t) => t.showOnDashboard !== false)
       .filter((t) => !state.measurements.some((m) => m.trackerId === t.id && m.date === todayISO())) : [];
-    document.getElementById('todayAttentionSubhead').hidden = pending.length === 0;
+    document.getElementById('todayAttentionHead').hidden = pending.length === 0;
+    document.getElementById('todayAttentionCount').textContent = `${pending.length} left`;
     const wrap = document.getElementById('todayAttentionWrap');
     wrap.hidden = pending.length === 0;
-    wrap.innerHTML = pending.map((t) => `
-      <div class="prompt-row" data-tracker-id="${t.id}">
-        <div>
-          <div class="prompt-row-name">${escapeHtml(t.name)}</div>
-          <div class="prompt-row-sub">Not logged today</div>
+    wrap.innerHTML = pending.map((t) => {
+      const last = measurementsFor(t.id).slice().sort((a, b) => b.date.localeCompare(a.date))[0];
+      return `
+      <div class="glance-row" data-tracker-id="${t.id}">
+        <div class="glance-open">
+          ${trackerIconHtml(t)}
+          <div class="glance-main">
+            <div class="glance-name">${escapeHtml(t.name)}</div>
+            <div class="glance-sub">${last ? `Last ${fmtTrackerValue(t, last.value)}` : 'Not logged yet'}</div>
+          </div>
         </div>
-        <button type="button" class="btn btn-secondary btn-sm" data-action="log-tracker-prompt">Log</button>
-      </div>`).join('');
+        <button type="button" class="btn btn-secondary btn-sm glance-btn" data-action="log-tracker-prompt">Log</button>
+      </div>`;
+    }).join('');
     wrap.querySelectorAll('[data-action="log-tracker-prompt"]').forEach((btn) => {
       btn.addEventListener('click', () => logTrackerFromDetail(btn.closest('[data-tracker-id]').getAttribute('data-tracker-id')));
     });
@@ -2926,53 +3060,50 @@
     });
   }
 
-  // Dashboard layout: "Today" (what's happening right now) above
-  // "Progress" (the lifetime picture) — see the section-head comment in
-  // index.html. Today holds, in order: needs-attention tracker prompts
-  // (renderTodayAttention), whatever's actually been logged today (any
-  // goal exercise with a today's entry, plus daily targets — which, same
-  // as before, only ever show up on a day they're logged at all — mixed
-  // together and sorted most-recent-first), then Water and Food, since
-  // both are inherently day-scoped rather than lifetime numbers. Progress
-  // keeps everything Today didn't claim: goal exercises untouched today,
-  // and every tracker's own card (Body & wellness) regardless of whether
-  // it was just logged — a tracker's card is a trend, not a today-only
-  // thing, so it doesn't disappear from Progress just because it's also
-  // prompted (or was, a moment ago) in Today.
-  // Home and Progress share the same data, so every call site just refreshes
-  // both through this one entry point.
+  // Home: what needs doing or is happening today, top to bottom — the streak
+  // card, trackers still to log, the daily targets (always shown, so they act
+  // as a standing reminder), goal exercises trained today, then water and
+  // food. Progress keeps the lifetime picture: every goal card and every
+  // tracker's trend. Home and Progress share the same data, so every call
+  // site refreshes both through renderDashboard().
   function renderDashboard() {
     renderHome();
     renderProgress();
   }
 
-  // Home: what needs doing or is happening today.
   function renderHome() {
     renderSetupReviewBanner();
     renderSummary();
-    // Workout toggled off in Manage (Track this) hides the whole domain, so
-    // an empty `all` empties every workout-derived section below.
+    renderTodayAttention();
+    // Workout toggled off in Manage (Track this) hides the whole domain.
     const all = domainTracked('workout') ? activeExercises() : [];
-    const isLoggedToday = (e) => entriesFor(e.id).some((en) => en.date === todayISO());
-    // A daily target only earns a spot once it's been logged today —
-    // otherwise it'd be a standing reminder whether or not you got to it.
-    // Accessory exercises are never shown here; Log and History cover them.
-    const todayItems = all
-      .filter((e) => (sectionOf(e) === 'goal' || sectionOf(e) === 'daily') && isLoggedToday(e))
+    const daily = all.filter((e) => sectionOf(e) === 'daily' && (e.kind !== 'habit' || habitDueToday(e)));
+    const logged = all
+      .filter((e) => sectionOf(e) === 'goal' && entriesFor(e.id).some((en) => en.date === todayISO()))
       .sort((a, b) => latestTodayEntryId(b.id).localeCompare(latestTodayEntryId(a.id)));
 
-    renderTodayAttention();
-
-    document.getElementById('todayActivitySubhead').hidden = todayItems.length === 0;
-    const todayWrap = document.getElementById('todayActivityList');
-    todayWrap.hidden = todayItems.length === 0;
-    todayWrap.innerHTML = todayItems.map((e) => sectionOf(e) === 'goal' ? goalCardHtml(e) : dailyRowHtml(e)).join('');
-    todayWrap.querySelectorAll('.ex-card[data-exercise-id], .daily-row').forEach((el) => {
-      wireOpenable(el, () => openExerciseDetail(el.getAttribute('data-exercise-id')));
+    document.getElementById('dailyTargetsHead').hidden = daily.length === 0;
+    const dailyWrap = document.getElementById('dailyTargetsWrap');
+    dailyWrap.hidden = daily.length === 0;
+    dailyWrap.innerHTML = daily.map(dailyTargetRowHtml).join('');
+    dailyWrap.querySelectorAll('.glance-row').forEach((row) => {
+      const exId = row.getAttribute('data-exercise-id');
+      wireOpenable(row.querySelector('.glance-open'), () => openExerciseDetail(exId));
+      row.querySelector('.glance-btn').addEventListener('click', () => {
+        if (row.querySelector('.glance-btn').dataset.action === 'log-habit') logHabit(exId);
+        else openLogFor(exId);
+      });
     });
 
-    renderWaterSection();
-    renderFoodDashboardSection();
+    document.getElementById('todayActivityHead').hidden = logged.length === 0;
+    const loggedWrap = document.getElementById('todayActivityList');
+    loggedWrap.hidden = logged.length === 0;
+    loggedWrap.innerHTML = logged.map(loggedTodayRowHtml).join('');
+    loggedWrap.querySelectorAll('.glance-row').forEach((row) => {
+      wireOpenable(row.querySelector('.glance-open'), () => openExerciseDetail(row.getAttribute('data-exercise-id')));
+    });
+
+    renderWaterFood();
   }
 
   // Progress: every goal card (including ones also shown on Home today),
@@ -2989,49 +3120,6 @@
     });
 
     renderBodySection();
-  }
-
-  // A read-only "today so far" summary of every tracked macro (see
-  // trackedMacroKeys — a macro turned off in Manage -> Nutrition -> Food
-  // isn't rendered here at all) — Food doesn't get quick-tap logging
-  // buttons on the dashboard the way Water does (typed macro numbers don't
-  // reduce to one tap), but seeing today's running total without a trip to
-  // Log or History is still worth having front and center. Every tile
-  // always shows a total; one with a daily goal enabled additionally shows
-  // "/ goal" underneath, the same way Water shows progress toward its daily
-  // goal; when the daily-value guidance toggle (Settings -> Insights) is
-  // on, a value past the DV for Sugar/Sodium/Caffeine (see
-  // MACRO_DV_OVER_FLAGS) is highlighted red right here too, not just in the
-  // detail modal's table. The whole card is tappable (same "quick glance
-  // here, detail one tap in" pattern as every other dashboard card) into
-  // openFoodDetail() below, which is where the richer breakdown, the
-  // nutrition calculator's recommendation, and quick access to
-  // logging/adjusting goals now live — this flat grid stays a lightweight
-  // summary.
-  function renderFoodDashboardSection() {
-    document.getElementById('foodSectionHead').hidden = !state.settings.trackFood;
-    const wrap = document.getElementById('foodDashboardWrap');
-    wrap.hidden = !state.settings.trackFood;
-    if (!state.settings.trackFood) { wrap.innerHTML = ''; return; }
-    const totals = foodTotalsForDate(todayISO());
-    wrap.innerHTML = `
-      <div class="card food-dashboard-card">
-        <div class="food-totals-row">
-          ${trackedMacroKeys().map((k) => {
-            const goalInfo = macroGoalInfo(k);
-            const goalLine = (goalInfo.enabled && goalInfo.goal != null)
-              ? `<div class="food-total-goal">/ ${fmtMacroValue(k, goalInfo.goal)}</div>` : '';
-            const isOver = state.settings.showMacroGuidance && macroDvOver(k, totals[k]);
-            return `
-              <div class="food-total-item">
-                <div class="food-total-value${isOver ? ' is-over-dv' : ''}">${fmtMacroValue(k, totals[k])}</div>
-                ${goalLine}
-                <div class="food-total-label">${MACRO_LABELS[k]}</div>
-              </div>`;
-          }).join('')}
-        </div>
-      </div>`;
-    wireOpenable(wrap.querySelector('.food-dashboard-card'), openFoodDetail);
   }
 
   // Food's detail-on-demand modal — the dashboard card's flat totals grid
@@ -3272,9 +3360,7 @@
   // The day-streak stat tile's flame (see renderSummary) — Lucide `flame`.
   const FLAME_ICON_SVG = '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3q1 4 4 6.5t3 5.5a1 1 0 0 1-14 0 5 5 0 0 1 1-3 1 1 0 0 0 5 0c0-2-1.5-3-1.5-5q0-2 2.5-4"/></svg>';
 
-  // A small water-drop glyph next to each water "cup" quick-log button (see
-  // cupButtonsHtml) — there was no icon here at all before. Lucide
-  // `droplets`.
+  // The Water domain tab's glyph. Lucide `droplets`.
   const WATER_DROP_ICON_SVG = '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 16.3c2.2 0 4-1.83 4-4.05 0-1.16-.57-2.26-1.71-3.19S7.29 6.75 7 5.3c-.29 1.45-1.14 2.84-2.29 3.76S3 11.1 3 12.25c0 2.22 1.8 4.05 4 4.05z"/><path d="M12.56 6.6A10.97 10.97 0 0 0 14 3.02c.5 2.5 2 4.9 4 6.5s3 3.5 3 5.5a6.98 6.98 0 0 1-11.91 4.97"/></svg>';
 
   // The Food domain tab's glyph, and the setup wizard's Food interest tile.
@@ -3309,6 +3395,8 @@
   // Icons for the static `data-icon="name"` spots in index.html (and the trophy
   // on the Strength level card). Same Lucide style as every icon above.
   const lucide = (paths) => `<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${paths}</svg>`;
+  const CHEVRON_RIGHT_SVG = lucide('<path d="m9 18 6-6-6-6"/>');
+  const CHECK_ICON_SVG = lucide('<path d="M20 6 9 17l-5-5"/>');
   const STATIC_ICONS = {
     workout: DOMAIN_TAB_ICONS.workout, measurements: DOMAIN_TAB_ICONS.measurements, ruler: DOMAIN_TAB_ICONS.measurements,
     water: DOMAIN_TAB_ICONS.water, food: DOMAIN_TAB_ICONS.food, apple: APPLE_ICON_SVG,
@@ -3323,6 +3411,111 @@
   };
   function hydrateStaticIcons() {
     document.querySelectorAll('[data-icon]').forEach((el) => { el.innerHTML = STATIC_ICONS[el.dataset.icon] || ''; });
+  }
+
+  /* ============================== Item icons ==============================
+     Every exercise, tracker, water cup and saved food shows a small icon.
+     Which one is the user's choice, set in Manage (an optional `icon` key on
+     the item); with none chosen, the item's type picks a default, so
+     nothing saved earlier changes. [label, picker category, Lucide paths] */
+  const ITEM_ICONS = {
+    dumbbell: ['Dumbbell', 'training', '<path d="M14.4 14.4 9.6 9.6"/><path d="M18.657 21.485a2 2 0 1 1-2.829-2.828l-1.767 1.768a2 2 0 1 1-2.829-2.829l6.364-6.364a2 2 0 1 1 2.829 2.829l-1.768 1.767a2 2 0 1 1 2.828 2.829z"/><path d="m21.5 21.5-1.4-1.4"/><path d="M3.9 3.9 2.5 2.5"/><path d="M6.404 12.768a2 2 0 1 1-2.829-2.829l1.768-1.767a2 2 0 1 1-2.828-2.829l2.828-2.828a2 2 0 1 1 2.829 2.828l1.767-1.768a2 2 0 1 1 2.829 2.829z"/>'],
+    weight: ['Weight', 'training', '<circle cx="12" cy="5" r="3"/><path d="M6.5 8a2 2 0 0 0-1.905 1.46L2.1 18.5A2 2 0 0 0 4 21h16a2 2 0 0 0 1.925-2.54L19.4 9.5A2 2 0 0 0 17.48 8Z"/>'],
+    footprints: ['Footprints', 'training', '<path d="M4 16v-2.38C4 11.5 2.97 10.5 3 8c.03-2.72 1.49-6 4.5-6C9.37 2 10 3.8 10 5.5c0 3.11-2 5.66-2 8.68V16a2 2 0 1 1-4 0Z"/><path d="M20 20v-2.38c0-2.12 1.03-3.12 1-5.62-.03-2.72-1.49-6-4.5-6C14.63 6 14 7.8 14 9.5c0 3.11 2 5.66 2 8.68V20a2 2 0 1 0 4 0Z"/><path d="M16 17h4"/><path d="M4 13h4"/>'],
+    bike: ['Bike', 'training', '<circle cx="18.5" cy="17.5" r="3.5"/><circle cx="5.5" cy="17.5" r="3.5"/><circle cx="15" cy="5" r="1"/><path d="M12 17.5V14l-3-3 4-3 2 3h2"/>'],
+    mountain: ['Mountain', 'training', '<path d="m8 3 4 8 5-5 5 15H2L8 3z"/>'],
+    zap: ['Lightning', 'training', '<path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z"/>'],
+    flame: ['Flame', 'training', '<path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/>'],
+    activity: ['Activity', 'training', '<path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"/>'],
+    standing: ['Person standing', 'training', '<circle cx="12" cy="5" r="1"/><path d="m9 20 3-6 3 6"/><path d="m6 8 6 2 6-2"/><path d="M12 10v4"/>'],
+    timer: ['Timer', 'training', '<line x1="10" x2="14" y1="2" y2="2"/><line x1="12" x2="15" y1="14" y2="11"/><circle cx="12" cy="14" r="8"/>'],
+    waves: ['Waves', 'training', '<path d="M2 6c.6.5 1.2 1 2.5 1C7 7 7 5 9.5 5c2.6 0 2.4 2 5 2 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1"/><path d="M2 12c.6.5 1.2 1 2.5 1 2.5 0 2.5-2 5-2 2.6 0 2.4 2 5 2 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1"/><path d="M2 18c.6.5 1.2 1 2.5 1 2.5 0 2.5-2 5-2 2.6 0 2.4 2 5 2 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1"/>'],
+    target: ['Target', 'training', '<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/>'],
+    ruler: ['Ruler', 'body', '<path d="M21.3 15.3a2.4 2.4 0 0 1 0 3.4l-2.6 2.6a2.4 2.4 0 0 1-3.4 0L2.7 8.7a2.4 2.4 0 0 1 0-3.4l2.6-2.6a2.4 2.4 0 0 1 3.4 0Z"/><path d="m14.5 12.5 2-2"/><path d="m11.5 9.5 2-2"/><path d="m8.5 6.5 2-2"/><path d="m17.5 15.5 2-2"/>'],
+    heart: ['Heart', 'body', '<path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/>'],
+    moon: ['Moon', 'body', '<path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/>'],
+    bed: ['Bed', 'body', '<path d="M2 4v16"/><path d="M2 8h18a2 2 0 0 1 2 2v10"/><path d="M2 17h20"/><path d="M6 8v9"/>'],
+    sun: ['Sun', 'body', '<circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/>'],
+    clock: ['Clock', 'body', '<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>'],
+    droplets: ['Droplets', 'food', '<path d="M7 16.3c2.2 0 4-1.83 4-4.05 0-1.16-.57-2.26-1.71-3.19S7.29 6.75 7 5.3c-.29 1.45-1.14 2.84-2.29 3.76S3 11.1 3 12.25c0 2.22 1.8 4.05 4 4.05z"/><path d="M12.56 6.6A10.97 10.97 0 0 0 14 3.02c.5 2.5 2 4.9 4 6.5s3 3.5 3 5.5a6.98 6.98 0 0 1-11.91 4.97"/>'],
+    glass: ['Glass of water', 'food', '<path d="M15.2 22H8.8a2 2 0 0 1-2-1.79L5 3h14l-1.81 17.21A2 2 0 0 1 15.2 22Z"/><path d="M6 12a5 5 0 0 1 6 0 5 5 0 0 0 6 0"/>'],
+    apple: ['Apple', 'food', '<path d="M12 20.94c1.5 0 2.75 1.06 4 1.06 3 0 6-8 6-12.22A4.91 4.91 0 0 0 17 5c-2.22 0-4 1.44-5 2-1-.56-2.78-2-5-2a4.9 4.9 0 0 0-5 4.78C2 14 5 22 8 22c1.25 0 2.5-1.06 4-1.06Z"/><path d="M10 2c1 .5 2 2 2 5"/>'],
+    utensils: ['Utensils', 'food', '<path d="M3 2v7c0 1.1.9 2 2 2h4a2 2 0 0 0 2-2V2"/><path d="M7 2v20"/><path d="M21 15V2a5 5 0 0 0-5 5v6c0 1.1.9 2 2 2h3Zm0 0v7"/>'],
+    coffee: ['Coffee', 'food', '<path d="M10 2v2"/><path d="M14 2v2"/><path d="M16 8a1 1 0 0 1 1 1v8a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4V9a1 1 0 0 1 1-1h14a4 4 0 1 1 0 8h-1"/><path d="M6 2v2"/>'],
+    pill: ['Pill', 'food', '<path d="m10.5 20.5 10-10a4.95 4.95 0 1 0-7-7l-10 10a4.95 4.95 0 1 0 7 7Z"/><path d="m8.5 8.5 7 7"/>'],
+  };
+  const ITEM_ICON_CATEGORIES = [['all', 'All'], ['training', 'Training'], ['body', 'Body'], ['food', 'Food']];
+  const EXERCISE_DEFAULT_ICON = { weight: 'dumbbell', reps: 'activity', cardio: 'footprints', habit: 'standing' };
+
+  function itemIconSvg(key) { return lucide((ITEM_ICONS[key] || ITEM_ICONS.dumbbell)[2]); }
+  function itemIconHtml(key, small) {
+    return `<span class="item-icon${small ? ' item-icon-sm' : ''}" aria-hidden="true">${itemIconSvg(key)}</span>`;
+  }
+  function exerciseIconKey(ex) { return ex && ITEM_ICONS[ex.icon] ? ex.icon : (ex && EXERCISE_DEFAULT_ICON[ex.kind]) || 'dumbbell'; }
+  function trackerDefaultIcon(t) { return t && t.kind === 'sleep' ? 'moon' : t && t.unitKind === 'weight' ? 'weight' : 'ruler'; }
+  function trackerIconKey(t) { return t && ITEM_ICONS[t.icon] ? t.icon : trackerDefaultIcon(t); }
+  function cupIconKey(cup) { return cup && ITEM_ICONS[cup.icon] ? cup.icon : 'droplets'; }
+  function savedFoodIconKey(food) { return food && ITEM_ICONS[food.icon] ? food.icon : 'utensils'; }
+  const exerciseIconHtml = (ex, small) => itemIconHtml(exerciseIconKey(ex), small);
+  const trackerIconHtml = (t, small) => itemIconHtml(trackerIconKey(t), small);
+  const cupIconHtml = (cup, small) => itemIconHtml(cupIconKey(cup), small);
+  const savedFoodIconHtml = (food, small) => itemIconHtml(savedFoodIconKey(food), small);
+
+  // The "Icon" field of an Add/Edit form: a row showing the current icon
+  // that opens a grid to pick another. `getDefault` is what shows with
+  // nothing chosen (it can change as the form's type does); the returned
+  // `value()` is the chosen key, or null for the default.
+  function iconFieldHtml(id) {
+    return `
+      <div class="field">
+        <span class="field-label">Icon</span>
+        <button type="button" class="icon-field" id="${id}" aria-expanded="false"></button>
+        <div class="icon-picker" id="${id}Picker" hidden>
+          <input type="search" id="${id}Search" placeholder="Search icons" aria-label="Search icons" />
+          <div class="segmented" role="radiogroup" aria-label="Icon category">
+            ${ITEM_ICON_CATEGORIES.map(([k, label]) => `<button type="button" data-icon-cat="${k}" role="radio">${label}</button>`).join('')}
+          </div>
+          <div class="icon-grid" role="radiogroup" aria-label="Icons"></div>
+          <button type="button" class="btn btn-secondary btn-block" data-action="icon-default">Use default icon</button>
+        </div>
+      </div>`;
+  }
+  function wireIconField(id, getDefault, initial) {
+    let chosen = initial && ITEM_ICONS[initial] ? initial : null;
+    let category = 'all';
+    const row = document.getElementById(id);
+    const picker = document.getElementById(`${id}Picker`);
+    const search = document.getElementById(`${id}Search`);
+    const grid = picker.querySelector('.icon-grid');
+    const current = () => chosen || getDefault();
+    function paintRow() {
+      row.innerHTML = `${itemIconHtml(current(), true)}<span>${ITEM_ICONS[current()][0]}${chosen ? '' : ' (default)'}</span><span class="icon-field-action">Change ›</span>`;
+    }
+    function paintGrid() {
+      const q = search.value.trim().toLowerCase();
+      picker.querySelectorAll('[data-icon-cat]').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.iconCat === category)));
+      grid.innerHTML = Object.entries(ITEM_ICONS)
+        .filter(([, [label, cat]]) => (category === 'all' || cat === category) && label.toLowerCase().includes(q))
+        .map(([key, [label]]) => `<button type="button" class="icon-cell" data-icon-key="${key}" role="radio" aria-checked="${key === current()}" aria-label="${label}">${itemIconSvg(key)}</button>`).join('')
+        || '<p class="muted-text">No icons match.</p>';
+    }
+    function choose(key) {
+      chosen = key;
+      picker.hidden = true;
+      row.setAttribute('aria-expanded', 'false');
+      paintRow();
+    }
+    row.addEventListener('click', () => {
+      picker.hidden = !picker.hidden;
+      row.setAttribute('aria-expanded', String(!picker.hidden));
+      if (!picker.hidden) paintGrid();
+    });
+    search.addEventListener('input', paintGrid);
+    picker.querySelectorAll('[data-icon-cat]').forEach((b) => b.addEventListener('click', () => { category = b.dataset.iconCat; paintGrid(); }));
+    grid.addEventListener('click', (ev) => { const b = ev.target.closest('[data-icon-key]'); if (b) choose(b.dataset.iconKey); });
+    picker.querySelector('[data-action="icon-default"]').addEventListener('click', () => choose(null));
+    paintRow();
+    return { value: () => chosen, refresh: paintRow };
   }
 
   // Visible label per domain — "Body" rather than "Measurements" purely so
@@ -3566,6 +3759,7 @@
 
   function entrySummaryText(exercise, entry) {
     if (!exercise) return '';
+    if (exercise.kind === 'habit') return entry.time ? `Done · ${new Date(`2000-01-01T${entry.time}`).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}` : 'Done';
     if (exercise.kind === 'weight') {
       return (entry.sets || []).map((s) => `${round(Units.lbToDisplay(s.weight), 1)}${Units.weightUnitLabel()}×${s.reps}`).join(', ');
     }
@@ -3584,6 +3778,7 @@
     const ex = exerciseById(entry.exerciseId);
     return `
       <div class="entry-row" data-entry-id="${entry.id}">
+        ${exerciseIconHtml(ex, true)}
         <div class="entry-row-main">
           <div class="entry-row-title">${escapeHtml(ex ? ex.name : 'Deleted exercise')}</div>
           <div class="entry-row-sub">${escapeHtml(entrySummaryText(ex, entry))}${entry.note ? ` — “${escapeHtml(entry.note)}”` : ''}</div>
@@ -3602,6 +3797,7 @@
     const cup = e.cupId ? cupById(e.cupId) : null;
     return `
       <div class="entry-row" data-water-entry-id="${e.id}">
+        ${cupIconHtml(cup, true)}
         <div class="entry-row-main">
           <div class="entry-row-title">${cup ? escapeHtml(cup.name) : 'Custom amount'}</div>
           <div class="entry-row-sub">${fmtVolume(e.amountMl)}</div>
@@ -3652,6 +3848,7 @@
   function foodEntryRowHtml(e) {
     return `
       <div class="entry-row" data-food-entry-id="${e.id}">
+        ${savedFoodIconHtml(savedFoodMatching(e), true)}
         <div class="entry-row-main">
           <div class="entry-row-title">${macroSummaryText(e)}</div>
           ${e.note ? `<div class="entry-row-sub">“${escapeHtml(e.note)}”</div>` : ''}
@@ -3673,11 +3870,12 @@
   // hand-typed entry whose note happens to match one, which is the right
   // call too — no reason to offer a near-duplicate. Used only to hide the
   // "Save as a saved food" button below, never to block anything.
-  function foodEntryAlreadySaved(entry) {
-    if (!entry.note) return false;
+  function savedFoodMatching(entry) {
+    if (!entry.note) return null;
     const name = entry.note.trim().toLowerCase();
-    return state.food.savedFoods.some((f) => f.name.trim().toLowerCase() === name);
+    return state.food.savedFoods.find((f) => f.name.trim().toLowerCase() === name) || null;
   }
+  function foodEntryAlreadySaved(entry) { return !!savedFoodMatching(entry); }
 
   // Edit modal only shows currently-tracked macro fields (see
   // trackedMacroKeys) — a field that's off doesn't render an input at all,
@@ -3759,6 +3957,7 @@
     const cat = SAVED_FOOD_CATEGORIES.find((c) => c.value === (food.category || 'other'));
     return `
       <div class="entry-row is-manage" data-saved-food-id="${food.id}">
+        ${savedFoodIconHtml(food, true)}
         <div class="entry-row-main">
           <div class="entry-row-title">${escapeHtml(food.name)} ${cat ? `<span class="chip">${cat.label}</span>` : ''}</div>
           <div class="entry-row-sub">${macroSummaryText(food)}</div>
@@ -3808,6 +4007,7 @@
       <div class="form-card">
         <label class="field"><span class="field-label">Name</span>
           <input type="text" id="savedFoodName" value="${seed && seed.name ? escapeHtml(seed.name) : ''}" placeholder="e.g. Chicken breast, 6oz" maxlength="60" /></label>
+        ${iconFieldHtml('savedFoodIcon')}
         <div class="field">
           <span class="field-label">Category</span>
           <div class="segmented" id="savedFoodCategorySegmentedForm" role="radiogroup" aria-label="Category">
@@ -3824,6 +4024,7 @@
         ${editing ? `<button type="button" class="btn-text-danger" id="deleteSavedFoodBtn">Delete saved food</button>` : ''}
       </div>
     `);
+    const iconField = wireIconField('savedFoodIcon', () => 'utensils', seed && seed.icon);
     function setCategoryUI(val) {
       selectedCategory = val;
       document.querySelectorAll('#savedFoodCategorySegmentedForm button').forEach((btn) => {
@@ -3848,8 +4049,9 @@
         food.name = name;
         food.category = selectedCategory;
         Object.assign(food, values);
+        if (iconField.value()) food.icon = iconField.value(); else delete food.icon;
       } else {
-        state.food.savedFoods.push({ id: genId('savedfood'), name, category: selectedCategory, ...values });
+        state.food.savedFoods.push({ id: genId('savedfood'), name, category: selectedCategory, ...values, ...(iconField.value() && { icon: iconField.value() }) });
       }
       if (!save()) return;
       closeModal();
@@ -3923,6 +4125,7 @@
       const isCustomQty = !SAVED_FOOD_QTY_PRESETS.includes(savedFoodQty);
       return `
         <div class="entry-row saved-food-log-row" data-saved-food-id="${food.id}">
+          ${savedFoodIconHtml(food, true)}
           <div class="entry-row-main">
             <div class="entry-row-title">${escapeHtml(food.name)}</div>
             <div class="entry-row-sub">${macroSummaryText(food)}</div>
@@ -3999,6 +4202,7 @@
     const select = document.getElementById('logExercise');
     const ex = exerciseById(select.value);
     if (!ex) { toast('Pick an exercise first.'); return; }
+    if (ex.kind === 'habit') return;
     const fields = readDynamicFields(document.getElementById('logDynamicFields'), ex);
     if (fields && fields.error) { toast(fields.error); return; }
     if (!fields) { toast('Enter at least one value before saving.'); return; }
@@ -4247,6 +4451,9 @@
   // a real 'change' event) rather than duplicating what it does.
   function logExerciseFromDetail(exId) {
     closeModal();
+    openLogFor(exId);
+  }
+  function openLogFor(exId) {
     logCategory = 'workout';
     switchTab('log');
     const select = document.getElementById('logExercise');
@@ -4264,6 +4471,51 @@
 
   /* ============================== Exercise detail modal ============================== */
 
+  // A habit's detail: today's count, how often the target was met lately,
+  // and its entries (there is no trend chart — nothing to measure but "done").
+  function renderHabitDetail(ex) {
+    const goal = ex.goal || 1;
+    const entries = entriesFor(ex.id).slice().sort((a, b) => (b.date + b.id).localeCompare(a.date + a.id));
+    const perDay = {};
+    entries.forEach((e) => { perDay[e.date] = (perDay[e.date] || 0) + 1; });
+    let hit = 0;
+    for (let i = 0; i < 30; i++) {
+      const d = new Date(todayISO() + 'T00:00:00');
+      d.setDate(d.getDate() - i);
+      if ((perDay[localDateISO(d)] || 0) >= goal) hit++;
+    }
+    openModal(`
+      <div class="modal-title-row">
+        <h2 class="title-with-icon">${exerciseIconHtml(ex)}${escapeHtml(ex.name)}</h2>
+        <div class="modal-title-actions">
+          <button class="icon-btn" id="editExerciseBtn" aria-label="Edit exercise">${EDIT_ICON_SVG}</button>
+          <button class="modal-close" data-action="close-modal">${CLOSE_ICON_SVG}</button>
+        </div>
+      </div>
+      <div class="card">
+        <div class="ex-card-badge badge-standalone">${kindBadge(ex)}${escapeHtml(exerciseGoalSummary(ex))}</div>
+        ${habitPanelHtml(ex)}
+        <p class="muted-text">Target met on ${hit} of the last 30 days.</p>
+      </div>
+      <button type="button" class="btn btn-primary btn-block" id="habitDoneBtn">Done</button>
+      <div class="btn-row">
+        <button class="btn btn-secondary" id="archiveExerciseBtn">${ex.archived ? 'Unarchive' : 'Archive'}</button>
+      </div>
+      <div class="section-head"><h2>All entries</h2></div>
+      <div class="entry-list" id="exerciseEntryList">${entries.map((e) => entryRowHtml(e)).join('') || '<p class="muted-text">No entries yet.</p>'}</div>
+    `, { tall: true });
+    wireEntryRowClicks(document.getElementById('exerciseEntryList'));
+    document.getElementById('editExerciseBtn').addEventListener('click', () => openExerciseForm(ex.id));
+    document.getElementById('habitDoneBtn').addEventListener('click', () => logHabit(ex.id));
+    document.getElementById('archiveExerciseBtn').addEventListener('click', () => {
+      ex.archived = !ex.archived;
+      if (!save()) return;
+      closeModal();
+      toast(ex.archived ? 'Exercise archived' : 'Exercise unarchived');
+      renderAll();
+    });
+  }
+
   // `chartMetric` only matters for cardio exercises with two configured
   // goals — it selects which one the trend chart plots. It is ignored (and
   // defaults sensibly) for every other case, so existing callers that don't
@@ -4271,6 +4523,7 @@
   function renderExerciseDetail(exId, scale, chartMetric) {
     const ex = exerciseById(exId);
     if (!ex) return;
+    if (ex.kind === 'habit') { renderHabitDetail(ex); return; }
     const cardioMetrics = ex.kind === 'cardio' ? cardioMetricsOf(ex) : null;
     const activeMetric = cardioMetrics ? (cardioMetrics.includes(chartMetric) ? chartMetric : cardioMetrics[0]) : undefined;
 
@@ -4292,7 +4545,7 @@
 
     openModal(`
       <div class="modal-title-row">
-        <h2>${escapeHtml(ex.name)}</h2>
+        <h2 class="title-with-icon">${exerciseIconHtml(ex)}${escapeHtml(ex.name)}</h2>
         <div class="modal-title-actions">
           <button class="icon-btn" id="editExerciseBtn" aria-label="Edit exercise">${EDIT_ICON_SVG}</button>
           <button class="modal-close" data-action="close-modal">${CLOSE_ICON_SVG}</button>
@@ -4438,6 +4691,8 @@
         <label class="field"><span class="field-label">Name</span>
           <input type="text" id="exName" value="${ex ? escapeHtml(ex.name) : ''}" placeholder="e.g. Overhead Press" maxlength="60" /></label>
 
+        ${iconFieldHtml('exIcon')}
+
         <div class="field">
           <span class="field-label">Section</span>
           <div class="segmented" id="exSectionSegmented" role="radiogroup">
@@ -4450,10 +4705,12 @@
 
         <div class="field">
           <span class="field-label">Type${hasEntries ? ' (locked — has logged entries)' : ''}</span>
-          <div class="segmented" id="exKindSegmented" role="radiogroup">
-            <button type="button" data-kind="weight" role="radio" ${hasEntries && kind !== 'weight' ? 'disabled' : ''}>Weighted lift</button>
-            <button type="button" data-kind="reps" role="radio" ${hasEntries && kind !== 'reps' ? 'disabled' : ''}>Bodyweight reps</button>
-            <button type="button" data-kind="cardio" role="radio" ${hasEntries && kind !== 'cardio' ? 'disabled' : ''}>Cardio</button>
+          <div class="option-list" id="exKindList" role="radiogroup">
+            ${[['weight', 'Weighted lift', 'Sets, reps and weight'], ['reps', 'Bodyweight reps', 'Reps per session'], ['cardio', 'Cardio', 'Distance and time'], ['habit', 'Habit', 'Done N times a day']].map(([k, name, hint]) => `
+            <button type="button" class="option-row" data-kind="${k}" role="radio" ${hasEntries && kind !== k ? 'disabled' : ''}>
+              <span class="option-text"><span class="option-name">${name}</span><br><span class="option-hint">${hint}</span></span>
+              <span class="option-radio"></span>
+            </button>`).join('')}
           </div>
         </div>
 
@@ -4496,17 +4753,25 @@
     // may already have typed in.
     let selectedGoalMode = (ex && ex.goalMode) || 'fixed';
     let selectedGoalTier = (ex && ex.goalTier) || 'intermediate';
+    let selectedTimes = (ex && ex.kind === 'habit' && ex.goal) || 1;
+    let selectedRepeat = (ex && ex.repeat) || 'daily';
+    const iconField = wireIconField('exIcon', () => EXERCISE_DEFAULT_ICON[selectedKind] || 'dumbbell', ex && ex.icon);
 
     const SECTION_HINTS = {
-      goal: 'Shown as a full progress card on your home screen.',
-      daily: 'Something you’re aiming to do every day (push-ups, pull-ups, ...). Only shows on your home screen on a day you’ve actually logged it.',
+      goal: 'Shown on your home screen once logged today, with a full progress card in Progress.',
+      daily: 'Something you’re aiming to do every day (push-ups, pull-ups, ...). Always shown in Daily targets on your home screen.',
       accessory: 'Hidden from your home screen. Still loggable and viewable in History — for accessory/other exercises.',
+      habit: 'Habits are always daily targets.',
     };
 
     function setSectionUI(s) {
       selectedSection = s;
-      document.querySelectorAll('#exSectionSegmented button').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.section === s)));
-      document.getElementById('sectionHint').textContent = SECTION_HINTS[s];
+      const isHabit = selectedKind === 'habit';
+      document.querySelectorAll('#exSectionSegmented button').forEach((b) => {
+        b.setAttribute('aria-checked', String(b.dataset.section === s));
+        b.disabled = isHabit && b.dataset.section !== 'daily';
+      });
+      document.getElementById('sectionHint').textContent = isHabit ? SECTION_HINTS.habit : SECTION_HINTS[s];
     }
     function setRegionUI(r) {
       selectedRegion = r;
@@ -4591,6 +4856,19 @@
       if (selectedKind === 'weight') {
         wrap.innerHTML = weightGoalFieldHtml();
         wireWeightGoalField();
+      } else if (selectedKind === 'habit') {
+        wrap.innerHTML = `
+          <div class="field"><span class="field-label">Times per day</span>
+            <div class="segmented" id="exTimesSegmented" role="radiogroup">${[1, 2, 3].map((n) => `<button type="button" data-times="${n}" role="radio">${n}</button>`).join('')}</div></div>
+          <div class="field"><span class="field-label">Repeats</span>
+            <div class="segmented" id="exRepeatSegmented" role="radiogroup">${HABIT_REPEATS.map(([k, label]) => `<button type="button" data-repeat="${k}" role="radio">${label}</button>`).join('')}</div></div>`;
+        const paint = () => {
+          wrap.querySelectorAll('[data-times]').forEach((b) => b.setAttribute('aria-checked', String(Number(b.dataset.times) === selectedTimes)));
+          wrap.querySelectorAll('[data-repeat]').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.repeat === selectedRepeat)));
+        };
+        wrap.querySelectorAll('[data-times]').forEach((b) => b.addEventListener('click', () => { selectedTimes = Number(b.dataset.times); paint(); }));
+        wrap.querySelectorAll('[data-repeat]').forEach((b) => b.addEventListener('click', () => { selectedRepeat = b.dataset.repeat; paint(); }));
+        paint();
       } else if (selectedKind === 'reps') {
         const v = ex && ex.goal ? ex.goal : '';
         wrap.innerHTML = `<label class="field"><span class="field-label">Goal reps (single set)</span><input type="number" step="1" min="1" id="goalInput" value="${v}" placeholder="e.g. 20" /></label>`;
@@ -4615,11 +4893,13 @@
 
     function setKindUI(k) {
       selectedKind = k;
-      document.querySelectorAll('#exKindSegmented button').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.kind === k)));
+      document.querySelectorAll('#exKindList .option-row').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.kind === k)));
+      setSectionUI(k === 'habit' ? 'daily' : selectedSection);
+      iconField.refresh();
       renderGoalField();
     }
 
-    document.querySelectorAll('#exKindSegmented button').forEach((b) => {
+    document.querySelectorAll('#exKindList .option-row').forEach((b) => {
       b.addEventListener('click', () => { if (!b.disabled) setKindUI(b.dataset.kind); });
     });
     setKindUI(selectedKind);
@@ -4634,6 +4914,8 @@
       if (usingStandardGoal) {
         goal = computeStandardGoal(selectedLiftType, selectedGoalTier, currentBodyWeightLb(), state.profile.sex);
         if (goal == null) { toast('Log your body weight and set your sex in Settings → Profile first.'); return; }
+      } else if (selectedKind === 'habit') {
+        goal = selectedTimes;
       } else if (selectedKind === 'weight' || selectedKind === 'reps') {
         const raw = parseFloat(document.getElementById('goalInput').value);
         if (!Number.isNaN(raw) && raw > 0) {
@@ -4664,6 +4946,8 @@
           ex.paceGoal = paceGoal;
         }
         ex.goal = goal; // meaningful for weight/reps only; left null and unread for cardio
+        if (selectedKind === 'habit') ex.repeat = selectedRepeat; else delete ex.repeat;
+        if (iconField.value()) ex.icon = iconField.value(); else delete ex.icon;
       } else {
         const newEx = { id: genId('ex'), name, kind: selectedKind, section: selectedSection, goal, goalMode: 'fixed', goalTier: null, archived: false, createdAt: new Date().toISOString() };
         if (selectedKind === 'weight') {
@@ -4672,6 +4956,8 @@
           newEx.goalTier = usingStandardGoal ? selectedGoalTier : null;
         }
         if (selectedKind === 'cardio') { newEx.distanceGoal = distanceGoal; newEx.paceGoal = paceGoal; }
+        if (selectedKind === 'habit') newEx.repeat = selectedRepeat;
+        if (iconField.value()) newEx.icon = iconField.value();
         state.exercises.push(newEx);
       }
       if (!save()) return;
@@ -4717,6 +5003,7 @@
     const qualityText = tracker && tracker.kind === 'sleep' && m.quality != null ? ` · Quality ${fmtQuality(m.quality)}` : '';
     return `
       <div class="entry-row" data-measurement-id="${m.id}">
+        ${trackerIconHtml(tracker, true)}
         <div class="entry-row-main">
           <div class="entry-row-title">${escapeHtml(tracker ? tracker.name : 'Deleted tracker')}</div>
           <div class="entry-row-sub">${escapeHtml(valueText)}${qualityText}${m.note ? ` — “${escapeHtml(m.note)}”` : ''}</div>
@@ -4801,7 +5088,7 @@
       : '';
     openModal(`
       <div class="modal-title-row">
-        <h2>${escapeHtml(tracker.name)}</h2>
+        <h2 class="title-with-icon">${trackerIconHtml(tracker)}${escapeHtml(tracker.name)}</h2>
         <div class="modal-title-actions">
           <button class="icon-btn" id="editTrackerBtn" aria-label="Edit tracker">${EDIT_ICON_SVG}</button>
           <button class="modal-close" data-action="close-modal">${CLOSE_ICON_SVG}</button>
@@ -4898,6 +5185,8 @@
         <label class="field"><span class="field-label">Name</span>
           <input type="text" id="trkName" value="${tracker ? escapeHtml(tracker.name) : ''}" placeholder="e.g. Waist, Protein, Resting Heart Rate" maxlength="60" /></label>
 
+        ${iconFieldHtml('trkIcon')}
+
         <div class="field">
           <span class="field-label">Value type${isSleep ? ' (fixed — Sleep also tracks quality)' : hasEntries ? ' (locked — has logged entries)' : ''}</span>
           <div class="segmented" id="trkUnitKindSegmentedA" role="radiogroup">
@@ -4935,6 +5224,7 @@
     `);
 
     let selectedUnitKind = unitKind;
+    const iconField = wireIconField('trkIcon', () => trackerDefaultIcon({ kind: tracker && tracker.kind, unitKind: selectedUnitKind }), tracker && tracker.icon);
     let selectedDirection = direction;
     let selectedRatingMax = tracker && tracker.ratingMax ? tracker.ratingMax : 5;
     let selectedShowOnDashboard = tracker ? tracker.showOnDashboard !== false : true;
@@ -4952,6 +5242,7 @@
 
     function setUnitKindUI(k) {
       selectedUnitKind = k;
+      iconField.refresh();
       document.querySelectorAll('#trkUnitKindSegmentedA button, #trkUnitKindSegmentedB button').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.unitKind === k)));
       renderGoalField();
     }
@@ -4980,7 +5271,7 @@
       const unitLabel = selectedUnitKind === 'count' ? (document.getElementById('trkUnitLabelInput').value.trim() || null) : null;
       const rawGoal = parseFloat(document.getElementById('trkGoalInput').value);
       const hasGoal = !Number.isNaN(rawGoal) && document.getElementById('trkGoalInput').value !== '';
-      const fields = { unitKind: selectedUnitKind, unitLabel, ratingMax: selectedUnitKind === 'rating' ? selectedRatingMax : null, direction: selectedDirection, showOnDashboard: selectedShowOnDashboard };
+      const fields = { unitKind: selectedUnitKind, unitLabel, ratingMax: selectedUnitKind === 'rating' ? selectedRatingMax : null, direction: selectedDirection, showOnDashboard: selectedShowOnDashboard, ...(iconField.value() && { icon: iconField.value() }) };
       const canonicalGoal = hasGoal ? trackerCanonicalFromDisplay(Object.assign({}, tracker, fields), rawGoal) : null;
       if (editing) {
         // A baseline means "where you started, toward THIS goal" —
@@ -5002,6 +5293,7 @@
         const goalOrDirectionChanged = canonicalGoal != null
           && (tracker.baseline == null || canonicalGoal !== prevGoal || fields.direction !== prevDirection);
         Object.assign(tracker, { name }, fields, { goal: canonicalGoal });
+        if (!iconField.value()) delete tracker.icon;
         if (canonicalGoal == null) {
           tracker.baseline = null;
         } else if (goalOrDirectionChanged) {
@@ -5045,6 +5337,7 @@
   function cupRowHtml(cup) {
     return `
       <div class="entry-row is-manage" data-cup-id="${cup.id}">
+        ${cupIconHtml(cup, true)}
         <div class="entry-row-main">
           <div class="entry-row-title">${escapeHtml(cup.name)}</div>
           <div class="entry-row-sub">${fmtVolume(cup.amountMl)}</div>
@@ -5063,12 +5356,14 @@
       <div class="form-card">
         <label class="field"><span class="field-label">Name</span>
           <input type="text" id="cupName" value="${cup ? escapeHtml(cup.name) : ''}" placeholder="e.g. Water bottle" maxlength="40" /></label>
+        ${iconFieldHtml('cupIcon')}
         <label class="field"><span class="field-label">Amount (${Units.volumeUnitLabel()})</span>
           <input type="number" step="any" min="0" id="cupAmount" value="${cup ? round(Units.mlToDisplay(cup.amountMl), 1) : ''}" placeholder="e.g. 16" /></label>
         <button type="button" class="btn btn-primary btn-block" id="saveCupBtn">${editing ? 'Save changes' : 'Add cup'}</button>
         ${editing ? `<button type="button" class="btn-text-danger" id="deleteCupBtn">Delete cup</button>` : ''}
       </div>
     `);
+    const iconField = wireIconField('cupIcon', () => 'droplets', cup && cup.icon);
     document.getElementById('saveCupBtn').addEventListener('click', () => {
       const name = document.getElementById('cupName').value.trim();
       const raw = parseFloat(document.getElementById('cupAmount').value);
@@ -5078,8 +5373,9 @@
       if (editing) {
         cup.name = name;
         cup.amountMl = amountMl;
+        if (iconField.value()) cup.icon = iconField.value(); else delete cup.icon;
       } else {
-        state.water.cups.push({ id: genId('cup'), name, amountMl });
+        state.water.cups.push({ id: genId('cup'), name, amountMl, ...(iconField.value() && { icon: iconField.value() }) });
       }
       if (!save()) return;
       closeModal();
@@ -5298,6 +5594,7 @@
       if (!groups[sec].length) return '';
       return `<div class="manage-group-label">${SECTION_LABELS[sec]}</div>` + groups[sec].map((ex) => `
         <div class="entry-row is-manage${ex.archived ? ' is-toggled-off' : ''}" data-exercise-id="${ex.id}">
+          ${exerciseIconHtml(ex, true)}
           <div class="entry-row-main">
             <div class="entry-row-title">${escapeHtml(ex.name)} ${ex.archived ? '<span class="chip chip-archived">archived</span>' : ''}</div>
             <div class="entry-row-sub">${kindBadge(ex)}${exerciseGoalSummary(ex)}</div>
@@ -5322,6 +5619,7 @@
   function trackerManageRowHtml(tracker) {
     return `
       <div class="entry-row is-manage${tracker.archived ? ' is-toggled-off' : ''}" data-tracker-id="${tracker.id}">
+        ${trackerIconHtml(tracker, true)}
         <div class="entry-row-main">
           <div class="entry-row-title">${escapeHtml(tracker.name)} ${tracker.archived ? '<span class="chip chip-archived">archived</span>' : ''}${tracker.showOnDashboard === false ? '<span class="chip">hidden from dashboard</span>' : ''}</div>
           <div class="entry-row-sub">${UNIT_KIND_LABELS[tracker.unitKind] || ''}${tracker.goal != null ? ` · ${trackerGoalLabel(tracker)}` : ' · no goal set'}</div>
@@ -5416,7 +5714,7 @@
      hand to runMigrations(). Not a full re-implementation of every rule in
      the app (e.g. it won't catch a negative water goal) — it exists to
      reject garbage and hostile input, not to replace normal validation. */
-  const VALID_EX_KINDS = new Set(['weight', 'reps', 'cardio']);
+  const VALID_EX_KINDS = new Set(['weight', 'reps', 'cardio', 'habit']);
   const VALID_TRACKER_KINDS = new Set(['metric', 'sleep']);
   const VALID_DIRECTIONS = new Set(['up', 'down']);
   const VALID_SEX = new Set(['male', 'female']);

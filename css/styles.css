@@ -28,13 +28,14 @@
   --accent:          #2a78d6;   /* THE app color — meter fill, buttons, links, active tab */
   --accent-track:    #b7d3f6;   /* the unfilled part of a progress meter (a lighter step of --accent) */
   --accent-strong:   #184f95;   /* a darker step of --accent, currently unused but kept for contrast needs */
-  --good:            #0ca30c;   /* "goal reached" green */
-  --good-bg:         #e4f5e4;   /* unused background tint for --good, kept for future use */
+  --good:            #2f9a5c;   /* "goal reached" green */
+  --good-bg:         #e3f3ea;   /* unused background tint for --good, kept for future use */
   --warning:         #fab219;   /* the BMI standards table's "Overweight" category dot */
   --critical:        #d03b3b;   /* delete/danger buttons */
   --critical-bg:     #fbe7e6;   /* the soft red background behind a danger button */
   --dot-body:        #8b5cf6;   /* History calendar's "body measurement logged" dot (workout reuses --good, water reuses --accent) */
   --dot-food:        #d9852b;   /* History calendar's "food logged" dot */
+  --streak:          #e8622c;   /* the Home streak card's flame, number and glow */
 
   --radius-sm: 10px;  /* inputs, small buttons */
   --radius-md: 14px;  /* rows, meters */
@@ -60,13 +61,14 @@
     --accent:          #3987e5;
     --accent-track:    #184f95;
     --accent-strong:   #86b6ef;
-    --good:            #0ca30c;
-    --good-bg:         rgba(12,163,12,0.16);
+    --good:            #4dba7f;
+    --good-bg:         rgba(77,186,127,0.16);
     --warning:         #fab219;
     --critical:        #e66767;
     --critical-bg:     rgba(224,90,90,0.16);
     --dot-body:        #a78bfa;
     --dot-food:        #e69a4a;
+    --streak:          #e8622c;
   }
 }
 :root[data-theme="dark"] {
@@ -84,13 +86,14 @@
   --accent:          #3987e5;
   --accent-track:    #184f95;
   --accent-strong:   #86b6ef;
-  --good:            #0ca30c;
-  --good-bg:         rgba(12,163,12,0.16);
+  --good:            #4dba7f;
+  --good-bg:         rgba(77,186,127,0.16);
   --warning:         #fab219;
   --critical:        #e66767;
   --critical-bg:     rgba(224,90,90,0.16);
   --dot-body:        #a78bfa;
   --dot-food:        #e69a4a;
+  --streak:          #e8622c;
 }
 
 /* ============ Base ============ */
@@ -229,29 +232,6 @@ button { font-family: inherit; }
 .section-head { margin-bottom: -6px; }
 .section-head h2 { font-size: 16px; font-weight: 700; }
 
-/* A lighter-weight sub-heading for the two rows inside "Today" (see
-   view-dashboard) — one notch quieter than a full .section-head, since
-   these aren't top-level dashboard sections, just labeling which part of
-   "Today" a card belongs to. */
-.subhead { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); margin: 14px 2px 8px; }
-.subhead:first-child { margin-top: 0; }
-
-/* ============ Today: needs-attention prompts ============
-   A compact "log it" row for a dashboard tracker (Weight, Sleep, or any
-   custom one) that hasn't been logged yet today — see renderTodayAttention
-   in app.js. Dashed border (vs. a card's solid one) marks it as a pending
-   to-do rather than a normal card; it disappears from here the moment
-   that tracker gets an entry for today, same as it always could via
-   Log/History/Manage regardless of whether it shows here. */
-.prompt-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 4px; }
-.prompt-row {
-  display: flex; align-items: center; justify-content: space-between; gap: 10px;
-  background: var(--surface-1); border: 1px dashed var(--border);
-  border-radius: var(--radius-md); padding: 10px 12px;
-}
-.prompt-row-name { font-size: 13.5px; font-weight: 600; }
-.prompt-row-sub { font-size: 11px; color: var(--muted); }
-
 /* ============ Domain tabs (Workout / Body / Water / Food) ============
    Log/History/Manage's top-level category switcher used to be a small
    inline pill row squeezed next to the section title — on a narrow phone
@@ -300,35 +280,103 @@ button { font-family: inherit; }
    "this can't be touched." */
 .is-toggled-off { opacity: 0.5; }
 
-/* ============ Summary row ============ */
-.summary-row {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 10px;
+/* ============ Item icon ============
+   The small monochrome circle in front of an exercise, tracker, cup or
+   saved food. Which glyph it shows is the user's choice in Manage (see
+   ITEM_ICONS in app.js); a plain 36px circle in Home's rows, 28px (-sm)
+   everywhere denser. */
+.item-icon { flex: none; display: flex; align-items: center; justify-content: center; width: 36px; height: 36px; border-radius: 50%; background: var(--surface-2); color: var(--text-secondary); }
+.item-icon .icon { width: 18px; height: 18px; }
+.item-icon-sm { width: 28px; height: 28px; }
+.item-icon-sm .icon { width: 16px; height: 16px; }
+
+/* ============ Home: streak card ============
+   One button for the streak and the last 7 days; opens History. Lit with a
+   warm glow while a streak is alive, plain gray at zero. */
+.streak-card { display: block; width: 100%; padding: 18px 16px 16px; text-align: left; font: inherit; color: inherit; cursor: pointer; background: var(--surface-1); border: 1px solid var(--border); border-radius: var(--radius-lg); }
+.streak-card.is-hot {
+  background: linear-gradient(160deg, color-mix(in srgb, var(--warning) 22%, transparent), color-mix(in srgb, var(--streak) 16%, transparent) 55%, color-mix(in srgb, var(--streak) 4%, transparent)), var(--surface-1);
+  border-color: color-mix(in srgb, var(--streak) 38%, transparent);
+  box-shadow: 0 0 28px color-mix(in srgb, var(--streak) 14%, transparent);
 }
-.stat-tile {
-  background: var(--surface-1);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  padding: 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.stat-tile .value { font-size: 22px; font-weight: 600; display: flex; align-items: center; gap: 4px; }
-.stat-tile .label { font-size: 12px; color: var(--text-secondary); }
-/* The day-streak tile lights up with a warm gradient + a flame icon (see
-   renderSummary) once there's an active streak to show off — dormant
-   (streak 0) it stays a plain tile, same as the days-logged one. */
-.stat-tile.is-streak-hot { background: linear-gradient(160deg, rgba(250,178,25,0.18), rgba(232,98,44,0.14)); border-color: rgba(232,98,44,0.35); }
-.stat-tile.is-streak-hot .value { color: #e8622c; }
-.stat-tile .value .icon { width: 18px; height: 18px; flex: none; }
-/* A tiny rolling-7-day "did I log something" strip under the weekly count
-   — same spirit as a GitHub contribution row, just two states (on/off)
-   instead of a heat gradient. */
-.heat-strip { display: flex; gap: 4px; margin-top: 4px; }
-.heat-day { width: 14px; height: 14px; border-radius: 4px; background: var(--surface-2); border: 1px solid var(--border); }
-.heat-day.on { background: var(--accent); border-color: var(--accent); }
+.streak-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.streak-main { display: flex; align-items: center; gap: 10px; }
+.streak-main .icon { width: 30px; height: 30px; color: var(--muted); }
+.streak-num { font-size: 40px; font-weight: 800; line-height: 1; color: var(--muted); }
+.streak-label { font-size: 14px; font-weight: 600; color: var(--text-secondary); }
+.is-hot .streak-main .icon, .is-hot .streak-num { color: var(--streak); }
+.streak-week-text { display: flex; align-items: center; gap: 2px; font-size: 13px; color: var(--text-secondary); }
+.streak-week-text .icon { width: 16px; height: 16px; color: var(--muted); }
+.streak-week { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; margin-top: 14px; text-align: center; }
+.streak-day { display: flex; flex-direction: column; align-items: center; gap: 6px; font-size: 11px; color: var(--text-secondary); }
+.streak-dot { display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 50%; border: 1px solid var(--gridline); color: var(--muted); }
+.streak-dot.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.streak-dot .icon { width: 14px; height: 14px; }
+
+/* ============ Home: glance rows ============
+   Every Home section is one card of compact rows: icon, name, value, a thin
+   meter, and an optional action. Reaching the goal turns the row green;
+   the action stays so more can still be logged. */
+.glance-row { display: flex; align-items: center; gap: 12px; padding: 10px 16px; min-height: 56px; }
+.glance-row + .glance-row { border-top: 1px solid var(--gridline); }
+.glance-open { display: flex; flex: 1; align-items: center; gap: 12px; min-width: 0; }
+.glance-open[role="button"] { cursor: pointer; }
+.glance-row-stack { flex-direction: column; align-items: stretch; gap: 12px; }
+.glance-head { display: flex; align-items: center; gap: 12px; }
+.glance-main { flex: 1; min-width: 0; }
+.glance-line { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.glance-name { min-width: 0; font-size: 15px; font-weight: 600; }
+.glance-value { display: inline-flex; align-items: center; gap: 4px; font-size: 15px; font-weight: 600; white-space: nowrap; }
+.glance-row .glance-value .muted-text { display: inline; font-size: 13px; font-weight: 400; }
+.glance-value .icon { width: 14px; height: 14px; }
+.glance-sub { font-size: 13px; color: var(--text-secondary); }
+.glance-row.is-complete .glance-value { color: var(--good); }
+.glance-open > .icon { flex: none; width: 16px; height: 16px; color: var(--muted); }
+.glance-btn { position: relative; flex: none; min-width: 56px; min-height: 36px; padding: 0 14px; }
+.glance-btn::after { content: ''; position: absolute; inset: -4px; }
+.glance-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.glance-actions .btn { flex: 1 1 auto; min-height: 40px; padding: 0 8px; font-size: 13px; white-space: nowrap; }
+.meter-sm { height: 6px; margin-top: 7px; }
+.meter-segs { display: flex; gap: 6px; margin-top: 7px; }
+.meter-seg { flex: 1; height: 6px; border-radius: 999px; background: var(--accent-track); }
+.meter-seg.on { background: var(--accent); }
+.is-complete .meter-seg.on { background: var(--good); }
+
+/* ============ Option list ============
+   Radio rows for a choice of four or more (a segmented control gets busy
+   past three); each row can carry a one-line hint. */
+.option-list { border: 1px solid var(--border); border-radius: var(--radius-md); overflow: hidden; }
+.option-row { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 52px; padding: 6px 14px; text-align: left; font: inherit; color: inherit; background: var(--surface-1); border: none; cursor: pointer; }
+.option-row + .option-row { border-top: 1px solid var(--gridline); }
+.option-row:disabled { opacity: 0.5; cursor: default; }
+.option-text { flex: 1; min-width: 0; }
+.option-name { font-size: 15px; font-weight: 600; }
+.option-hint { font-size: 12px; color: var(--text-secondary); }
+.option-radio { flex: none; width: 20px; height: 20px; border-radius: 50%; border: 2px solid var(--muted); }
+.option-row[aria-checked="true"] .option-radio { border: 6px solid var(--accent); background: #fff; }
+
+/* ============ Icon field and picker ============
+   "Icon" in the Add/Edit forms: a row showing the current icon that opens
+   a grid to choose another. */
+.icon-field { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 44px; padding: 0 14px; font: inherit; font-size: 15px; color: var(--text-primary); text-align: left; background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-sm); cursor: pointer; }
+.icon-field .item-icon { background: var(--surface-1); }
+.icon-field-action { margin-left: auto; font-size: 13px; color: var(--muted); }
+.icon-picker { display: flex; flex-direction: column; gap: 12px; }
+.icon-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; }
+.icon-cell { display: flex; align-items: center; justify-content: center; height: 52px; color: var(--text-primary); background: var(--surface-1); border: 1px solid var(--border); border-radius: var(--radius-md); cursor: pointer; }
+.icon-cell .icon { width: 22px; height: 22px; }
+.icon-cell[aria-checked="true"] { color: var(--accent); background: var(--accent-track); border: 2px solid var(--accent); }
+
+/* ============ Habit (Log screen) ============ */
+.habit-panel { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 8px 0 16px; text-align: center; }
+.habit-hint { margin-top: 10px; text-align: center; }
+.habit-count { font-size: 40px; font-weight: 800; line-height: 1; }
+.habit-count .muted-text { font-size: 18px; font-weight: 500; }
+.habit-dots { display: flex; gap: 8px; }
+.habit-dot { width: 12px; height: 12px; border-radius: 50%; background: var(--accent-track); }
+.habit-dot.on { background: var(--accent); }
+/* A habit is logged with the one Done button, so the Log form drops its date, note and Save. */
+#logForm.is-habit > .field:not(:first-child), #logForm.is-habit > [type="submit"] { display: none; }
 
 /* ============ Card grid / exercise cards ============ */
 .card-grid { display: flex; flex-direction: column; gap: 12px; }
@@ -341,9 +389,9 @@ button { font-family: inherit; }
 /* A `›` disclosure hint (plus role=button/tabindex, wired in JS) makes it
    clear these cards open something even without a visible cursor, which a
    touch device never shows. */
-.ex-card, .food-dashboard-card { cursor: pointer; position: relative; padding-right: 34px; }
-.ex-card:focus-visible, .daily-row:focus-visible, .food-dashboard-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.ex-card::after, .daily-row::after, .food-dashboard-card::after {
+.ex-card { cursor: pointer; position: relative; padding-right: 34px; }
+.ex-card:focus-visible, .glance-open[role="button"]:focus-visible, .streak-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ex-card::after {
   content: '\203A';
   position: absolute;
   right: 14px;
@@ -354,8 +402,8 @@ button { font-family: inherit; }
   font-weight: 600;
   pointer-events: none;
 }
-.ex-card-top { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
-.ex-card-name { font-size: 16px; font-weight: 600; }
+.ex-card-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.ex-card-name { display: flex; align-items: center; gap: 10px; font-size: 16px; font-weight: 600; }
 .ex-card-badge {
   font-size: 11px;
   color: var(--text-secondary);
@@ -423,26 +471,6 @@ button { font-family: inherit; }
   text-transform: uppercase;
   letter-spacing: 0.03em;
 }
-
-/* ============ Daily target compact rows ============ */
-.daily-list { display: flex; flex-direction: column; gap: 6px; }
-.daily-row {
-  background: var(--surface-1);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  padding: 10px 30px 10px 14px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  cursor: pointer;
-  position: relative;
-}
-.daily-row-main { min-width: 0; }
-.daily-row-name { font-size: 13px; font-weight: 600; }
-.daily-row-sub { font-size: 11.5px; color: var(--text-secondary); }
-.daily-row-goal { font-size: 15px; font-weight: 600; white-space: nowrap; }
-.daily-row-goal .muted-text { font-size: 12px; font-weight: 500; }
 
 /* ============ Suggestion card (progressive overload) ============ */
 .suggestion-card { background: var(--surface-2); border: none; cursor: pointer; }
@@ -516,20 +544,7 @@ button { font-family: inherit; }
 .standards-preview-row .pct { font-size: 11.5px; font-weight: 400; }
 .standards-preview-row.over .pct { font-weight: 700; }
 
-/* Today's food dashboard card — a grid of macro totals, each with its
-   value stacked over its label, mirroring how ex-card-current/goal read.
-   Grid (not flex-wrap) so a partial last row (e.g. 7 items -> 4 + 3)
-   still aligns to the same column widths instead of one orphan item
-   stretching to fill the whole row. */
-.food-totals-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px 4px; }
-.food-total-item { text-align: center; }
-.food-total-value { font-size: 18px; font-weight: 600; }
-/* Same red-flag treatment as the guidance table's .over rows, mirrored here
-   so a value past its DV is visible at a glance without opening the food
-   detail modal — see renderFoodDashboardSection. */
-.food-total-value.is-over-dv { color: var(--critical); }
-.food-total-goal { font-size: 11px; color: var(--text-secondary); }
-.food-total-label { font-size: 12px; color: var(--text-secondary); margin-top: 2px; }
+.is-over-dv { color: var(--critical); }
 
 .empty-state {
   text-align: center;
@@ -766,7 +781,7 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 1p
   gap: 10px;
   cursor: pointer;
 }
-.entry-row-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.entry-row-main { display: flex; flex: 1; flex-direction: column; gap: 2px; min-width: 0; }
 .entry-row-title { font-size: 14px; font-weight: 600; }
 .entry-row-sub { font-size: 12px; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .entry-row-date { font-size: 12px; color: var(--muted); white-space: nowrap; }
@@ -941,6 +956,7 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 1p
    other section gap in the app before this fix. */
 .modal-title-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .modal-title-row h2 { font-size: 18px; }
+.title-with-icon { display: flex; align-items: center; gap: 10px; }
 /* Groups the title row's action icons (Edit, then ✕) so a detail modal
    can offer Edit right where the title already is — the "more convenient
    place" for it than a full-width button buried below the fold — without
