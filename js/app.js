@@ -3420,31 +3420,62 @@
      nothing saved earlier changes. [label, picker category, Lucide paths] */
   const ITEM_ICONS = {
     dumbbell: ['Dumbbell', 'training', '<path d="M14.4 14.4 9.6 9.6"/><path d="M18.657 21.485a2 2 0 1 1-2.829-2.828l-1.767 1.768a2 2 0 1 1-2.829-2.829l6.364-6.364a2 2 0 1 1 2.829 2.829l-1.768 1.767a2 2 0 1 1 2.828 2.829z"/><path d="m21.5 21.5-1.4-1.4"/><path d="M3.9 3.9 2.5 2.5"/><path d="M6.404 12.768a2 2 0 1 1-2.829-2.829l1.768-1.767a2 2 0 1 1-2.828-2.829l2.828-2.828a2 2 0 1 1 2.829 2.828l1.767-1.768a2 2 0 1 1 2.829 2.829z"/>'],
-    weight: ['Weight', 'training', '<circle cx="12" cy="5" r="3"/><path d="M6.5 8a2 2 0 0 0-1.905 1.46L2.1 18.5A2 2 0 0 0 4 21h16a2 2 0 0 0 1.925-2.54L19.4 9.5A2 2 0 0 0 17.48 8Z"/>'],
+    weight: ['Kettlebell', 'training', '<circle cx="12" cy="5" r="3"/><path d="M6.5 8a2 2 0 0 0-1.905 1.46L2.1 18.5A2 2 0 0 0 4 21h16a2 2 0 0 0 1.925-2.54L19.4 9.5A2 2 0 0 0 17.48 8Z"/>'],
+    biceps: ['Strength', 'training', '<path d="M12.409 13.017A5 5 0 0 1 22 15c0 3.866-4 7-9 7-4.077 0-8.153-.82-10.371-2.462-.426-.316-.631-.832-.62-1.362C2.118 12.723 2.627 2 10 2a3 3 0 0 1 3 3 2 2 0 0 1-2 2c-1.105 0-1.64-.444-2-1"/><path d="M15 14a5 5 0 0 0-7.584 2"/><path d="M9.964 6.825C8.019 7.977 9.5 13 8 15"/>'],
     footprints: ['Footprints', 'training', '<path d="M4 16v-2.38C4 11.5 2.97 10.5 3 8c.03-2.72 1.49-6 4.5-6C9.37 2 10 3.8 10 5.5c0 3.11-2 5.66-2 8.68V16a2 2 0 1 1-4 0Z"/><path d="M20 20v-2.38c0-2.12 1.03-3.12 1-5.62-.03-2.72-1.49-6-4.5-6C14.63 6 14 7.8 14 9.5c0 3.11 2 5.66 2 8.68V20a2 2 0 1 0 4 0Z"/><path d="M16 17h4"/><path d="M4 13h4"/>'],
     bike: ['Bike', 'training', '<circle cx="18.5" cy="17.5" r="3.5"/><circle cx="5.5" cy="17.5" r="3.5"/><circle cx="15" cy="5" r="1"/><path d="M12 17.5V14l-3-3 4-3 2 3h2"/>'],
     mountain: ['Mountain', 'training', '<path d="m8 3 4 8 5-5 5 15H2L8 3z"/>'],
-    zap: ['Lightning', 'training', '<path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z"/>'],
+    waves: ['Waves', 'training', '<path d="M2 6c.6.5 1.2 1 2.5 1C7 7 7 5 9.5 5c2.6 0 2.4 2 5 2 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1"/><path d="M2 12c.6.5 1.2 1 2.5 1 2.5 0 2.5-2 5-2 2.6 0 2.4 2 5 2 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1"/><path d="M2 18c.6.5 1.2 1 2.5 1 2.5 0 2.5-2 5-2 2.6 0 2.4 2 5 2 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1"/>'],
     flame: ['Flame', 'training', '<path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/>'],
+    zap: ['Lightning', 'training', '<path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z"/>'],
     activity: ['Activity', 'training', '<path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"/>'],
     standing: ['Person standing', 'training', '<circle cx="12" cy="5" r="1"/><path d="m9 20 3-6 3 6"/><path d="m6 8 6 2 6-2"/><path d="M12 10v4"/>'],
     timer: ['Timer', 'training', '<line x1="10" x2="14" y1="2" y2="2"/><line x1="12" x2="15" y1="14" y2="11"/><circle cx="12" cy="14" r="8"/>'],
-    waves: ['Waves', 'training', '<path d="M2 6c.6.5 1.2 1 2.5 1C7 7 7 5 9.5 5c2.6 0 2.4 2 5 2 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1"/><path d="M2 12c.6.5 1.2 1 2.5 1 2.5 0 2.5-2 5-2 2.6 0 2.4 2 5 2 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1"/><path d="M2 18c.6.5 1.2 1 2.5 1 2.5 0 2.5-2 5-2 2.6 0 2.4 2 5 2 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1"/>'],
     target: ['Target', 'training', '<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/>'],
+    trophy: ['Trophy', 'training', '<path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/>'],
+    medal: ['Medal', 'training', '<path d="M7.21 15 2.66 7.14a2 2 0 0 1 .13-2.2L4.4 2.8A2 2 0 0 1 6 2h12a2 2 0 0 1 1.6.8l1.6 2.14a2 2 0 0 1 .14 2.2L16.79 15"/><path d="M11 12 5.12 2.2"/><path d="m13 12 5.88-9.8"/><path d="M8 7h8"/><circle cx="12" cy="17" r="5"/><path d="M12 18v-2h-.5"/>'],
+    route: ['Route', 'training', '<circle cx="6" cy="19" r="3"/><path d="M9 19h8.5a3.5 3.5 0 0 0 0-7h-11a3.5 3.5 0 0 1 0-7H15"/><circle cx="18" cy="5" r="3"/>'],
+    gauge: ['Speed', 'training', '<path d="m12 14 4-4"/><path d="M3.34 19a10 10 0 1 1 17.32 0"/>'],
+    flag: ['Flag', 'training', '<path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" x2="4" y1="22" y2="15"/>'],
+    scale: ['Body scale', 'body', '<rect width="18" height="18" x="3" y="3" rx="4"/><path d="M8 9.5a5.5 5.5 0 0 1 8 0"/><path d="m12 10 1.6-2"/>'],
     ruler: ['Ruler', 'body', '<path d="M21.3 15.3a2.4 2.4 0 0 1 0 3.4l-2.6 2.6a2.4 2.4 0 0 1-3.4 0L2.7 8.7a2.4 2.4 0 0 1 0-3.4l2.6-2.6a2.4 2.4 0 0 1 3.4 0Z"/><path d="m14.5 12.5 2-2"/><path d="m11.5 9.5 2-2"/><path d="m8.5 6.5 2-2"/><path d="m17.5 15.5 2-2"/>'],
     heart: ['Heart', 'body', '<path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/>'],
+    heartpulse: ['Heart rate', 'body', '<path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/><path d="M3.22 12H9.5l.5-1 2 4.5 2-7 1.5 3.5h5.27"/>'],
     moon: ['Moon', 'body', '<path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/>'],
     bed: ['Bed', 'body', '<path d="M2 4v16"/><path d="M2 8h18a2 2 0 0 1 2 2v10"/><path d="M2 17h20"/><path d="M6 8v9"/>'],
     sun: ['Sun', 'body', '<circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/>'],
     clock: ['Clock', 'body', '<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>'],
+    brain: ['Brain', 'body', '<path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"/><path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z"/><path d="M15 13a4.5 4.5 0 0 1-3-4 4.5 4.5 0 0 1-3 4"/><path d="M17.599 6.5a3 3 0 0 0 .399-1.375"/><path d="M6.003 5.125A3 3 0 0 0 6.401 6.5"/><path d="M3.477 10.896a4 4 0 0 1 .585-.396"/><path d="M19.938 10.5a4 4 0 0 1 .585.396"/><path d="M6 18a4 4 0 0 1-1.967-.516"/><path d="M19.967 17.484A4 4 0 0 1 18 18"/>'],
+    smile: ['Smile', 'body', '<circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" x2="9.01" y1="9" y2="9"/><line x1="15" x2="15.01" y1="9" y2="9"/>'],
+    thermometer: ['Thermometer', 'body', '<path d="M14 4v10.54a4 4 0 1 1-4 0V4a2 2 0 0 1 4 0Z"/>'],
+    stethoscope: ['Stethoscope', 'body', '<path d="M11 2v2"/><path d="M5 2v2"/><path d="M5 3H4a2 2 0 0 0-2 2v4a6 6 0 0 0 12 0V5a2 2 0 0 0-2-2h-1"/><path d="M8 15a6 6 0 0 0 12 0v-3"/><circle cx="20" cy="10" r="2"/>'],
+    eye: ['Eye', 'body', '<path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"/><circle cx="12" cy="12" r="3"/>'],
+    bone: ['Bone', 'body', '<path d="M17 10c.7-.7 1.69 0 2.5 0a2.5 2.5 0 1 0 0-5 .5.5 0 0 1-.5-.5 2.5 2.5 0 1 0-5 0c0 .81.7 1.8 0 2.5l-7 7c-.7.7-1.69 0-2.5 0a2.5 2.5 0 0 0 0 5c.28 0 .5.22.5.5a2.5 2.5 0 1 0 5 0c0-.81-.7-1.8 0-2.5Z"/>'],
+    pill: ['Pill', 'body', '<path d="m10.5 20.5 10-10a4.95 4.95 0 1 0-7-7l-10 10a4.95 4.95 0 1 0 7 7Z"/><path d="m8.5 8.5 7 7"/>'],
+    hand: ['Hand', 'body', '<path d="M18 11V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2"/><path d="M14 10V4a2 2 0 0 0-2-2a2 2 0 0 0-2 2v2"/><path d="M10 10.5V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2v8"/><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"/>'],
+    ear: ['Ear', 'body', '<path d="M6 8.5a6.5 6.5 0 1 1 13 0c0 6-6 6-6 10a3.5 3.5 0 1 1-7 0"/><path d="M15 8.5a2.5 2.5 0 0 0-5 0v1a2 2 0 1 1 0 4"/>'],
+    accessibility: ['Mobility', 'body', '<circle cx="16" cy="4" r="1"/><path d="m18 19 1-7-6 1"/><path d="m5 8 3-3 5.5 3-2.36 3.5"/><path d="M4.24 14.5a5 5 0 0 0 6.88 6"/><path d="M13.76 17.5a5 5 0 0 0-6.88-6"/>'],
     droplets: ['Droplets', 'food', '<path d="M7 16.3c2.2 0 4-1.83 4-4.05 0-1.16-.57-2.26-1.71-3.19S7.29 6.75 7 5.3c-.29 1.45-1.14 2.84-2.29 3.76S3 11.1 3 12.25c0 2.22 1.8 4.05 4 4.05z"/><path d="M12.56 6.6A10.97 10.97 0 0 0 14 3.02c.5 2.5 2 4.9 4 6.5s3 3.5 3 5.5a6.98 6.98 0 0 1-11.91 4.97"/>'],
     glass: ['Glass of water', 'food', '<path d="M15.2 22H8.8a2 2 0 0 1-2-1.79L5 3h14l-1.81 17.21A2 2 0 0 1 15.2 22Z"/><path d="M6 12a5 5 0 0 1 6 0 5 5 0 0 0 6 0"/>'],
-    apple: ['Apple', 'food', '<path d="M12 20.94c1.5 0 2.75 1.06 4 1.06 3 0 6-8 6-12.22A4.91 4.91 0 0 0 17 5c-2.22 0-4 1.44-5 2-1-.56-2.78-2-5-2a4.9 4.9 0 0 0-5 4.78C2 14 5 22 8 22c1.25 0 2.5-1.06 4-1.06Z"/><path d="M10 2c1 .5 2 2 2 5"/>'],
-    utensils: ['Utensils', 'food', '<path d="M3 2v7c0 1.1.9 2 2 2h4a2 2 0 0 0 2-2V2"/><path d="M7 2v20"/><path d="M21 15V2a5 5 0 0 0-5 5v6c0 1.1.9 2 2 2h3Zm0 0v7"/>'],
+    cupsoda: ['Soda', 'food', '<path d="m6 8 1.75 12.28a2 2 0 0 0 2 1.72h4.54a2 2 0 0 0 2-1.72L18 8"/><path d="M5 8h14"/><path d="M7 15a6.47 6.47 0 0 1 5 0 6.47 6.47 0 0 0 5 0"/><path d="m12 8 1-6h2"/>'],
     coffee: ['Coffee', 'food', '<path d="M10 2v2"/><path d="M14 2v2"/><path d="M16 8a1 1 0 0 1 1 1v8a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4V9a1 1 0 0 1 1-1h14a4 4 0 1 1 0 8h-1"/><path d="M6 2v2"/>'],
-    pill: ['Pill', 'food', '<path d="m10.5 20.5 10-10a4.95 4.95 0 1 0-7-7l-10 10a4.95 4.95 0 1 0 7 7Z"/><path d="m8.5 8.5 7 7"/>'],
+    apple: ['Apple', 'food', '<path d="M12 20.94c1.5 0 2.75 1.06 4 1.06 3 0 6-8 6-12.22A4.91 4.91 0 0 0 17 5c-2.22 0-4 1.44-5 2-1-.56-2.78-2-5-2a4.9 4.9 0 0 0-5 4.78C2 14 5 22 8 22c1.25 0 2.5-1.06 4-1.06Z"/><path d="M10 2c1 .5 2 2 2 5"/>'],
+    banana: ['Banana', 'food', '<path d="M4 13c3.5-2 8-2 10 2a5.5 5.5 0 0 1 8 5"/><path d="M5.15 17.89c5.52-1.52 8.65-6.89 7-12C11.55 4 11.5 2 13 2c3.22 0 5 5.5 5 8 0 6.5-4.2 12-10.49 12C5.11 22 2 22 2 20c0-1.5 1.14-1.55 3.15-2.11Z"/>'],
+    cherry: ['Cherry', 'food', '<path d="M2 17a5 5 0 0 0 10 0c0-2.76-2.5-5-5-3-2.5-2-5 .24-5 3Z"/><path d="M12 17a5 5 0 0 0 10 0c0-2.76-2.5-5-5-3-2.5-2-5 .24-5 3Z"/><path d="M7 14c3.22-2.91 4.29-8.75 5-12 1.66 2.38 4.94 9 5 12"/><path d="M22 9c-4.29 0-7.14-2.33-10-7 5.71 0 10 4.67 10 7Z"/>'],
+    citrus: ['Citrus', 'food', '<path d="M21.66 17.67a1.08 1.08 0 0 1-.04 1.6A12 12 0 0 1 4.73 2.38a1.1 1.1 0 0 1 1.61-.04z"/><path d="M19.65 15.66A8 8 0 0 1 8.35 4.34"/><path d="m14 10-5.5 5.5"/><path d="M14 17.85V10H6.15"/>'],
+    carrot: ['Carrot', 'food', '<path d="M2.27 21.7s9.87-3.5 12.73-6.36a4.5 4.5 0 0 0-6.36-6.37C5.77 11.84 2.27 21.7 2.27 21.7zM8.64 14l-2.05-2.04M15.34 15l-2.46-2.46"/><path d="M22 9s-1.33-2-3.5-2C16.86 7 15 9 15 9s1.33 2 3.5 2S22 9 22 9z"/><path d="M15 2s-2 1.33-2 3.5S15 9 15 9s2-1.84 2-3.5C17 3.33 15 2 15 2z"/>'],
+    salad: ['Salad', 'food', '<path d="M7 21h10"/><path d="M12 21a9 9 0 0 0 9-9H3a9 9 0 0 0 9 9Z"/><path d="M11.38 12a2.4 2.4 0 0 1-.4-4.77 2.4 2.4 0 0 1 3.2-2.77 2.4 2.4 0 0 1 3.47-.63 2.4 2.4 0 0 1 3.37 3.37 2.4 2.4 0 0 1-1.1 3.7 2.51 2.51 0 0 1 .03 1.1"/><path d="m13 12 4-4"/><path d="M10.9 7.25A3.99 3.99 0 0 0 4 10c0 .73.2 1.41.54 2"/>'],
+    wheat: ['Wheat', 'food', '<path d="M2 22 16 8"/><path d="M3.47 12.53 5 11l1.53 1.53a3.5 3.5 0 0 1 0 4.94L5 19l-1.53-1.53a3.5 3.5 0 0 1 0-4.94Z"/><path d="M7.47 8.53 9 7l1.53 1.53a3.5 3.5 0 0 1 0 4.94L9 15l-1.53-1.53a3.5 3.5 0 0 1 0-4.94Z"/><path d="M11.47 4.53 13 3l1.53 1.53a3.5 3.5 0 0 1 0 4.94L13 11l-1.53-1.53a3.5 3.5 0 0 1 0-4.94Z"/><path d="M20 2h2v2a4 4 0 0 1-4 4h-2V6a4 4 0 0 1 4-4Z"/><path d="M11.47 17.47 13 19l-1.53 1.53a3.5 3.5 0 0 1-4.94 0L5 19l1.53-1.53a3.5 3.5 0 0 1 4.94 0Z"/><path d="M15.47 13.47 17 15l-1.53 1.53a3.5 3.5 0 0 1-4.94 0L9 15l1.53-1.53a3.5 3.5 0 0 1 4.94 0Z"/><path d="M19.47 9.47 21 11l-1.53 1.53a3.5 3.5 0 0 1-4.94 0L13 11l1.53-1.53a3.5 3.5 0 0 1 4.94 0Z"/>'],
+    egg: ['Egg', 'food', '<path d="M12 22c6.23-.05 7.87-5.57 7.5-10-.36-4.34-3.95-9.96-7.5-10-3.55.04-7.14 5.66-7.5 10-.37 4.43 1.27 9.95 7.5 10z"/>'],
+    fish: ['Fish', 'food', '<path d="M6.5 12c.94-3.46 4.94-6 8.5-6 3.56 0 6.06 2.54 7 6-.94 3.47-3.44 6-7 6s-7.56-2.53-8.5-6Z"/><path d="M18 12v.5"/><path d="M16 17.93a9.77 9.77 0 0 1 0-11.86"/><path d="M7 10.67C7 8 5.58 5.97 2.73 5.5c-1 1.5-1 5 .23 6.5-1.24 1.5-1.24 5-.23 6.5C5.58 18.03 7 16 7 13.33"/><path d="M10.46 7.26C10.2 5.88 9.17 4.24 8 3h5.8a2 2 0 0 1 1.98 1.67l.23 1.4"/><path d="m16.01 17.93-.23 1.4A2 2 0 0 1 13.8 21H9.5a5.96 5.96 0 0 0 1.49-3.98"/>'],
+    beef: ['Beef', 'food', '<circle cx="12.5" cy="8.5" r="2.5"/><path d="M12.5 2a6.5 6.5 0 0 0-6.22 4.6c-1.1 3.13-.78 3.9-3.18 6.08A3 3 0 0 0 5 18c4 0 8.4-1.8 11.4-4.3A6.5 6.5 0 0 0 12.5 2Z"/><path d="m18.5 6 2.19 4.5a6.48 6.48 0 0 1 .31 2 6.49 6.49 0 0 1-2.6 5.2C15.4 20.2 11 22 7 22a3 3 0 0 1-2.68-1.66L2.4 16.5"/>'],
+    sandwich: ['Sandwich', 'food', '<path d="m2.37 11.223 8.372-6.777a2 2 0 0 1 2.516 0l8.371 6.777"/><path d="M21 15a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1h-5.25"/><path d="M3 15a1 1 0 0 0-1 1v2a1 1 0 0 0 1 1h9"/><path d="m6.67 15 6.13 4.6a2 2 0 0 0 2.8-.4l3.15-4.2"/><rect width="20" height="4" x="2" y="11" rx="1"/>'],
+    pizza: ['Pizza', 'food', '<path d="m12 14-1 1"/><path d="m13.75 18.25-1.25 1.42"/><path d="M17.775 5.654a15.68 15.68 0 0 0-12.121 12.12"/><path d="M18.8 9.3a1 1 0 0 0 2.1 7.7"/><path d="M21.964 20.732a1 1 0 0 1-1.232 1.232l-18-5a1 1 0 0 1-.695-1.232A19.68 19.68 0 0 1 15.732 2.037a1 1 0 0 1 1.232.695z"/>'],
+    soup: ['Soup', 'food', '<path d="M12 21a9 9 0 0 0 9-9H3a9 9 0 0 0 9 9Z"/><path d="M7 21h10"/><path d="M19.5 12 22 6"/><path d="M16.25 3c.27.1.8.53.75 1.36-.06.83-.93 1.2-1 2.02-.05.78.34 1.24.73 1.62"/><path d="M11.25 3c.27.1.8.53.74 1.36-.05.83-.93 1.2-.98 2.02-.06.78.33 1.24.72 1.62"/><path d="M6.25 3c.27.1.8.53.75 1.36-.06.83-.93 1.2-1 2.02-.05.78.34 1.24.74 1.62"/>'],
+    utensils: ['Utensils', 'food', '<path d="M3 2v7c0 1.1.9 2 2 2h4a2 2 0 0 0 2-2V2"/><path d="M7 2v20"/><path d="M21 15V2a5 5 0 0 0-5 5v6c0 1.1.9 2 2 2h3Zm0 0v7"/>'],
   };
-  const ITEM_ICON_CATEGORIES = [['all', 'All'], ['training', 'Training'], ['body', 'Body'], ['food', 'Food']];
+  const ITEM_ICON_CATEGORIES = [['common', 'Common'], ['training', 'Training'], ['body', 'Body'], ['food', 'Food']];
+  const COMMON_ICONS = ['dumbbell', 'weight', 'activity', 'footprints', 'bike', 'timer', 'flame', 'scale', 'ruler', 'heart', 'moon', 'droplets', 'glass', 'apple', 'utensils', 'coffee', 'biceps', 'pill'];
   const EXERCISE_DEFAULT_ICON = { weight: 'dumbbell', reps: 'activity', cardio: 'footprints', habit: 'standing' };
 
   function itemIconSvg(key) { return lucide((ITEM_ICONS[key] || ITEM_ICONS.dumbbell)[2]); }
@@ -3452,7 +3483,7 @@
     return `<span class="item-icon${small ? ' item-icon-sm' : ''}" aria-hidden="true">${itemIconSvg(key)}</span>`;
   }
   function exerciseIconKey(ex) { return ex && ITEM_ICONS[ex.icon] ? ex.icon : (ex && EXERCISE_DEFAULT_ICON[ex.kind]) || 'dumbbell'; }
-  function trackerDefaultIcon(t) { return t && t.kind === 'sleep' ? 'moon' : t && t.unitKind === 'weight' ? 'weight' : 'ruler'; }
+  function trackerDefaultIcon(t) { return t && t.kind === 'sleep' ? 'moon' : t && t.unitKind === 'weight' ? 'scale' : 'ruler'; }
   function trackerIconKey(t) { return t && ITEM_ICONS[t.icon] ? t.icon : trackerDefaultIcon(t); }
   function cupIconKey(cup) { return cup && ITEM_ICONS[cup.icon] ? cup.icon : 'droplets'; }
   function savedFoodIconKey(food) { return food && ITEM_ICONS[food.icon] ? food.icon : 'utensils'; }
@@ -3482,7 +3513,7 @@
   }
   function wireIconField(id, getDefault, initial) {
     let chosen = initial && ITEM_ICONS[initial] ? initial : null;
-    let category = 'all';
+    let category = 'common';
     const row = document.getElementById(id);
     const picker = document.getElementById(`${id}Picker`);
     const search = document.getElementById(`${id}Search`);
@@ -3494,9 +3525,10 @@
     function paintGrid() {
       const q = search.value.trim().toLowerCase();
       picker.querySelectorAll('[data-icon-cat]').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.iconCat === category)));
-      grid.innerHTML = Object.entries(ITEM_ICONS)
-        .filter(([, [label, cat]]) => (category === 'all' || cat === category) && label.toLowerCase().includes(q))
-        .map(([key, [label]]) => `<button type="button" class="icon-cell" data-icon-key="${key}" role="radio" aria-checked="${key === current()}" aria-label="${label}">${itemIconSvg(key)}</button>`).join('')
+      const keys = q ? Object.keys(ITEM_ICONS).filter((k) => ITEM_ICONS[k][0].toLowerCase().includes(q))
+        : category === 'common' ? COMMON_ICONS : Object.keys(ITEM_ICONS).filter((k) => ITEM_ICONS[k][1] === category);
+      grid.innerHTML = keys
+        .map((key) => `<button type="button" class="icon-cell" data-icon-key="${key}" role="radio" aria-checked="${key === current()}" aria-label="${ITEM_ICONS[key][0]}">${itemIconSvg(key)}</button>`).join('')
         || '<p class="muted-text">No icons match.</p>';
     }
     function choose(key) {
@@ -5189,11 +5221,8 @@
 
         <div class="field">
           <span class="field-label">Value type${isSleep ? ' (fixed — Sleep also tracks quality)' : hasEntries ? ' (locked — has logged entries)' : ''}</span>
-          <div class="segmented" id="trkUnitKindSegmentedA" role="radiogroup">
-            ${['weight', 'length', 'percent'].map((k) => `<button type="button" data-unit-kind="${k}" role="radio" ${typeLocked && unitKind !== k ? 'disabled' : ''}>${UNIT_KIND_LABELS[k]}</button>`).join('')}
-          </div>
-          <div class="segmented" id="trkUnitKindSegmentedB" role="radiogroup">
-            ${['hours', 'rating', 'count'].map((k) => `<button type="button" data-unit-kind="${k}" role="radio" ${typeLocked && unitKind !== k ? 'disabled' : ''}>${UNIT_KIND_LABELS[k]}</button>`).join('')}
+          <div class="segmented segmented-grid" id="trkUnitKindSegmented" role="radiogroup">
+            ${['weight', 'length', 'percent', 'hours', 'rating', 'count'].map((k) => `<button type="button" data-unit-kind="${k}" role="radio" ${typeLocked && unitKind !== k ? 'disabled' : ''}>${UNIT_KIND_LABELS[k]}</button>`).join('')}
           </div>
         </div>
 
@@ -5243,7 +5272,7 @@
     function setUnitKindUI(k) {
       selectedUnitKind = k;
       iconField.refresh();
-      document.querySelectorAll('#trkUnitKindSegmentedA button, #trkUnitKindSegmentedB button').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.unitKind === k)));
+      document.querySelectorAll('#trkUnitKindSegmented button').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.unitKind === k)));
       renderGoalField();
     }
     function setDirectionUI(d) {
@@ -5255,7 +5284,7 @@
       document.getElementById('trkShowOnDashboardSwitch').setAttribute('aria-checked', String(show));
     }
 
-    document.querySelectorAll('#trkUnitKindSegmentedA button, #trkUnitKindSegmentedB button').forEach((b) => {
+    document.querySelectorAll('#trkUnitKindSegmented button').forEach((b) => {
       b.addEventListener('click', () => { if (!b.disabled) setUnitKindUI(b.dataset.unitKind); });
     });
     document.querySelectorAll('#trkDirectionSegmented button').forEach((b) => b.addEventListener('click', () => setDirectionUI(b.dataset.direction)));
@@ -6061,8 +6090,8 @@
           <input type="number" step="any" min="0" id="setupWeight" value="${escapeHtml(setupAnswers.weight)}" placeholder="Not set" /></label>
         <label class="field"><span class="field-label">Age <span class="muted-text">(for nutrition advice)</span></span>
           <input type="number" step="1" min="1" max="120" inputmode="numeric" id="setupAge" value="${escapeHtml(setupAnswers.age)}" placeholder="Not set" /></label>
-        <div class="setting-row">
-          <span>Sex <span class="muted-text">(for strength/pace benchmarks + nutrition calculator)</span></span>
+        <div class="field">
+          <span class="field-label">Sex <span class="muted-text">(for strength/pace benchmarks + nutrition calculator)</span></span>
           <div class="segmented" id="setupSexSegmented" role="radiogroup" aria-label="Sex">
             <button type="button" data-sex-choice="" role="radio" aria-checked="${setupAnswers.sex === ''}">Not set</button>
             <button type="button" data-sex-choice="male" role="radio" aria-checked="${setupAnswers.sex === 'male'}">Male</button>
@@ -6127,8 +6156,8 @@
     const t = setupAnswers.runningGoalType;
     document.getElementById('setupContent').innerHTML = `
       <div class="card form-card">
-        <div class="setting-row">
-          <span>Goal by</span>
+        <div class="field">
+          <span class="field-label">Goal by</span>
           <div class="segmented" id="setupRunGoalType" role="radiogroup" aria-label="Running goal type">
             <button type="button" data-type-choice="distance" role="radio" aria-checked="${t === 'distance'}">Distance</button>
             <button type="button" data-type-choice="pace" role="radio" aria-checked="${t === 'pace'}">Pace</button>
