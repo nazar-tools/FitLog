@@ -2440,8 +2440,9 @@
   function strengthStandardsDetailHtml(ex) {
     const info = strengthLevelInfo(ex);
     if (!info) return '';
-    if (info.needsBodyWeight) return `<div class="card"><div class="section-head"><h2>Strength level</h2></div><p class="muted-text">Log your body weight to see your strength level.</p></div>`;
-    if (info.needsSex) return `<div class="card"><div class="section-head"><h2>Strength level</h2></div><p class="muted-text">Set your sex in Settings → Profile to see your strength level.</p></div>`;
+    const head = '<div class="section-head"><div class="setting-row-label"><span class="setting-icon">'+STATIC_ICONS.trophy+'</span><h2>Strength level</h2></div></div>';
+    if (info.needsBodyWeight) return `<div class="card">${head}<p class="muted-text">Log your body weight to see your strength level.</p></div>`;
+    if (info.needsSex) return `<div class="card">${head}<p class="muted-text">Set your sex in Settings → Profile to see your strength level.</p></div>`;
     const bw = currentBodyWeightLb();
     const table = LIFT_STANDARDS[ex.liftType][state.profile.sex];
     const thresholds = table.map((mult) => Math.round((bw * mult) / 5) * 5);
@@ -2453,7 +2454,7 @@
     });
     return `
       <div class="card">
-        <div class="section-head"><h2>Strength level</h2></div>
+        ${head}
         <div class="insight-line">Est. 1RM ${fmtWeight(info.oneRepMax)} &middot; ${round(info.ratio, 2)}&times; bodyweight &middot; <strong>${info.tier}</strong></div>
         <div class="insight-line muted-text">Heaviest logged: ${fmtWeight(info.heaviestLoad)}</div>
         <div class="standards-preview">
@@ -3306,6 +3307,25 @@
     water: WATER_DROP_ICON_SVG,
     food: APPLE_ICON_SVG,
   };
+
+  // Icons for the static `data-icon="name"` spots in index.html (and the trophy
+  // on the Strength level card). Same Lucide style as every icon above.
+  const lucide = (paths) => `<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${paths}</svg>`;
+  const STATIC_ICONS = {
+    workout: DOMAIN_TAB_ICONS.workout, measurements: DOMAIN_TAB_ICONS.measurements, ruler: DOMAIN_TAB_ICONS.measurements,
+    water: DOMAIN_TAB_ICONS.water, food: DOMAIN_TAB_ICONS.food, apple: APPLE_ICON_SVG,
+    scale: SCALE_ICON_SVG, moon: MOON_ICON_SVG, footprints: FOOTPRINTS_ICON_SVG,
+    trophy: lucide('<path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/>'),
+    chart: lucide('<path d="M3 3v16a2 2 0 0 0 2 2h16"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/>'),
+    calendar: lucide('<path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/>'),
+    contrast: lucide('<circle cx="12" cy="12" r="10"/><path d="M12 18a6 6 0 0 0 0-12v12z"/>'),
+    calculator: lucide('<rect width="16" height="20" x="4" y="2" rx="2"/><line x1="8" x2="16" y1="6" y2="6"/><line x1="16" x2="16" y1="14" y2="18"/><path d="M16 10h.01"/><path d="M12 10h.01"/><path d="M8 10h.01"/><path d="M12 14h.01"/><path d="M8 14h.01"/><path d="M12 18h.01"/><path d="M8 18h.01"/>'),
+    download: lucide('<path d="M12 15V3"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/>'),
+    upload: lucide('<path d="M12 3v12"/><path d="m17 8-5-5-5 5"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>'),
+  };
+  function hydrateStaticIcons() {
+    document.querySelectorAll('[data-icon]').forEach((el) => { el.innerHTML = STATIC_ICONS[el.dataset.icon] || ''; });
+  }
 
   // Visible label per domain — "Body" rather than "Measurements" purely so
   // four labels fit as comfortably at this tap-target size as three used
@@ -4905,12 +4925,9 @@
           </div>
         </div>
 
-        <div class="field">
-          <span class="field-label">Dashboard <span class="muted-text">(as more trackers pile up, hide the ones you don't need to see every day)</span></span>
-          <div class="segmented" id="trkShowOnDashboardSegmented" role="radiogroup">
-            <button type="button" data-show="1" role="radio">Show</button>
-            <button type="button" data-show="0" role="radio">Hide</button>
-          </div>
+        <div class="setting-row">
+          <span>Show on dashboard <span class="muted-text">(hide trackers you don't need to see every day)</span></span>
+          ${switchHtml('id="trkShowOnDashboardSwitch"', 'Show on dashboard', true)}
         </div>
 
         <button type="button" class="btn btn-primary btn-block" id="saveTrackerBtn">${editing ? 'Save changes' : 'Add tracker'}</button>
@@ -4946,14 +4963,14 @@
     }
     function setShowOnDashboardUI(show) {
       selectedShowOnDashboard = show;
-      document.querySelectorAll('#trkShowOnDashboardSegmented button').forEach((b) => b.setAttribute('aria-checked', String((b.dataset.show === '1') === show)));
+      document.getElementById('trkShowOnDashboardSwitch').setAttribute('aria-checked', String(show));
     }
 
     document.querySelectorAll('#trkUnitKindSegmentedA button, #trkUnitKindSegmentedB button').forEach((b) => {
       b.addEventListener('click', () => { if (!b.disabled) setUnitKindUI(b.dataset.unitKind); });
     });
     document.querySelectorAll('#trkDirectionSegmented button').forEach((b) => b.addEventListener('click', () => setDirectionUI(b.dataset.direction)));
-    document.querySelectorAll('#trkShowOnDashboardSegmented button').forEach((b) => b.addEventListener('click', () => setShowOnDashboardUI(b.dataset.show === '1')));
+    document.getElementById('trkShowOnDashboardSwitch').addEventListener('click', () => setShowOnDashboardUI(!selectedShowOnDashboard));
     document.getElementById('trkUnitLabelField').querySelector('input').addEventListener('input', renderGoalField);
     setUnitKindUI(selectedUnitKind);
     setDirectionUI(selectedDirection);
@@ -5098,8 +5115,8 @@
      back on (add a cup here even with zero cups today; flip Water back on
      here even while it's off), so it can't gate on the very thing it's
      meant to change. Each panel carries the identical "Track this" master
-     toggle (trackWorkoutSegmented/trackMeasurementsSegmented/
-     trackWaterSegmented/trackFoodSegmented, each writing the matching
+     toggle (trackWorkoutSwitch/trackMeasurementsSwitch/
+     trackWaterSwitch/trackFoodSwitch, each writing the matching
      settings.track* flag via renderDomainTrackToggle() below) — Food had
      this pattern first, the other three were added to match it exactly.
      All configuration lives here now; Settings (reached from the header)
@@ -5129,7 +5146,7 @@
   function renderDomainTrackToggle(id) {
     const tracked = domainTracked(id);
     const cap = id.charAt(0).toUpperCase() + id.slice(1);
-    document.querySelectorAll(`#track${cap}Segmented button`).forEach((b) => b.setAttribute('aria-checked', String((b.dataset.boolChoice === 'on') === tracked)));
+    syncSwitches();
     document.getElementById(`track${cap}OffHint`).hidden = tracked;
     document.getElementById(`${id}TrackedFields`).hidden = !tracked;
     return tracked;
@@ -5148,7 +5165,7 @@
       select.dataset.built = '1';
     }
     const calc = state.settings.nutritionCalc;
-    document.querySelectorAll('#nutritionCalcEnabledSegmented button').forEach((b) => b.setAttribute('aria-checked', String((b.dataset.boolChoice === 'on') === calc.enabled)));
+    document.getElementById('nutritionCalcEnabledSwitch').setAttribute('aria-checked', String(calc.enabled));
     document.getElementById('nutritionCalcFields').hidden = !calc.enabled;
     if (!calc.enabled) return;
     select.value = calc.activityLevel;
@@ -5220,11 +5237,7 @@
       wrap.innerHTML = MACRO_KEYS.map((k) => `
         <div class="setting-row" data-macro-goal-row="${k}">
           <span>${MACRO_LABELS[k]} <span class="muted-text" data-macro-hint="${k}"></span></span>
-          ${k === 'calories' ? `
-          <div class="segmented" data-macro-goal-toggle="${k}" role="radiogroup" aria-label="Calories goal">
-            <button type="button" data-bool-choice="off" role="radio">Off</button>
-            <button type="button" data-bool-choice="on" role="radio">On</button>
-          </div>` : ''}
+          ${k === 'calories' ? switchHtml(`data-macro-goal-toggle="${k}"`, 'Calories goal', false) : ''}
         </div>
         <label class="field" data-macro-goal-field="${k}" hidden>
           <span class="field-label">Daily goal (${MACRO_UNITS[k] || 'cal'})</span>
@@ -5232,11 +5245,10 @@
         </label>`).join('');
       wrap.dataset.built = '1';
       wrap.addEventListener('click', (ev) => {
-        const btn = ev.target.closest('[data-bool-choice]');
-        const toggle = btn && btn.closest('[data-macro-goal-toggle]');
+        const toggle = ev.target.closest('[data-macro-goal-toggle]');
         if (!toggle) return;
         const k = toggle.dataset.macroGoalToggle;
-        macroGoalInfo(k).enabled = btn.dataset.boolChoice === 'on';
+        macroGoalInfo(k).enabled = !isOn(toggle);
         if (!save()) return;
         renderMacroGoalRows();
         renderDashboard();
@@ -5257,7 +5269,7 @@
       const row = wrap.querySelector(`[data-macro-goal-row="${k}"]`);
       if (row) row.hidden = !tracked;
       if (k === 'calories') {
-        wrap.querySelectorAll(`[data-macro-goal-toggle="${k}"] button`).forEach((b) => b.setAttribute('aria-checked', String((b.dataset.boolChoice === 'on') === info.enabled)));
+        wrap.querySelector(`[data-macro-goal-toggle="${k}"]`).setAttribute('aria-checked', String(!!info.enabled));
       }
       const field = wrap.querySelector(`[data-macro-goal-field="${k}"]`);
       if (field) field.hidden = k === 'calories' ? !info.enabled : !tracked;
@@ -5361,7 +5373,20 @@
 
   /* ============================== Settings ============================== */
 
+  // Settings flags driven by a plain on/off switch in index.html.
+  const settingSwitches = {
+    trackWorkoutSwitch: 'trackWorkout', trackMeasurementsSwitch: 'trackMeasurements',
+    trackWaterSwitch: 'trackWater', trackFoodSwitch: 'trackFood',
+    showWeightInsightsSwitch: 'showWeightInsights', showStrengthLevelSwitch: 'showStrengthLevel',
+    showPaceLevelSwitch: 'showPaceLevel', showSleepInsightsSwitch: 'showSleepInsights',
+    showMacroGuidanceSwitch: 'showMacroGuidance',
+  };
+  function syncSwitches() {
+    Object.entries(settingSwitches).forEach(([id, key]) => document.getElementById(id).setAttribute('aria-checked', String(state.settings[key])));
+  }
+
   function renderSettings() {
+    syncSwitches();
     document.querySelectorAll('#themeSegmented button').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.themeChoice === state.settings.theme)));
     document.querySelectorAll('#weightUnitSegmented button').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.unitChoice === state.settings.weightUnit)));
     document.querySelectorAll('#distanceUnitSegmented button').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.unitChoice === state.settings.distanceUnit)));
@@ -5380,11 +5405,6 @@
 
     document.querySelectorAll('#dashboardChartScaleSegmented button').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.scaleChoice === state.settings.chartScale)));
     document.querySelectorAll('#insightsWindowSegmented button').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.windowChoice === String(state.settings.insightsWindowDays))));
-    document.querySelectorAll('#showWeightInsightsSegmented button').forEach((b) => b.setAttribute('aria-checked', String((b.dataset.boolChoice === 'on') === state.settings.showWeightInsights)));
-    document.querySelectorAll('#showStrengthLevelSegmented button').forEach((b) => b.setAttribute('aria-checked', String((b.dataset.boolChoice === 'on') === state.settings.showStrengthLevel)));
-    document.querySelectorAll('#showPaceLevelSegmented button').forEach((b) => b.setAttribute('aria-checked', String((b.dataset.boolChoice === 'on') === state.settings.showPaceLevel)));
-    document.querySelectorAll('#showSleepInsightsSegmented button').forEach((b) => b.setAttribute('aria-checked', String((b.dataset.boolChoice === 'on') === state.settings.showSleepInsights)));
-    document.querySelectorAll('#showMacroGuidanceSegmented button').forEach((b) => b.setAttribute('aria-checked', String((b.dataset.boolChoice === 'on') === state.settings.showMacroGuidance)));
   }
 
   /* ============================== Backup validation ==============================
@@ -5664,18 +5684,19 @@
     renderSetupStep();
   }
 
-  // A Settings-style on/off row (see e.g. #showWeightInsightsSegmented) —
-  // every wizard toggle re-renders its whole step on change, since flipping
-  // one always shows or hides other fields below it.
+  // On/off switch markup for rows built in JS; `attrs` is the id or data-* hook.
+  function switchHtml(attrs, label, on) {
+    return `<button type="button" class="switch" ${attrs} role="switch" aria-checked="${!!on}" aria-label="${label}"><span class="switch-track"><span class="switch-thumb"></span></span></button>`;
+  }
+  const isOn = (el) => el.getAttribute('aria-checked') === 'true';
+
+  // Every wizard toggle re-renders its whole step, since flipping one shows or hides fields below it.
   function setupBoolRowHtml(id, label, checked) {
-    return `<div class="setting-row"><span>${label}</span>
-      <div class="segmented" id="${id}" role="radiogroup" aria-label="${label}">
-        <button type="button" data-bool-choice="off" role="radio" aria-checked="${!checked}">Off</button>
-        <button type="button" data-bool-choice="on" role="radio" aria-checked="${checked}">On</button>
-      </div></div>`;
+    return `<div class="setting-row"><span>${label}</span>${switchHtml(`id="${id}"`, label, checked)}</div>`;
   }
   function wireSetupBoolRow(id, onChange) {
-    document.querySelectorAll(`#${id} button`).forEach((b) => b.addEventListener('click', () => onChange(b.dataset.boolChoice === 'on')));
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('click', () => onChange(!isOn(el)));
   }
 
   function renderSetupStep() {
@@ -5776,10 +5797,7 @@
             <div class="form-card">
               <div class="setting-row">
                 <span>${LIFT_TYPE_LABELS[key]}</span>
-                <div class="segmented" data-lift-toggle="${key}" role="radiogroup" aria-label="Track ${LIFT_TYPE_LABELS[key]}">
-                  <button type="button" data-bool-choice="off" role="radio" aria-checked="${!lift.enabled}">Off</button>
-                  <button type="button" data-bool-choice="on" role="radio" aria-checked="${lift.enabled}">On</button>
-                </div>
+                ${switchHtml(`data-lift-toggle="${key}"`, `Track ${LIFT_TYPE_LABELS[key]}`, lift.enabled)}
               </div>
               ${lift.enabled ? `
               <div class="segmented" data-lift-mode="${key}" role="radiogroup" aria-label="${LIFT_TYPE_LABELS[key]} goal style">
@@ -5798,7 +5816,7 @@
         </div>`;
     ['bench', 'squat', 'deadlift'].forEach((key) => {
       const toggleEl = document.querySelector(`[data-lift-toggle="${key}"]`);
-      if (toggleEl) toggleEl.querySelectorAll('button').forEach((b) => b.addEventListener('click', () => { lifts[key].enabled = b.dataset.boolChoice === 'on'; renderSetupStepLifting(); }));
+      if (toggleEl) toggleEl.addEventListener('click', () => { lifts[key].enabled = !isOn(toggleEl); renderSetupStepLifting(); });
       const modeEl = document.querySelector(`[data-lift-mode="${key}"]`);
       if (modeEl) modeEl.querySelectorAll('button').forEach((b) => b.addEventListener('click', () => { if (!b.disabled) { lifts[key].mode = b.dataset.modeChoice; renderSetupStepLifting(); } }));
       const tierEl = document.querySelector(`[data-lift-tier="${key}"]`);
@@ -6190,44 +6208,21 @@
       renderDashboard();
     });
 
-    // Master on/off toggle, identical across all four Manage domains —
-    // turning one off hides that domain's tab from Log/History and its
-    // dashboard section (see availableDomainCategories/domainTracked),
-    // without touching any already-logged data. Each panel stays visible
-    // and clickable in Manage regardless (see renderDomainTrackToggle) —
-    // Manage is where a turned-off domain gets turned back on.
-    document.getElementById('trackWorkoutSegmented').addEventListener('click', (ev) => {
-      const btn = ev.target.closest('button'); if (!btn) return;
-      state.settings.trackWorkout = btn.dataset.boolChoice === 'on';
-      if (!save()) return;
-      renderAll();
-    });
-    document.getElementById('trackMeasurementsSegmented').addEventListener('click', (ev) => {
-      const btn = ev.target.closest('button'); if (!btn) return;
-      state.settings.trackMeasurements = btn.dataset.boolChoice === 'on';
-      if (!save()) return;
-      renderAll();
-    });
-    document.getElementById('trackWaterSegmented').addEventListener('click', (ev) => {
-      const btn = ev.target.closest('button'); if (!btn) return;
-      state.settings.trackWater = btn.dataset.boolChoice === 'on';
-      if (!save()) return;
-      renderAll();
-    });
-    document.getElementById('trackFoodSegmented').addEventListener('click', (ev) => {
-      const btn = ev.target.closest('button'); if (!btn) return;
-      state.settings.trackFood = btn.dataset.boolChoice === 'on';
-      if (!save()) return;
-      renderAll();
+    // Turning a domain off hides it from Log/History/Goals without touching logged data.
+    Object.entries(settingSwitches).forEach(([id, key]) => {
+      document.getElementById(id).addEventListener('click', () => {
+        state.settings[key] = !state.settings[key];
+        if (!save()) return;
+        renderAll();
+      });
     });
 
     // Nutrition calculator (Manage -> Nutrition -> Food) — "Use calculator"
     // only shows/updates the live preview below; nothing is written into
     // macroGoals until "Apply to daily goals" is tapped (see the comment on
     // applyNutritionCalcTargets()).
-    document.getElementById('nutritionCalcEnabledSegmented').addEventListener('click', (ev) => {
-      const btn = ev.target.closest('button'); if (!btn) return;
-      state.settings.nutritionCalc.enabled = btn.dataset.boolChoice === 'on';
+    document.getElementById('nutritionCalcEnabledSwitch').addEventListener('click', () => {
+      state.settings.nutritionCalc.enabled = !state.settings.nutritionCalc.enabled;
       if (!save()) return;
       renderManage();
     });
@@ -6352,36 +6347,6 @@
       if (!save()) return;
       renderAll();
     });
-    document.getElementById('showWeightInsightsSegmented').addEventListener('click', (ev) => {
-      const btn = ev.target.closest('button'); if (!btn) return;
-      state.settings.showWeightInsights = btn.dataset.boolChoice === 'on';
-      if (!save()) return;
-      renderAll();
-    });
-    document.getElementById('showStrengthLevelSegmented').addEventListener('click', (ev) => {
-      const btn = ev.target.closest('button'); if (!btn) return;
-      state.settings.showStrengthLevel = btn.dataset.boolChoice === 'on';
-      if (!save()) return;
-      renderAll();
-    });
-    document.getElementById('showPaceLevelSegmented').addEventListener('click', (ev) => {
-      const btn = ev.target.closest('button'); if (!btn) return;
-      state.settings.showPaceLevel = btn.dataset.boolChoice === 'on';
-      if (!save()) return;
-      renderAll();
-    });
-    document.getElementById('showSleepInsightsSegmented').addEventListener('click', (ev) => {
-      const btn = ev.target.closest('button'); if (!btn) return;
-      state.settings.showSleepInsights = btn.dataset.boolChoice === 'on';
-      if (!save()) return;
-      renderAll();
-    });
-    document.getElementById('showMacroGuidanceSegmented').addEventListener('click', (ev) => {
-      const btn = ev.target.closest('button'); if (!btn) return;
-      state.settings.showMacroGuidance = btn.dataset.boolChoice === 'on';
-      if (!save()) return;
-      renderAll();
-    });
 
     document.getElementById('exportBtn').addEventListener('click', exportBackup);
     document.getElementById('importBtn').addEventListener('click', () => document.getElementById('importFile').click());
@@ -6447,6 +6412,7 @@
     // openModal() for the rest of this mechanism.
     history.replaceState({ nav: 'base' }, '');
     history.pushState({ nav: 'exit-guard' }, '');
+    hydrateStaticIcons();
     load();
     // wireEvents() only ever attaches listeners (nothing here reads `state`
     // synchronously), so it's safe to wire even in recovery mode — that's
