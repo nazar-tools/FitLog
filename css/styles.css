@@ -329,6 +329,10 @@ button { font-family: inherit; }
 .glance-row .glance-value .muted-text { display: inline; font-size: 13px; font-weight: 400; }
 .glance-value .icon { width: 14px; height: 14px; }
 .glance-sub { font-size: 13px; color: var(--text-secondary); }
+.glance-macros { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 20px; margin-top: 10px; font-size: 13px; }
+.glance-macro { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; min-width: 0; }
+.glance-macro-name { color: var(--text-secondary); }
+.glance-macro-val { font-weight: 600; white-space: nowrap; }
 .glance-row.is-complete .glance-value { color: var(--good); }
 .glance-open > .icon { flex: none; width: 16px; height: 16px; color: var(--muted); }
 .glance-btn { position: relative; flex: none; min-width: 56px; min-height: 36px; padding: 0 14px; }
@@ -547,8 +551,12 @@ button { font-family: inherit; }
    Sugar/Sodium/Caffeine (see MACRO_DV_OVER_FLAGS) gets its whole value
    column in red, not just the "% DV" part, per the user's request to
    highlight the number itself. */
-.standards-preview-row.over > span:last-child { color: var(--critical); font-weight: 700; }
-.standards-preview-row .pct { font-size: 11.5px; font-weight: 400; }
+.standards-preview-row.over > span:last-child, .standards-preview-row.over .pct { color: var(--critical); font-weight: 700; }
+.standards-preview-row .macro-val { display: flex; flex-direction: column; align-items: flex-end; gap: 1px; text-align: right; }
+.standards-preview-row .pct { font-size: 11.5px; font-weight: 400; color: var(--text-secondary); }
+.standards-preview.food-totals { margin-top: 0; }
+.standards-preview.food-totals .standards-preview-row { padding: 10px 14px; }
+.food-dv-note { margin: 0; }
 .standards-preview-row.over .pct { font-weight: 700; }
 
 .is-over-dv { color: var(--critical); }
@@ -567,6 +575,7 @@ button { font-family: inherit; }
 .form-card { display: flex; flex-direction: column; gap: 14px; }
 /* A lone `.setting-row` in a form card (a switch) takes its spacing from the card's gap, not its own padding. */
 .form-card .setting-row { padding: 0; }
+#logFoodDynamicFields { display: flex; flex-direction: column; gap: 14px; }
 .field { display: flex; flex-direction: column; gap: 6px; }
 .field-label { font-size: 13px; color: var(--text-secondary); font-weight: 500; }
 /* Required-field marker — currently just Calories in the food log/edit
@@ -610,7 +619,7 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 1p
 .set-row {
   display: grid;
   grid-template-columns: 1fr 1fr auto;
-  gap: 8px;
+  column-gap: 6px;
   align-items: end;
 }
 .set-row.set-row-3 { grid-template-columns: 1fr 1fr 1fr auto; }
@@ -638,6 +647,7 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 1p
 .set-row-star { color: var(--border); font-size: 18px; line-height: 1; }
 .set-row-star.is-active { color: var(--accent); border-color: var(--accent); }
 .sets-wrap { display: flex; flex-direction: column; gap: 10px; }
+.sets-container { display: flex; flex-direction: column; gap: 14px; }
 .sets-label { display: flex; align-items: center; justify-content: space-between; }
 
 /* ============ Buttons ============ */
@@ -711,11 +721,13 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 1p
    optional one turned on in Manage). A 2-3 button segmented control never
    overflows, so this is a no-op there; button `flex: none` keeps buttons
    at their natural width instead of squeezing/wrapping their labels. */
-.segmented { display: inline-flex; gap: 1px; max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; background: var(--border) padding-box; border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.segmented { flex-shrink: 0; display: inline-flex; gap: 1px; max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; background: var(--border) padding-box; border: 1px solid var(--border); border-radius: var(--radius-sm); }
 .segmented button { flex: none; border: none; border-radius: 0; background: var(--surface-2); color: var(--text-primary); min-width: 52px; padding: 7px 14px; font-size: 14px; font-weight: 600; cursor: pointer; white-space: nowrap; }
 .segmented button[aria-checked="true"] { background: var(--accent-track); color: var(--accent); }
 /* Many choices: one bar that wraps into rows of three. */
 .segmented.segmented-grid, .field > .segmented.segmented-grid { display: grid; grid-template-columns: repeat(3, 1fr); }
+.segmented-grid button:last-child:nth-child(3n+1) { grid-column: span 3; }
+.segmented-grid button:last-child:nth-child(3n+2) { grid-column: span 2; }
 /* In a form, a segmented control fills the row and splits it evenly, so long labels wrap instead of clipping. */
 .form-card > .segmented, .field > .segmented { display: flex; }
 .form-card > .segmented button, .field > .segmented button { flex: 1 1 0; min-width: 0; min-height: 44px; padding: 8px; white-space: normal; line-height: 1.2; }
@@ -913,6 +925,7 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 1p
    the *bottom* of the sheet instead, which reads as a normal, settled
    screen rather than a mostly-empty popup. */
 .modal-sheet.is-detail-sheet { min-height: 88vh; }
+.modal-sheet > * { flex-shrink: 0; }
 .modal-handle {
   /* The visible bar stays a slim 36x4px; `background-clip: content-box`
      keeps color off the padding, which exists purely to give the drag

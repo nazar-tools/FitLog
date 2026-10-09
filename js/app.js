@@ -2859,11 +2859,15 @@
     const cal = macroGoalInfo('calories');
     const hasGoal = cal.enabled && cal.goal != null;
     const pct = hasGoal ? ((totals.calories || 0) / cal.goal) * 100 : null;
-    const others = trackedMacroKeys().filter((k) => k !== 'calories').map((k) => {
+    const otherKeys = trackedMacroKeys().filter((k) => k !== 'calories');
+    const compactMacros = otherKeys.length > 2;
+    const others = otherKeys.map((k) => {
       const info = macroGoalInfo(k);
-      const goalText = info.enabled && info.goal != null ? ` / ${fmtMacroValue(k, info.goal)}` : '';
+      const goalText = !compactMacros && info.enabled && info.goal != null ? ` / ${fmtMacroValue(k, info.goal)}` : '';
       const over = state.settings.showMacroGuidance && macroDvOver(k, totals[k]);
-      return `<span${over ? ' class="is-over-dv"' : ''}>${MACRO_LABELS[k]} ${fmtMacroValue(k, totals[k])}${goalText}</span>`;
+      return compactMacros
+        ? `<span class="glance-macro${over ? ' is-over-dv' : ''}"><span class="glance-macro-name">${MACRO_LABELS[k]}</span><span class="glance-macro-val">${fmtMacroValue(k, totals[k])}</span></span>`
+        : `<span${over ? ' class="is-over-dv"' : ''}>${MACRO_LABELS[k]} ${fmtMacroValue(k, totals[k])}${goalText}</span>`;
     });
     return `
       <div class="glance-row${hasGoal && pct >= 100 ? ' is-complete' : ''}">
@@ -2875,7 +2879,7 @@
               <span class="glance-value">${hasGoal && pct >= 100 ? CHECK_ICON_SVG : ''}<span>${totals.calories == null ? '0' : fmtMacroValue('calories', totals.calories)}${hasGoal ? `<span class="muted-text"> / ${fmtMacroValue('calories', cal.goal)} cal</span>` : '<span class="muted-text"> cal</span>'}</span></span>
             </div>
             ${hasGoal ? glanceMeterHtml({}, pct) : ''}
-            ${others.length ? `<div class="glance-sub">${others.join(' · ')}</div>` : ''}
+            ${others.length ? (compactMacros ? `<div class="glance-macros">${others.join('')}</div>` : `<div class="glance-sub">${others.join(' · ')}</div>`) : ''}
           </div>
           ${CHEVRON_RIGHT_SVG}
         </div>
@@ -3183,47 +3187,44 @@
       const goalInfo = macroGoalInfo(k);
       const hasGoal = goalInfo.enabled && goalInfo.goal != null;
       const value = totals[k];
-      let rightText = fmtMacroValue(k, value);
+      const mainText = hasGoal ? `${fmtMacroValue(k, value)} / ${fmtMacroValue(k, goalInfo.goal)}` : fmtMacroValue(k, value);
+      const subParts = [];
       if (hasGoal) {
-        const pct = value != null ? Math.round(Math.min(100, (value / goalInfo.goal) * 100)) : null;
-        rightText += ` / ${fmtMacroValue(k, goalInfo.goal)}${pct != null ? ` &middot; ${pct}%` : ''}`;
+        const pct = value != null ? Math.round((value / goalInfo.goal) * 100) : null;
+        if (pct != null) subParts.push(`${pct}% of goal`);
       }
       const hasDv = guidanceOn && MACRO_DV[k] != null;
       const over = hasDv && macroDvOver(k, value);
       if (hasDv) {
         anyDvShown = true;
         const dvPct = macroDvPct(k, value);
-        rightText += ` <span class="pct">&middot; ${dvPct != null ? `${dvPct}% DV` : '— DV'}</span>`;
+        subParts.push(`${dvPct != null ? dvPct : '—'}% DV`);
       }
-      return `<div class="standards-preview-row${over ? ' over' : ''}"><span>${MACRO_LABELS[k]}</span><span>${rightText}</span></div>`;
+      return `<div class="standards-preview-row${over ? ' over' : ''}"><span>${MACRO_LABELS[k]}</span><span class="macro-val"><span>${mainText}</span>${subParts.length ? `<span class="pct">${subParts.join(' &middot; ')}</span>` : ''}</span></div>`;
     }).join('');
     // Same caveats the old separate table carried once below it, now below
     // this merged one instead — only relevant, so only shown, once guidance
     // is actually on and at least one tracked macro has a DV to show.
     const guidanceNoteHtml = anyDvShown
-      ? `<p class="muted-text field-hint">DV = % of a general adult daily value for a 2,000-calorie diet, not personalized. Sugar's DV is for <i>added</i> sugar specifically — Fit Log logs one total, so treat that comparison as an upper bound. Caffeine has no official DV; 400mg is the FDA's general guidance, shown the same way.</p>`
+      ? `<p class="muted-text field-hint food-dv-note">DV = % of a general adult daily value for a 2,000-calorie diet, not personalized. Sugar's DV is for <i>added</i> sugar specifically — Fit Log logs one total, so treat that comparison as an upper bound. Caffeine has no official DV; 400mg is the FDA's general guidance, shown the same way.</p>`
       : '';
 
     let calcHtml;
     if (!calc.enabled) {
       calcHtml = `
-        <div class="card">
-          <div class="section-head"><h2>Recommendation</h2></div>
-          <p class="muted-text">Turn on the nutrition calculator (Adjust goals below) for a calorie/protein recommendation based on your profile.</p>
-        </div>`;
+        <div class="section-head"><h2>Recommendation</h2></div>
+        <p class="muted-text">Turn on the nutrition calculator (Adjust goals below) for a calorie/protein recommendation based on your profile.</p>`;
     } else if (suggestion.missing) {
       const list = suggestion.missing.length > 1
         ? `${suggestion.missing.slice(0, -1).join(', ')} and ${suggestion.missing[suggestion.missing.length - 1]}`
         : suggestion.missing[0];
       calcHtml = `
-        <div class="card">
-          <div class="section-head"><h2>Recommendation</h2></div>
-          <p class="muted-text">Set your ${list} to get a calorie/protein recommendation.</p>
-        </div>`;
+        <div class="section-head"><h2>Recommendation</h2></div>
+        <p class="muted-text">Set your ${list} to get a calorie/protein recommendation.</p>`;
     } else {
       calcHtml = `
+        <div class="section-head"><h2>Recommendation</h2></div>
         <div class="card">
-          <div class="section-head"><h2>Recommendation</h2></div>
           <div class="insight-line">${suggestion.calories} cal &middot; ${suggestion.protein}g protein</div>
           <p class="muted-text field-hint">For ${NUTRITION_GOAL_LABELS[calc.goal]}, ${ACTIVITY_LEVELS[calc.activityLevel].label.toLowerCase()}.</p>
         </div>`;
@@ -3241,7 +3242,7 @@
     const chartGoalInfo = macroGoalInfo(activeMetric);
     const chartGoal = chartGoalInfo.enabled ? chartGoalInfo.goal : null;
     const metricSegHtml = trackedKeys.length > 1 ? `
-      <div class="segmented" id="foodChartMetricSegmented" role="radiogroup" aria-label="Chart metric">
+      <div class="segmented${trackedKeys.length > 4 ? ' segmented-grid' : ''}" id="foodChartMetricSegmented" role="radiogroup" aria-label="Chart metric">
         ${trackedKeys.map((k) => `<button type="button" data-metric="${k}" role="radio">${MACRO_LABELS[k]}</button>`).join('')}
       </div>` : '';
     const lastPoint = chartEntries[chartEntries.length - 1];
@@ -3255,17 +3256,13 @@
     openModal(`
       <div class="modal-title-row"><h2>Food today</h2><button class="modal-close" data-action="close-modal">${CLOSE_ICON_SVG}</button></div>
       <button type="button" class="btn btn-primary btn-block" id="logFoodFromDetailBtn">Log food</button>
-      <div class="card">
-        <div class="section-head"><h2>Today's totals</h2></div>
-        <div class="standards-preview">${rows}</div>
-        ${guidanceNoteHtml}
-      </div>
-      <div class="card">
-        <div class="section-head"><h2>Trend</h2></div>
-        ${metricSegHtml}
-        <div class="chart-wrap">${Charts.lineChart(chartEntries, { goal: chartGoal, formatValue: (v) => fmtMacroValue(activeMetric, v) })}</div>
-        ${trendFootHtml}
-      </div>
+      <div class="section-head"><h2>Today's totals</h2></div>
+      <div class="standards-preview food-totals">${rows}</div>
+      ${guidanceNoteHtml}
+      <div class="section-head"><h2>Trend</h2></div>
+      ${metricSegHtml}
+      <div class="chart-wrap">${Charts.lineChart(chartEntries, { goal: chartGoal, formatValue: (v) => fmtMacroValue(activeMetric, v) })}</div>
+      ${trendFootHtml}
       ${calcHtml}
       <div class="btn-row">
         <button class="btn btn-secondary" id="adjustFoodGoalsBtn">Adjust goals</button>
