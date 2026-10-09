@@ -179,6 +179,7 @@ button { font-family: inherit; }
    cramped compared to everything at the `.view` level — the exact opposite
    problem from the double-margins fixed elsewhere on this page, but the
    same root cause: spacing left to chance instead of one shared rule. */
+#setupContent,
 #manageExercisesPanel,
 #manageMeasurementsPanel,
 #manageWaterPanel,
@@ -224,7 +225,9 @@ button { font-family: inherit; }
    child was something else (Dashboard) — a purely incidental, inconsistent
    difference in top spacing that had nothing to do with content. */
 .section-head:first-child { margin-top: 0; }
-.section-head h2 { font-size: 15px; color: var(--text-secondary); font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
+/* 16px gap minus 6 = a heading sits 10px above its card, 24px below the previous one. */
+.section-head { margin-bottom: -6px; }
+.section-head h2 { font-size: 16px; font-weight: 700; }
 
 /* A lighter-weight sub-heading for the two rows inside "Today" (see
    view-dashboard) — one notch quieter than a full .section-head, since
@@ -702,30 +705,40 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 1p
 .segmented { display: inline-flex; max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; background: var(--surface-2); border-radius: 999px; padding: 3px; gap: 2px; }
 .segmented button {
   flex: none; border: none; background: transparent; color: var(--text-secondary);
-  padding: 6px 12px; border-radius: 999px; font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap;
+  min-width: 52px; padding: 7px 14px; border-radius: 999px; font-size: 14px; font-weight: 600; cursor: pointer; white-space: nowrap;
 }
 .segmented button[aria-checked="true"] { background: var(--surface-1); color: var(--text-primary); box-shadow: inset 0 0 0 1px var(--border); }
+/* In a form, a segmented control fills the row and splits it evenly, so long labels wrap instead of clipping. */
+.form-card > .segmented, .field > .segmented { display: flex; }
+.form-card > .segmented button, .field > .segmented button { flex: 1 1 0; min-width: 0; padding: 10px 8px; white-space: normal; line-height: 1.2; }
 
 /* ============ Switch (on/off) ============
    One button, role="switch". The ::after widens the tap area to 44px
    without making the control itself any bigger. */
 .switch { position: relative; flex: none; border: none; background: none; padding: 0; cursor: pointer; }
-.switch::after { content: ''; position: absolute; inset: -11px -6px; }
-.switch-track { display: block; position: relative; width: 36px; height: 22px; border-radius: 999px; background: var(--muted); transition: background 0.15s; }
-.switch-thumb { position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 999px; background: #fff; transition: transform 0.15s; }
+.switch::after { content: ''; position: absolute; inset: -9px -8px; }
+.switch-track { display: block; position: relative; width: 44px; height: 26px; border-radius: 999px; background: var(--muted); transition: background 0.15s; }
+.switch-thumb { position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 999px; background: #fff; transition: transform 0.15s; }
 .switch[aria-checked="true"] .switch-track { background: var(--accent); }
-.switch[aria-checked="true"] .switch-thumb { transform: translateX(14px); }
+.switch[aria-checked="true"] .switch-thumb { transform: translateX(18px); }
 .switch:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 999px; }
 
 /* Icon badge in front of a row's label; a note under the label wraps below it. */
 .setting-row-label { display: flex; align-items: center; gap: 10px; min-width: 0; }
-.setting-icon { flex: none; width: 34px; height: 34px; border-radius: 999px; background: var(--surface-2); color: var(--text-secondary); display: flex; align-items: center; justify-content: center; }
-.setting-icon .icon { width: 17px; height: 17px; }
-.setting-row-label .muted-text { display: block; font-size: 12px; }
+.setting-icon { flex: none; width: 36px; height: 36px; border-radius: 999px; background: var(--surface-2); color: var(--text-secondary); display: flex; align-items: center; justify-content: center; }
+.setting-icon .icon { width: 18px; height: 18px; }
 
-/* A card holding one row (Manage's "Track this") is as tall as a list row. */
-.card-row { padding: 10px 14px; }
-.card-row .setting-row { padding: 0; }
+/* ============ List card ============
+   A card made of rows (Settings lists, Manage's "Track this", macro goals).
+   No card padding, so each row's divider runs edge to edge; the row carries
+   the padding itself. */
+.card-list { padding: 0; overflow: hidden; }
+.card-list > .setting-row { padding: 12px 16px; min-height: 60px; }
+.card-list > .setting-row > :first-child { font-size: 15px; font-weight: 600; }
+.card-list .muted-text { display: block; font-size: 13px; font-weight: 400; }
+.card-list > .muted-text { padding: 12px 16px; }
+.card-list > .field { padding: 0 16px 14px; }
+#nutritionCalcFields { padding: 14px 16px 16px; border-top: 1px solid var(--gridline); }
 
 
 /* Chip picker — a row of discrete-choice tap targets (e.g. a 1-5 rating,

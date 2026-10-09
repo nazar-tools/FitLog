@@ -261,7 +261,7 @@
       <div class="domain-tabs" id="manageCategorySegmented" role="radiogroup" aria-label="Manage category"></div>
 
       <div id="manageExercisesPanel">
-        <div class="card card-row">
+        <div class="card card-list">
           <div class="setting-row">
             <span class="setting-row-label"><span class="setting-icon" data-icon="workout"></span><span>Track this</span></span>
             <button type="button" class="switch" id="trackWorkoutSwitch" role="switch" aria-checked="false" aria-label="Track workout"><span class="switch-track"><span class="switch-thumb"></span></span></button>
@@ -279,7 +279,7 @@
       </div>
 
       <div id="manageMeasurementsPanel" hidden>
-        <div class="card card-row">
+        <div class="card card-list">
           <div class="setting-row">
             <span class="setting-row-label"><span class="setting-icon" data-icon="measurements"></span><span>Track this</span></span>
             <button type="button" class="switch" id="trackMeasurementsSwitch" role="switch" aria-checked="false" aria-label="Track measurements"><span class="switch-track"><span class="switch-thumb"></span></span></button>
@@ -298,7 +298,7 @@
       </div>
 
       <div id="manageWaterPanel" hidden>
-        <div class="card card-row">
+        <div class="card card-list">
           <div class="setting-row">
             <span class="setting-row-label"><span class="setting-icon" data-icon="water"></span><span>Track this</span></span>
             <button type="button" class="switch" id="trackWaterSwitch" role="switch" aria-checked="false" aria-label="Track water"><span class="switch-track"><span class="switch-thumb"></span></span></button>
@@ -324,7 +324,7 @@
       </div>
 
       <div id="manageFoodPanel" hidden>
-        <div class="card card-row">
+        <div class="card card-list">
           <div class="setting-row">
             <span class="setting-row-label"><span class="setting-icon" data-icon="food"></span><span>Track this</span></span>
             <button type="button" class="switch" id="trackFoodSwitch" role="switch" aria-checked="false" aria-label="Track food"><span class="switch-track"><span class="switch-thumb"></span></span></button>
@@ -356,11 +356,11 @@
           <!-- Populated by renderMacroGoalRows() — Calories keeps its own
                toggle+amount row; every other row only appears once its
                macro is turned on above. -->
-          <div class="card" id="macroGoalRows"></div>
+          <div class="card card-list" id="macroGoalRows"></div>
 
           <div class="section-head"><h2>Nutrition calculator</h2></div>
           <p class="muted-text">Estimates daily calories and protein from your Profile, body weight, activity level, and goal (Mifflin-St Jeor formula) — apply it below.</p>
-          <div class="card" id="nutritionCalcCard">
+          <div class="card card-list" id="nutritionCalcCard">
             <div class="setting-row">
               <span class="setting-row-label"><span class="setting-icon" data-icon="calculator"></span><span>Use calculator</span></span>
               <button type="button" class="switch" id="nutritionCalcEnabledSwitch" role="switch" aria-checked="false" aria-label="Use nutrition calculator"><span class="switch-track"><span class="switch-thumb"></span></span></button>
@@ -395,7 +395,7 @@
       <div class="modal-title-row"><h2>Settings</h2><button class="modal-close" data-action="close-settings"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button></div>
 
       <div class="section-head"><h2>Appearance</h2></div>
-      <div class="card">
+      <div class="card card-list">
         <div class="setting-row">
           <span class="setting-row-label"><span class="setting-icon" data-icon="contrast"></span><span>Theme</span></span>
           <div class="segmented" id="themeSegmented" role="radiogroup" aria-label="Theme">
@@ -436,7 +436,7 @@
       </div>
 
       <div class="section-head"><h2>Units</h2></div>
-      <div class="card">
+      <div class="card card-list">
         <div class="setting-row">
           <span class="setting-row-label"><span class="setting-icon" data-icon="scale"></span><span>Weight</span></span>
           <div class="segmented" id="weightUnitSegmented" role="radiogroup" aria-label="Weight unit">
@@ -468,7 +468,7 @@
       </div>
 
       <div class="section-head"><h2>Insights</h2></div>
-      <div class="card">
+      <div class="card card-list">
         <div class="setting-row">
           <span class="setting-row-label"><span class="setting-icon" data-icon="chart"></span><span>Dashboard chart range</span></span>
           <div class="segmented" id="dashboardChartScaleSegmented" role="radiogroup" aria-label="Chart range">
