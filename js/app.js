@@ -3304,6 +3304,419 @@
     return groups;
   }
 
+  /* ============================== Organization: groups, favorites, search ==============================
+     Exercises and saved foods both outgrow a single flat list, so both get
+     the same three tools: a favorite star (pins it to the top / the
+     Favorites tab), "recent" (derived from what was actually logged — never
+     stored), and search + filter chips. Exercises also get a muscle group
+     (`ex.group`). Nothing here needs a data migration: a missing `group`
+     is inferred from the name, a missing `favorite` means "a goal lift is a
+     favorite", and a saved food is simply not a favorite until starred. */
+
+  const UI_ICON_PATHS = {
+    star: '<path d="M11.525 2.295a.53.53 0 0 1 .95 0l2.31 4.679a2.123 2.123 0 0 0 1.595 1.16l5.166.756a.53.53 0 0 1 .294.904l-3.736 3.638a2.123 2.123 0 0 0-.611 1.878l.882 5.14a.53.53 0 0 1-.771.56l-4.618-2.428a2.122 2.122 0 0 0-1.973 0L6.396 21.01a.53.53 0 0 1-.77-.56l.881-5.139a2.122 2.122 0 0 0-.611-1.879L2.16 9.795a.53.53 0 0 1 .294-.906l5.165-.755a2.122 2.122 0 0 0 1.597-1.16z"/>',
+    'chevron-right': '<path d="m9 18 6-6-6-6"/>',
+    'chevron-down': '<path d="m6 9 6 6 6-6"/>',
+    'chevron-up': '<path d="m18 15-6-6-6 6"/>',
+  };
+  const uiIcon = (name) => lucide(UI_ICON_PATHS[name]);
+
+  const EXERCISE_GROUPS = [
+    ['chest', 'Chest'], ['back', 'Back'], ['legs', 'Legs'], ['shoulders', 'Shoulders'],
+    ['arms', 'Arms'], ['core', 'Core'], ['cardio', 'Cardio'], ['full', 'Full body'], ['other', 'Other'],
+  ];
+  const EXERCISE_GROUP_LABELS = Object.fromEntries(EXERCISE_GROUPS);
+
+  // Best guess at a muscle group from the exercise's type and name — used
+  // for anything saved before groups existed, and to pre-select the chip on
+  // a new exercise until the user picks one themselves.
+  function inferExerciseGroup(ex) {
+    if (!ex) return 'other';
+    if (ex.kind === 'cardio') return 'cardio';
+    if (ex.kind === 'habit') return 'other';
+    const n = (ex.name || '').toLowerCase();
+    const has = (re) => re.test(n);
+    if (has(/plank|crunch|sit[- ]?up|\babs?\b|\bcore\b|leg raise|russian twist|wood ?chop/)) return 'core';
+    if (has(/overhead|\bohp\b|shoulder|lateral raise|front raise|shrug|face pull|delt|arnold|military/)) return 'shoulders';
+    if (has(/squat|lunge|\bleg\b|calf|calves|glute|hip thrust|\brdl\b|romanian|hamstring|quad|step[- ]?up/)) return 'legs';
+    if (has(/curl|tricep|bicep|skull|pushdown|kickback|\barm\b/)) return 'arms';
+    if (has(/deadlift|\brow\b|rows\b|pull[- ]?up|chin[- ]?up|pulldown|\blat\b|back ext|\bback\b|rack pull/)) return 'back';
+    if (has(/bench|chest|push[- ]?up|\bfly\b|flye|\bdips?\b|\bpec\b|incline|decline|\bpress\b/)) return 'chest';
+    if (has(/burpee|clean|snatch|thruster|kettlebell|swing|full body/)) return 'full';
+    return 'other';
+  }
+  function exerciseGroup(ex) { return EXERCISE_GROUP_LABELS[ex.group] ? ex.group : inferExerciseGroup(ex); }
+  function exerciseGroupLabel(ex) { return EXERCISE_GROUP_LABELS[exerciseGroup(ex)]; }
+  // Until someone stars/unstars an exercise themselves, the lifts they set a
+  // goal for are the favorites — so Favorites is useful from day one.
+  function isFavoriteExercise(ex) {
+    if (ex.favorite === undefined) return sectionOf(ex) === 'goal' && ex.kind !== 'habit';
+    return !!ex.favorite;
+  }
+
+  function agoText(iso) {
+    const d = Math.round((new Date(`${todayISO()}T00:00:00`) - new Date(`${iso}T00:00:00`)) / 86400000);
+    if (!(d > 0)) return 'today';
+    if (d === 1) return 'yesterday';
+    if (d < 14) return `${d} days ago`;
+    if (d < 60) return `${Math.round(d / 7)} weeks ago`;
+    return `${Math.round(d / 30)} months ago`;
+  }
+
+  // exerciseId -> { k: sortable "date+id", entry } for its most recent entry.
+  function lastEntryMap() {
+    const m = {};
+    state.entries.forEach((e) => {
+      const k = e.date + e.id;
+      if (!m[e.exerciseId] || k > m[e.exerciseId].k) m[e.exerciseId] = { k, entry: e };
+    });
+    return m;
+  }
+
+  function lastResultText(ex, entry) {
+    if (ex.kind === 'habit') return 'done';
+    const top = topSetOf(ex, entry);
+    if (ex.kind === 'weight' && top) return `${round(Units.lbToDisplay(top.weight), 1)} ${Units.weightUnitLabel()} × ${top.reps}`;
+    if (ex.kind === 'reps' && top) return `${top.reps} reps`;
+    if (ex.kind === 'cardio') {
+      const bits = [];
+      if (entry.distance != null) bits.push(fmtDistance(entry.distance));
+      if (entry.duration != null) bits.push(fmtDuration(entry.duration));
+      if (bits.length) return bits.join(' · ');
+    }
+    return entrySummaryText(ex, entry);
+  }
+
+  function exercisePickSub(ex, lastMap) {
+    const last = lastMap[ex.id];
+    const group = exerciseGroupLabel(ex);
+    if (!last) return `${group} · No entries yet`;
+    if (ex.kind === 'habit') return `${group} · last done ${agoText(last.entry.date)}`;
+    return `${group} · last ${lastResultText(ex, last.entry)} · ${agoText(last.entry.date)}`;
+  }
+
+  // ---- shared bits ----
+  function starButtonHtml(attr, id, on) {
+    return `<button type="button" class="org-star" ${attr}="${id}" aria-pressed="${!!on}" aria-label="${on ? 'Remove from favorites' : 'Add to favorites'}">${uiIcon('star')}</button>`;
+  }
+  function chipHtml(value, label, count, on) {
+    return `<button type="button" class="f-chip" role="radio" aria-checked="${!!on}" data-chip="${value}">${label}${count != null ? `<span class="n">${count}</span>` : ''}</button>`;
+  }
+  function segHtml(items, active) {
+    return items.map(([v, label]) => `<button type="button" role="radio" aria-checked="${v === active}" data-seg="${v}">${label}</button>`).join('');
+  }
+  // Re-render a chip row without losing where the user had scrolled it to.
+  function setChips(chipsEl, html) {
+    const left = chipsEl.scrollLeft;
+    chipsEl.innerHTML = html;
+    chipsEl.scrollLeft = left;
+    refreshFScroll(chipsEl);
+  }
+  function refreshFScroll(chipsEl) {
+    const wrap = chipsEl.closest('.f-scroll');
+    if (!wrap) return;
+    const update = () => wrap.classList.toggle('at-end', chipsEl.scrollLeft + chipsEl.clientWidth >= chipsEl.scrollWidth - 4);
+    update();
+    requestAnimationFrame(update);
+  }
+  function wireFScroll(chipsEl) {
+    const wrap = chipsEl.closest('.f-scroll');
+    if (!wrap) return;
+    chipsEl.addEventListener('scroll', () => refreshFScroll(chipsEl), { passive: true });
+    window.addEventListener('resize', () => refreshFScroll(chipsEl));
+    const more = wrap.querySelector('.f-more');
+    if (more) more.addEventListener('click', () => chipsEl.scrollBy({ left: Math.max(120, chipsEl.clientWidth * 0.7), behavior: 'smooth' }));
+  }
+  function onEnterOrSpace(handler) {
+    return (ev) => { if ((ev.key === 'Enter' || ev.key === ' ') && ev.target === ev.currentTarget.closest('[data-pick]')) { ev.preventDefault(); handler(ev); } };
+  }
+
+  /* ---------- Log -> Workout ---------- */
+
+  // Transient UI state (never saved).
+  const logEx = { seg: null, group: 'all', query: '', showAll: false, pickerOpen: false };
+  const LOG_LIST_LIMIT = 5;
+
+  function toggleExerciseFavorite(id) {
+    const ex = exerciseById(id);
+    if (!ex) return;
+    ex.favorite = !isFavoriteExercise(ex);
+    if (!save()) return;
+    renderLogExercisePicker();
+    renderExerciseManageList();
+  }
+
+  function renderLogExercisePicker() {
+    const lastMap = lastEntryMap();
+    const q = logEx.query.trim().toLowerCase();
+    const active = activeExercises();
+    const favs = active.filter(isFavoriteExercise);
+    const recent = active.filter((e) => lastMap[e.id]).sort((a, b) => lastMap[b.id].k.localeCompare(lastMap[a.id].k));
+    const byName = (a, b) => a.name.localeCompare(b.name);
+    if (!logEx.seg) logEx.seg = favs.length ? 'fav' : recent.length ? 'recent' : 'all';
+    const searching = !!q;
+    const seg = searching ? 'all' : logEx.seg;
+
+    document.getElementById('logExSeg').innerHTML = segHtml([['fav', 'Favorites'], ['recent', 'Recent'], ['all', `All ${active.length}`]], seg);
+
+    let base = seg === 'fav' ? favs : seg === 'recent' ? recent : active.slice().sort(byName);
+    if (searching) base = active.filter((e) => e.name.toLowerCase().includes(q) || exerciseGroupLabel(e).toLowerCase().includes(q)).sort(byName);
+
+    const counts = {};
+    base.forEach((e) => { const g = exerciseGroup(e); counts[g] = (counts[g] || 0) + 1; });
+    if (logEx.group !== 'all' && !counts[logEx.group]) logEx.group = 'all';
+    setChips(document.getElementById('logExChips'),
+      chipHtml('all', 'All', null, logEx.group === 'all') +
+      EXERCISE_GROUPS.filter(([g]) => counts[g]).map(([g, label]) => chipHtml(g, label, counts[g], logEx.group === g)).join(''));
+
+    const filtered = logEx.group === 'all' ? base : base.filter((e) => exerciseGroup(e) === logEx.group);
+    const limited = !searching && logEx.group === 'all' && !logEx.showAll && filtered.length > LOG_LIST_LIMIT;
+    const shown = limited ? filtered.slice(0, LOG_LIST_LIMIT) : filtered;
+
+    const list = document.getElementById('logExList');
+    if (!shown.length) {
+      let msg;
+      if (!active.length) msg = 'No exercises yet.';
+      else if (searching) msg = `No exercises match “${escapeHtml(logEx.query.trim())}”.`;
+      else if (seg === 'fav') msg = 'No favorites yet — tap the ☆ on an exercise to pin it here.';
+      else if (seg === 'recent') msg = 'Nothing logged yet — exercises you log show up here.';
+      else msg = 'No exercises in this group.';
+      list.innerHTML = `<p class="muted-text org-empty">${msg}</p>` +
+        (!active.length || searching ? `<button type="button" class="btn btn-secondary btn-sm" data-org-add="exercise">Add exercise</button>` : '');
+    } else {
+      list.innerHTML = shown.map((ex) => `
+        <div class="entry-row" data-pick="${ex.id}" role="button" tabindex="0">
+          ${exerciseIconHtml(ex, true)}
+          <div class="entry-row-main">
+            <div class="entry-row-title">${escapeHtml(ex.name)}</div>
+            <div class="entry-row-sub">${escapeHtml(exercisePickSub(ex, lastMap))}</div>
+          </div>
+          ${starButtonHtml('data-fav', ex.id, isFavoriteExercise(ex))}
+        </div>`).join('');
+    }
+    const more = document.getElementById('logExShowAll');
+    more.hidden = !limited;
+    if (limited) more.innerHTML = `${seg === 'fav' ? 'Show all favorites' : seg === 'recent' ? 'Show all recent' : `Show all ${filtered.length}`} ${uiIcon('chevron-right')}`;
+  }
+
+  function renderLogExerciseHead() {
+    const head = document.getElementById('logExerciseHead');
+    const ex = exerciseById(document.getElementById('logExercise').value);
+    if (!ex) { head.innerHTML = ''; return; }
+    head.innerHTML = `
+      ${exerciseIconHtml(ex)}
+      <div class="log-head-main">
+        <div class="log-head-label">Logging</div>
+        <div class="log-head-name">${escapeHtml(ex.name)}</div>
+        <div class="entry-row-sub">${escapeHtml(exercisePickSub(ex, lastEntryMap()))}</div>
+      </div>
+      <button type="button" class="btn btn-secondary btn-sm" id="logChangeBtn">Change</button>`;
+  }
+
+  // One place decides what shows on Log -> Workout: the picker (nothing
+  // chosen, or "Switch exercise" open) or the form (something chosen), plus
+  // the "Switch exercise" row that toggles between them.
+  function syncLogWorkoutUI() {
+    const on = logCategory === 'workout' && availableDomainCategories().length > 0;
+    const select = document.getElementById('logExercise');
+    const ex = exerciseById(select.value);
+    if (!ex) logEx.pickerOpen = false;
+    const pickerShown = on && (!ex || logEx.pickerOpen);
+    const formShown = on && !!ex && !logEx.pickerOpen;
+    document.getElementById('logExercisePicker').hidden = !pickerShown;
+    document.getElementById('logForm').hidden = !formShown;
+    document.getElementById('logSwitchCard').hidden = !(on && ex);
+    if (pickerShown) renderLogExercisePicker();
+    if (formShown) renderLogExerciseHead();
+    if (on && ex) {
+      document.getElementById('logSwitchBtn').innerHTML = logEx.pickerOpen
+        ? `<span>Back to ${escapeHtml(ex.name)}<span class="muted-text">Close the list</span></span>${uiIcon('chevron-up')}`
+        : `<span>Switch exercise<span class="muted-text">Search or browse your list</span></span>${uiIcon('chevron-down')}`;
+    }
+  }
+
+  function chooseLogExercise(id) {
+    const select = document.getElementById('logExercise');
+    select.value = id;
+    select.dispatchEvent(new Event('change'));
+    const form = document.getElementById('logForm');
+    if (!form.hidden && form.scrollIntoView) form.scrollIntoView({ block: 'nearest' });
+  }
+
+  function wireLogExercisePicker() {
+    const chips = document.getElementById('logExChips');
+    wireFScroll(chips);
+    document.getElementById('logExSeg').addEventListener('click', (ev) => {
+      const b = ev.target.closest('[data-seg]');
+      if (!b) return;
+      logEx.seg = b.dataset.seg; logEx.group = 'all'; logEx.showAll = false; logEx.query = '';
+      document.getElementById('logExSearch').value = '';
+      renderLogExercisePicker();
+    });
+    document.getElementById('logExSearch').addEventListener('input', (ev) => {
+      logEx.query = ev.target.value; logEx.group = 'all';
+      renderLogExercisePicker();
+    });
+    chips.addEventListener('click', (ev) => {
+      const b = ev.target.closest('[data-chip]');
+      if (!b) return;
+      logEx.group = b.dataset.chip;
+      renderLogExercisePicker();
+    });
+    const list = document.getElementById('logExList');
+    const pick = (ev) => {
+      const star = ev.target.closest('[data-fav]');
+      if (star) { ev.stopPropagation(); toggleExerciseFavorite(star.dataset.fav); return; }
+      const add = ev.target.closest('[data-org-add]');
+      if (add) { openExerciseForm(null); return; }
+      const row = ev.target.closest('[data-pick]');
+      if (row) chooseLogExercise(row.dataset.pick);
+    };
+    list.addEventListener('click', pick);
+    list.addEventListener('keydown', onEnterOrSpace(pick));
+    document.getElementById('logExShowAll').addEventListener('click', () => { logEx.showAll = true; renderLogExercisePicker(); });
+    document.getElementById('logSwitchBtn').addEventListener('click', () => { logEx.pickerOpen = !logEx.pickerOpen; syncLogWorkoutUI(); });
+    document.getElementById('logExerciseHead').addEventListener('click', (ev) => {
+      if (ev.target.closest('#logChangeBtn')) { logEx.pickerOpen = true; syncLogWorkoutUI(); }
+    });
+  }
+
+  /* ---------- Manage -> Workout ---------- */
+
+  const manageEx = { query: '', filter: 'all', open: {} };
+  const MANAGE_EX_FILTERS = [['all', 'All'], ['goal', 'Goals'], ['daily', 'Daily targets'], ['habit', 'Habits'], ['accessory', 'Other']];
+  function manageExMatchesFilter(ex, f) {
+    if (f === 'all') return true;
+    if (f === 'habit') return ex.kind === 'habit';
+    if (f === 'daily') return sectionOf(ex) === 'daily' && ex.kind !== 'habit';
+    return sectionOf(ex) === f && ex.kind !== 'habit';
+  }
+
+  function manageExRowHtml(ex) {
+    return `
+      <div class="entry-row is-manage${ex.archived ? ' is-toggled-off' : ''}" data-exercise-id="${ex.id}">
+        ${exerciseIconHtml(ex, true)}
+        <div class="entry-row-main">
+          <div class="entry-row-title">${escapeHtml(ex.name)}</div>
+          <div class="entry-row-sub">${kindBadge(ex)}${exerciseGoalSummary(ex)}</div>
+        </div>
+        <div class="entry-row-actions">
+          ${ex.archived ? `<button class="btn btn-secondary btn-sm" data-action="unarchive-exercise" data-id="${ex.id}">Unarchive</button>` : ''}
+          <button class="btn btn-secondary btn-sm" data-action="edit-exercise" data-id="${ex.id}">Edit</button>
+        </div>
+        ${ex.archived ? '' : starButtonHtml('data-fav', ex.id, isFavoriteExercise(ex))}
+      </div>`;
+  }
+
+  function renderExerciseManageList() {
+    if (!renderDomainTrackToggle('workout')) return;
+    const wrap = document.getElementById('exerciseManageList');
+    const q = manageEx.query.trim().toLowerCase();
+    const matchesQ = (ex) => !q || ex.name.toLowerCase().includes(q) || exerciseGroupLabel(ex).toLowerCase().includes(q);
+    const queried = state.exercises.filter(matchesQ);
+
+    const fcounts = {};
+    MANAGE_EX_FILTERS.forEach(([f]) => { fcounts[f] = queried.filter((ex) => manageExMatchesFilter(ex, f)).length; });
+    if (!fcounts[manageEx.filter]) manageEx.filter = 'all';
+    setChips(document.getElementById('exManageChips'),
+      MANAGE_EX_FILTERS.filter(([f]) => f === 'all' || fcounts[f]).map(([f, label]) => chipHtml(f, label, fcounts[f], manageEx.filter === f)).join(''));
+
+    const visible = queried.filter((ex) => manageExMatchesFilter(ex, manageEx.filter));
+    const active = visible.filter((e) => !e.archived);
+    const archived = visible.filter((e) => e.archived);
+    const pinned = active.filter(isFavoriteExercise);
+    const rest = active.filter((e) => !isFavoriteExercise(e));
+    const sections = [{ key: 'pinned', label: '★ Pinned', items: pinned }];
+    EXERCISE_GROUPS.forEach(([g, label]) => sections.push({ key: g, label, items: rest.filter((e) => exerciseGroup(e) === g) }));
+    sections.push({ key: 'archived', label: 'Archived', items: archived });
+
+    // A small list opens fully; a long one starts with just Pinned open so
+    // the group headers (with counts) are what you scan.
+    const totalActive = state.exercises.filter((e) => !e.archived).length;
+    const filtering = !!q || manageEx.filter !== 'all';
+    const isOpen = (key) => {
+      if (filtering) return true;
+      if (key in manageEx.open) return manageEx.open[key];
+      if (key === 'archived') return false;
+      return key === 'pinned' || totalActive <= 12;
+    };
+
+    const html = sections.filter((s) => s.items.length).map((s) => {
+      const open = isOpen(s.key);
+      return `<div class="g-sec">
+        <button type="button" class="g-head" data-sec="${s.key}" aria-expanded="${open}">${uiIcon(open ? 'chevron-down' : 'chevron-right')}<span>${s.label}</span><span class="n">${s.items.length}</span></button>
+        ${open ? `<div class="g-list">${s.items.map(manageExRowHtml).join('')}</div>` : ''}
+      </div>`;
+    }).join('');
+    wrap.innerHTML = html
+      ? `<div class="card org-card">${html}</div>`
+      : `<div class="card org-card"><p class="muted-text org-empty">${state.exercises.length ? 'No exercises match.' : 'No exercises yet.'}</p></div>`;
+  }
+
+  function wireManageExercises() {
+    wireFScroll(document.getElementById('exManageChips'));
+    document.getElementById('exManageSearch').addEventListener('input', (ev) => { manageEx.query = ev.target.value; renderExerciseManageList(); });
+    document.getElementById('exManageChips').addEventListener('click', (ev) => {
+      const b = ev.target.closest('[data-chip]');
+      if (!b) return;
+      manageEx.filter = b.dataset.chip;
+      renderExerciseManageList();
+    });
+    document.getElementById('exerciseManageList').addEventListener('click', (ev) => {
+      const star = ev.target.closest('[data-fav]');
+      if (star) { toggleExerciseFavorite(star.dataset.fav); return; }
+      const head = ev.target.closest('[data-sec]');
+      if (head) {
+        const key = head.dataset.sec;
+        manageEx.open[key] = head.getAttribute('aria-expanded') !== 'true';
+        renderExerciseManageList();
+        return;
+      }
+      const edit = ev.target.closest('[data-action="edit-exercise"]');
+      if (edit) { openExerciseForm(edit.dataset.id); return; }
+      const un = ev.target.closest('[data-action="unarchive-exercise"]');
+      if (un) {
+        const ex = exerciseById(un.dataset.id);
+        if (!ex) return;
+        ex.archived = false;
+        if (!save()) return;
+        toast('Exercise unarchived');
+        renderAll();
+      }
+    });
+  }
+
+  /* ---------- Saved foods: shared helpers ---------- */
+
+  // savedFoodId -> sortable "date+id" of the last time it was logged. Entries
+  // made from a saved food carry its id; older ones only have its name as
+  // the note, which matches just as well.
+  function savedFoodLastUsedMap() {
+    const byName = {};
+    state.food.savedFoods.forEach((f) => { byName[f.name] = f.id; });
+    const m = {};
+    state.food.entries.forEach((e) => {
+      const id = e.savedFoodId || (e.note && byName[e.note]);
+      if (!id) return;
+      const k = e.date + e.id;
+      if (!m[id] || k > m[id]) m[id] = k;
+    });
+    return m;
+  }
+  function savedFoodCategoryLabel(food) {
+    const c = SAVED_FOOD_CATEGORIES.find((x) => x.value === (food.category || 'other'));
+    return c ? c.label : 'Other';
+  }
+  const SAVED_FOOD_CHIP_LABELS = { meal: 'Meals', snack: 'Snacks', drink: 'Drinks', other: 'Other' };
+  function toggleSavedFoodFavorite(id) {
+    const f = savedFoodById(id);
+    if (!f) return;
+    f.favorite = !f.favorite;
+    if (!save()) return;
+    renderSavedFoodLogList();
+    renderSavedFoodManageList();
+  }
+
   function populateExerciseSelect(select, { includeArchived = false } = {}) {
     const list = includeArchived ? state.exercises : activeExercises();
     const groups = groupBySection(list);
@@ -3620,10 +4033,14 @@
     const select = document.getElementById('logExercise');
     const prevValue = select.value;
     populateExerciseSelect(select);
-    if (prevValue && [...select.options].some((o) => o.value === prevValue)) select.value = prevValue;
+    // Nothing is chosen until the user picks from the list (or opens one
+    // from elsewhere in the app) — hence the blank first option.
+    select.insertAdjacentHTML('afterbegin', '<option value=""></option>');
+    select.value = prevValue && [...select.options].some((o) => o.value === prevValue) ? prevValue : '';
     document.getElementById('logDate').value = document.getElementById('logDate').value || todayISO();
     const ex = exerciseById(select.value);
     renderDynamicFields(document.getElementById('logDynamicFields'), ex);
+    syncLogWorkoutUI();
   }
 
   function populateTrackerSelect(select) {
@@ -3741,13 +4158,24 @@
     // still happens to say.
     const allOff = cats.length === 0;
     document.getElementById('logAllOffHint').hidden = !allOff;
-    document.getElementById('logForm').hidden = allOff || logCategory !== 'workout';
+    // Which of the workout pieces (picker / form / switch row) show is decided in syncLogWorkoutUI().
+    document.getElementById('logForm').hidden = true;
+    document.getElementById('logExercisePicker').hidden = true;
+    document.getElementById('logSwitchCard').hidden = true;
     document.getElementById('logMeasurementForm').hidden = allOff || logCategory !== 'measurements';
     document.getElementById('logWaterPanel').hidden = allOff || logCategory !== 'water';
-    document.getElementById('logFoodForm').hidden = allOff || logCategory !== 'food';
-    document.getElementById('savedFoodsWrap').hidden = allOff || logCategory !== 'food' || !state.food.savedFoods.length;
+    // Food: saved foods lead; typing one in by hand is collapsed under them
+    // (open straight away when nothing is saved yet).
+    const hasSaved = state.food.savedFoods.length > 0;
+    const foodOn = !allOff && logCategory === 'food';
+    document.getElementById('logFoodForm').hidden = !foodOn || (hasSaved && !foodLog.manualOpen);
+    document.getElementById('logFoodManualCard').hidden = !foodOn || !hasSaved;
+    document.getElementById('savedFoodsWrap').hidden = !foodOn || !hasSaved;
+    if (foodOn && hasSaved) {
+      document.getElementById('logFoodManualBtn').innerHTML = `<span>Enter a food manually<span class="muted-text">Calories and macros you haven’t saved</span></span>${uiIcon(foodLog.manualOpen ? 'chevron-up' : 'chevron-down')}`;
+    }
     if (!allOff) {
-      if (logCategory === 'workout') renderLogForm();
+      if (logCategory === 'workout') renderLogForm(); else syncLogWorkoutUI();
       if (logCategory === 'measurements') renderLogMeasurementForm();
       if (logCategory === 'water') renderLogWaterPanel();
       if (logCategory === 'food') { renderLogFoodForm(); renderSavedFoodLogList(); }
@@ -3981,28 +4409,6 @@
 
   function savedFoodById(id) { return state.food.savedFoods.find((f) => f.id === id); }
 
-  function savedFoodRowHtml(food) {
-    const cat = SAVED_FOOD_CATEGORIES.find((c) => c.value === (food.category || 'other'));
-    return `
-      <div class="entry-row is-manage" data-saved-food-id="${food.id}">
-        ${savedFoodIconHtml(food, true)}
-        <div class="entry-row-main">
-          <div class="entry-row-title">${escapeHtml(food.name)} ${cat ? `<span class="chip">${cat.label}</span>` : ''}</div>
-          <div class="entry-row-sub">${macroSummaryText(food)}</div>
-        </div>
-        <div class="entry-row-actions">
-          <button class="btn btn-secondary btn-sm" data-action="edit-saved-food" data-id="${food.id}">Edit</button>
-        </div>
-      </div>`;
-  }
-
-  function renderSavedFoodManageList() {
-    const wrap = document.getElementById('savedFoodManageList');
-    wrap.innerHTML = state.food.savedFoods.map(savedFoodRowHtml).join('')
-      || '<p class="muted-text">No saved foods yet — research a food once, save it here, then log it in one tap from Log &rarr; Food.</p>';
-    wrap.querySelectorAll('[data-action="edit-saved-food"]').forEach((btn) => btn.addEventListener('click', () => openSavedFoodForm(btn.dataset.id)));
-  }
-
   // Only currently-tracked macros are asked for (same fields as the log
   // form itself, Calories required) — a saved food is just a template for
   // a food entry, so it follows the same tracking rules one would.
@@ -4030,6 +4436,7 @@
     const food = editing ? savedFoodById(foodId) : null;
     const seed = food || prefill || null;
     let selectedCategory = (seed && seed.category) || 'other';
+    let selectedFavorite = !!(food && food.favorite);
     openModal(`
       <div class="modal-title-row"><h2>${editing ? 'Edit saved food' : 'Save a new food'}</h2><button class="modal-close" data-action="close-modal">${CLOSE_ICON_SVG}</button></div>
       <div class="form-card">
@@ -4042,6 +4449,10 @@
             ${SAVED_FOOD_CATEGORIES.map((c) => `<button type="button" data-category="${c.value}" role="radio">${c.label}</button>`).join('')}
           </div>
         </div>
+        <div class="card card-list"><div class="setting-row">
+          <span>Favorite<span class="muted-text">Shows under Favorites when you log a food</span></span>
+          ${switchHtml('id="savedFoodFavorite"', 'Favorite', selectedFavorite)}
+        </div></div>
         ${trackedMacroKeys().map((k) => {
           const req = k === 'calories';
           return `
@@ -4063,6 +4474,10 @@
     document.querySelectorAll('#savedFoodCategorySegmentedForm button').forEach((btn) => {
       btn.addEventListener('click', () => setCategoryUI(btn.dataset.category));
     });
+    document.getElementById('savedFoodFavorite').addEventListener('click', (ev) => {
+      selectedFavorite = !selectedFavorite;
+      ev.currentTarget.setAttribute('aria-checked', String(selectedFavorite));
+    });
     document.getElementById('saveSavedFoodBtn').addEventListener('click', () => {
       const name = document.getElementById('savedFoodName').value.trim();
       if (!name) { toast('Give it a name.'); return; }
@@ -4076,10 +4491,11 @@
       if (editing) {
         food.name = name;
         food.category = selectedCategory;
+        food.favorite = selectedFavorite;
         Object.assign(food, values);
         if (iconField.value()) food.icon = iconField.value(); else delete food.icon;
       } else {
-        state.food.savedFoods.push({ id: genId('savedfood'), name, category: selectedCategory, ...values, ...(iconField.value() && { icon: iconField.value() }) });
+        state.food.savedFoods.push({ id: genId('savedfood'), name, category: selectedCategory, favorite: selectedFavorite, ...values, ...(iconField.value() && { icon: iconField.value() }) });
       }
       if (!save()) return;
       closeModal();
@@ -4110,11 +4526,6 @@
   let savedFoodQty = 1;
   const SAVED_FOOD_QTY_PRESETS = [0.5, 0.75, 1, 1.5, 2];
 
-  // Which category chip is active above the saved-foods list on Log → Food.
-  // 'all' shows everything; otherwise one of SAVED_FOOD_CATEGORIES' values.
-  // Also transient UI state, not saved.
-  let savedFoodCategoryFilter = 'all';
-
   // Every tracked macro on `food`, scaled by `qty` and rounded to one
   // decimal place — e.g. 1.5x on 280 cal / 53g protein logs 420 cal /
   // 79.5g protein. A macro the saved food has no value for stays null, same
@@ -4125,39 +4536,64 @@
     return values;
   }
 
+  /* ---------- Log -> Food: saved foods ---------- */
+
+  // Transient UI state (never saved).
+  const foodLog = { seg: null, cat: 'all', query: '', showAll: false, manualOpen: false };
+  const FOOD_LIST_LIMIT = 5;
+  let savedFoodDate = null;
+
   function renderSavedFoodLogList() {
     const wrap = document.getElementById('savedFoodsWrap');
     const list = document.getElementById('savedFoodLogList');
-    const chipsWrap = document.getElementById('savedFoodCategorySegmented');
     const foods = state.food.savedFoods;
-    wrap.hidden = foods.length === 0;
-    if (!foods.length) { list.innerHTML = ''; if (chipsWrap) chipsWrap.innerHTML = ''; return; }
-    if (chipsWrap) {
-      chipsWrap.innerHTML = `<button type="button" data-cat-filter="all" role="radio" aria-checked="${savedFoodCategoryFilter === 'all'}">All</button>` +
-        SAVED_FOOD_CATEGORIES.map((c) => `<button type="button" data-cat-filter="${c.value}" role="radio" aria-checked="${savedFoodCategoryFilter === c.value}">${c.label}${c.value === 'meal' || c.value === 'snack' || c.value === 'drink' ? 's' : ''}</button>`).join('');
-      chipsWrap.querySelectorAll('button').forEach((btn) => {
-        btn.addEventListener('click', () => {
-          savedFoodCategoryFilter = btn.dataset.catFilter;
-          expandedSavedFoodId = null;
-          renderSavedFoodLogList();
-        });
-      });
-    }
-    const visibleFoods = savedFoodCategoryFilter === 'all' ? foods : foods.filter((f) => (f.category || 'other') === savedFoodCategoryFilter);
-    if (!visibleFoods.length) {
-      list.innerHTML = `<p class="muted-text field-hint">No saved foods in this category.</p>`;
+    wrap.hidden = foods.length === 0 || logCategory !== 'food';
+    if (!foods.length) { list.innerHTML = ''; return; }
+
+    const lastUsed = savedFoodLastUsedMap();
+    const q = foodLog.query.trim().toLowerCase();
+    const favs = foods.filter((f) => f.favorite);
+    const recent = foods.filter((f) => lastUsed[f.id]).sort((a, b) => lastUsed[b.id].localeCompare(lastUsed[a.id]));
+    const byName = (a, b) => a.name.localeCompare(b.name);
+    if (!foodLog.seg) foodLog.seg = favs.length ? 'fav' : recent.length ? 'recent' : 'all';
+    const searching = !!q;
+    const seg = searching ? 'all' : foodLog.seg;
+    document.getElementById('foodSeg').innerHTML = segHtml([['fav', 'Favorites'], ['recent', 'Recent'], ['all', `All ${foods.length}`]], seg);
+
+    let base = seg === 'fav' ? favs : seg === 'recent' ? recent : foods.slice().sort(byName);
+    if (searching) base = foods.filter((f) => f.name.toLowerCase().includes(q)).sort(byName);
+
+    const counts = {};
+    base.forEach((f) => { const c = f.category || 'other'; counts[c] = (counts[c] || 0) + 1; });
+    if (foodLog.cat !== 'all' && !counts[foodLog.cat]) foodLog.cat = 'all';
+    setChips(document.getElementById('savedFoodCategorySegmented'),
+      chipHtml('all', 'All', null, foodLog.cat === 'all') +
+      SAVED_FOOD_CATEGORIES.filter((c) => counts[c.value]).map((c) => chipHtml(c.value, SAVED_FOOD_CHIP_LABELS[c.value], counts[c.value], foodLog.cat === c.value)).join(''));
+
+    const filtered = foodLog.cat === 'all' ? base : base.filter((f) => (f.category || 'other') === foodLog.cat);
+    const limited = !searching && foodLog.cat === 'all' && !foodLog.showAll && filtered.length > FOOD_LIST_LIMIT;
+    const shown = limited ? filtered.slice(0, FOOD_LIST_LIMIT) : filtered;
+    const more = document.getElementById('foodShowAll');
+    more.hidden = !limited;
+    if (limited) more.innerHTML = `${seg === 'fav' ? 'Show all favorites' : seg === 'recent' ? 'Show all recent' : `Show all ${filtered.length}`} ${uiIcon('chevron-right')}`;
+
+    if (!shown.length) {
+      list.innerHTML = `<p class="muted-text org-empty">${searching ? `No saved foods match “${escapeHtml(foodLog.query.trim())}”.`
+        : seg === 'fav' ? 'No favorites yet — tap the ☆ on a saved food to pin it here.'
+        : seg === 'recent' ? 'Nothing logged from a saved food yet.' : 'No saved foods in this category.'}</p>`;
       return;
     }
-    list.innerHTML = visibleFoods.map((food) => {
+    list.innerHTML = shown.map((food) => {
       const expanded = expandedSavedFoodId === food.id;
       const isCustomQty = !SAVED_FOOD_QTY_PRESETS.includes(savedFoodQty);
       return `
-        <div class="entry-row saved-food-log-row" data-saved-food-id="${food.id}">
+        <div class="entry-row saved-food-log-row" data-saved-food-id="${food.id}" role="button" tabindex="0">
           ${savedFoodIconHtml(food, true)}
           <div class="entry-row-main">
             <div class="entry-row-title">${escapeHtml(food.name)}</div>
             <div class="entry-row-sub">${macroSummaryText(food)}</div>
           </div>
+          ${starButtonHtml('data-fav', food.id, food.favorite)}
         </div>
         ${expanded ? `
         <div class="card form-card saved-food-qty-card">
@@ -4168,23 +4604,16 @@
           ${isCustomQty ? `
           <label class="field"><span class="field-label">Custom quantity (&times;)</span>
             <input type="number" step="any" min="0" id="savedFoodCustomQty" value="${savedFoodQty}" /></label>` : ''}
+          <label class="field"><span class="field-label">Date</span>
+            <input type="date" id="savedFoodDate" value="${savedFoodDate || todayISO()}" /></label>
           <p class="muted-text field-hint">Logs: ${macroSummaryText(scaledSavedFoodValues(food, savedFoodQty))}</p>
           <button type="button" class="btn btn-primary btn-block" id="logSavedFoodBtn">Log it</button>
         </div>` : ''}`;
     }).join('');
-    list.querySelectorAll('.saved-food-log-row').forEach((row) => {
-      row.addEventListener('click', () => {
-        const id = row.dataset.savedFoodId;
-        expandedSavedFoodId = expandedSavedFoodId === id ? null : id;
-        savedFoodQty = 1;
-        renderSavedFoodLogList();
-      });
-    });
     const chips = document.getElementById('savedFoodQtyChips');
     if (chips) {
       chips.querySelectorAll('.chip-option').forEach((btn) => {
-        btn.addEventListener('click', (ev) => {
-          ev.stopPropagation();
+        btn.addEventListener('click', () => {
           if (btn.dataset.qty === 'custom') { savedFoodQty = 1.25; } // any non-preset value switches the picker into "Custom" mode
           else savedFoodQty = parseFloat(btn.dataset.qty);
           renderSavedFoodLogList();
@@ -4193,36 +4622,156 @@
     }
     const customInput = document.getElementById('savedFoodCustomQty');
     if (customInput) {
-      customInput.addEventListener('click', (ev) => ev.stopPropagation());
       customInput.addEventListener('change', () => {
         const raw = parseFloat(customInput.value);
         if (!Number.isNaN(raw) && raw > 0) savedFoodQty = raw;
         renderSavedFoodLogList();
       });
     }
+    const dateInput = document.getElementById('savedFoodDate');
+    if (dateInput) dateInput.addEventListener('input', () => { savedFoodDate = dateInput.value || null; });
     const logBtn = document.getElementById('logSavedFoodBtn');
-    if (logBtn) {
-      logBtn.addEventListener('click', (ev) => {
-        ev.stopPropagation();
-        logSavedFood(expandedSavedFoodId, savedFoodQty);
-      });
-    }
+    if (logBtn) logBtn.addEventListener('click', () => logSavedFood(expandedSavedFoodId, savedFoodQty));
   }
 
   function logSavedFood(foodId, qty) {
     const food = savedFoodById(foodId);
     if (!food) return;
     const values = scaledSavedFoodValues(food, qty);
-    const date = document.getElementById('logFoodDate').value || todayISO();
-    state.food.entries.push({ id: genId('food'), date, ...values, note: food.name });
+    const dateEl = document.getElementById('savedFoodDate');
+    const date = (dateEl && dateEl.value) || savedFoodDate || todayISO();
+    state.food.entries.push({ id: genId('food'), date, ...values, note: food.name, savedFoodId: food.id });
     if (!save()) return;
     toast(`${food.name} logged`);
     expandedSavedFoodId = null;
     savedFoodQty = 1;
+    savedFoodDate = null;
     renderSavedFoodLogList();
+    renderSavedFoodManageList();
     renderRecentEntries();
     renderDashboard();
     renderHistory();
+  }
+
+  function wireFoodLog() {
+    const chips = document.getElementById('savedFoodCategorySegmented');
+    wireFScroll(chips);
+    const reset = () => { expandedSavedFoodId = null; savedFoodQty = 1; };
+    document.getElementById('foodSeg').addEventListener('click', (ev) => {
+      const b = ev.target.closest('[data-seg]');
+      if (!b) return;
+      foodLog.seg = b.dataset.seg; foodLog.cat = 'all'; foodLog.showAll = false; foodLog.query = '';
+      document.getElementById('foodSearch').value = '';
+      reset(); renderSavedFoodLogList();
+    });
+    document.getElementById('foodSearch').addEventListener('input', (ev) => {
+      foodLog.query = ev.target.value; foodLog.cat = 'all';
+      reset(); renderSavedFoodLogList();
+    });
+    chips.addEventListener('click', (ev) => {
+      const b = ev.target.closest('[data-chip]');
+      if (!b) return;
+      foodLog.cat = b.dataset.chip;
+      reset(); renderSavedFoodLogList();
+    });
+    const list = document.getElementById('savedFoodLogList');
+    const pick = (ev) => {
+      const star = ev.target.closest('[data-fav]');
+      if (star) { ev.stopPropagation(); toggleSavedFoodFavorite(star.dataset.fav); return; }
+      const row = ev.target.closest('.saved-food-log-row');
+      if (!row) return;
+      const id = row.dataset.savedFoodId;
+      expandedSavedFoodId = expandedSavedFoodId === id ? null : id;
+      savedFoodQty = 1;
+      renderSavedFoodLogList();
+    };
+    list.addEventListener('click', pick);
+    list.addEventListener('keydown', (ev) => {
+      if ((ev.key === 'Enter' || ev.key === ' ') && ev.target.classList.contains('saved-food-log-row')) { ev.preventDefault(); pick(ev); }
+    });
+    document.getElementById('foodShowAll').addEventListener('click', () => { foodLog.showAll = true; renderSavedFoodLogList(); });
+    document.getElementById('logFoodManualBtn').addEventListener('click', () => { foodLog.manualOpen = !foodLog.manualOpen; renderLogView(); });
+  }
+
+  /* ---------- Manage -> Food: saved foods ---------- */
+
+  const foodManage = { query: '', filter: 'all', sort: 'recent', showAll: false };
+
+  function savedFoodRowHtml(food) {
+    return `
+      <div class="entry-row is-manage" data-saved-food-id="${food.id}">
+        ${savedFoodIconHtml(food, true)}
+        <div class="entry-row-main">
+          <div class="entry-row-title">${escapeHtml(food.name)}</div>
+          <div class="entry-row-sub">${savedFoodCategoryLabel(food)} · ${macroSummaryText(food)}</div>
+        </div>
+        <div class="entry-row-actions">
+          <button class="btn btn-secondary btn-sm" data-action="edit-saved-food" data-id="${food.id}">Edit</button>
+        </div>
+        ${starButtonHtml('data-fav', food.id, food.favorite)}
+      </div>`;
+  }
+
+  function renderSavedFoodManageList() {
+    const wrap = document.getElementById('savedFoodManageList');
+    const foods = state.food.savedFoods;
+    const tools = ['foodManageSearch', 'foodManageChips', 'foodSortLabel'].map((id) => document.getElementById(id).closest('.search, .f-scroll, .sortrow'));
+    tools.forEach((el) => { el.hidden = foods.length === 0; });
+    if (!foods.length) {
+      wrap.innerHTML = '<p class="muted-text">No saved foods yet — research a food once, save it here, then log it in one tap from Log &rarr; Food.</p>';
+      return;
+    }
+    const q = foodManage.query.trim().toLowerCase();
+    const queried = q ? foods.filter((f) => f.name.toLowerCase().includes(q) || savedFoodCategoryLabel(f).toLowerCase().includes(q)) : foods;
+    const favCount = queried.filter((f) => f.favorite).length;
+    const counts = {};
+    queried.forEach((f) => { const c = f.category || 'other'; counts[c] = (counts[c] || 0) + 1; });
+    if ((foodManage.filter === 'fav' && !favCount) || (foodManage.filter !== 'all' && foodManage.filter !== 'fav' && !counts[foodManage.filter])) foodManage.filter = 'all';
+    setChips(document.getElementById('foodManageChips'),
+      chipHtml('all', 'All', queried.length, foodManage.filter === 'all') +
+      (favCount ? chipHtml('fav', '★ Favorites', favCount, foodManage.filter === 'fav') : '') +
+      SAVED_FOOD_CATEGORIES.filter((c) => counts[c.value]).map((c) => chipHtml(c.value, SAVED_FOOD_CHIP_LABELS[c.value], counts[c.value], foodManage.filter === c.value)).join(''));
+
+    let visible = queried.filter((f) => foodManage.filter === 'all' || (foodManage.filter === 'fav' ? f.favorite : (f.category || 'other') === foodManage.filter));
+    const lastUsed = savedFoodLastUsedMap();
+    visible = visible.slice().sort((a, b) => {
+      if (foodManage.sort === 'recent') {
+        const ka = lastUsed[a.id] || '', kb = lastUsed[b.id] || '';
+        if (ka !== kb) return kb.localeCompare(ka);
+      }
+      return a.name.localeCompare(b.name);
+    });
+    document.getElementById('foodSortLabel').innerHTML = `Sorted by <b>${foodManage.sort === 'recent' ? 'Recently used' : 'A–Z'}</b>`;
+
+    const filtering = !!q || foodManage.filter !== 'all';
+    const limited = !filtering && !foodManage.showAll && visible.length > FOOD_LIST_LIMIT;
+    const shown = limited ? visible.slice(0, FOOD_LIST_LIMIT) : visible;
+    wrap.innerHTML = `<div class="card org-card flush">${shown.length
+      ? `<div class="g-list">${shown.map(savedFoodRowHtml).join('')}</div>`
+      : '<p class="muted-text org-empty">No saved foods match.</p>'}
+      ${limited ? `<button type="button" class="showall" id="foodManageShowAll">Show all ${visible.length} ${uiIcon('chevron-right')}</button>` : ''}</div>`;
+  }
+
+  function wireManageFood() {
+    wireFScroll(document.getElementById('foodManageChips'));
+    document.getElementById('foodManageSearch').addEventListener('input', (ev) => { foodManage.query = ev.target.value; renderSavedFoodManageList(); });
+    document.getElementById('foodManageChips').addEventListener('click', (ev) => {
+      const b = ev.target.closest('[data-chip]');
+      if (!b) return;
+      foodManage.filter = b.dataset.chip;
+      renderSavedFoodManageList();
+    });
+    document.getElementById('foodSortBtn').addEventListener('click', () => {
+      foodManage.sort = foodManage.sort === 'recent' ? 'az' : 'recent';
+      renderSavedFoodManageList();
+    });
+    document.getElementById('savedFoodManageList').addEventListener('click', (ev) => {
+      const star = ev.target.closest('[data-fav]');
+      if (star) { toggleSavedFoodFavorite(star.dataset.fav); return; }
+      const edit = ev.target.closest('[data-action="edit-saved-food"]');
+      if (edit) { openSavedFoodForm(edit.dataset.id); return; }
+      if (ev.target.closest('#foodManageShowAll')) { foodManage.showAll = true; renderSavedFoodManageList(); }
+    });
   }
 
   function handleLogSubmit(ev) {
@@ -4242,6 +4791,7 @@
     toast('Entry saved');
     document.getElementById('logNote').value = '';
     renderDynamicFields(document.getElementById('logDynamicFields'), ex);
+    renderLogExerciseHead();
     renderRecentEntries();
     renderDashboard();
     renderHistory();
@@ -4486,6 +5036,7 @@
     switchTab('log');
     const select = document.getElementById('logExercise');
     select.value = exId;
+    logEx.pickerOpen = false;
     select.dispatchEvent(new Event('change'));
   }
   function logTrackerFromDetail(trackerId) {
@@ -4722,6 +5273,18 @@
         ${iconFieldHtml('exIcon')}
 
         <div class="field">
+          <span class="field-label">Muscle group</span>
+          <div class="f-chips wrap" id="exGroupChips" role="radiogroup" aria-label="Muscle group">
+            ${EXERCISE_GROUPS.map(([g, label]) => chipHtml(g, label, null, false)).join('')}
+          </div>
+        </div>
+
+        <div class="card card-list"><div class="setting-row">
+          <span>Favorite<span class="muted-text">Shows under Favorites and at the top of the exercise list</span></span>
+          ${switchHtml('id="exFavorite"', 'Favorite', false)}
+        </div></div>
+
+        <div class="field">
           <span class="field-label">Section</span>
           <div class="segmented" id="exSectionSegmented" role="radiogroup">
             <button type="button" data-section="goal" role="radio">Goal</button>
@@ -4772,6 +5335,23 @@
     let selectedSection = section;
     let selectedRegion = bodyRegion;
     let selectedLiftType = (ex && ex.liftType) || '';
+    // Muscle group: whatever's saved (or inferred from the name for older
+    // exercises). A brand-new exercise follows its name/type until a chip is
+    // tapped, so "Incline Dumbbell Press" lands on Chest without any extra tap.
+    let selectedGroup = ex ? exerciseGroup(ex) : 'other';
+    let groupTouched = !!ex;
+    let selectedFavorite = ex ? isFavoriteExercise(ex) : false;
+    const paintGroup = () => document.querySelectorAll('#exGroupChips .f-chip').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.chip === selectedGroup)));
+    const followGroup = () => {
+      if (groupTouched) return;
+      selectedGroup = inferExerciseGroup({ name: document.getElementById('exName').value, kind: selectedKind });
+      paintGroup();
+    };
+    document.querySelectorAll('#exGroupChips .f-chip').forEach((b) => b.addEventListener('click', () => { groupTouched = true; selectedGroup = b.dataset.chip; paintGroup(); }));
+    document.getElementById('exName').addEventListener('input', followGroup);
+    const favSwitch = document.getElementById('exFavorite');
+    favSwitch.setAttribute('aria-checked', String(selectedFavorite));
+    favSwitch.addEventListener('click', () => { selectedFavorite = !selectedFavorite; favSwitch.setAttribute('aria-checked', String(selectedFavorite)); });
     // Goal style for a weight-kind exercise with a lift type set — 'fixed'
     // (a plain typed number) or 'standard' (recomputed from a bodyweight
     // multiplier tier; see computeStandardGoal/standardGoalPreviewRows).
@@ -4925,11 +5505,13 @@
       setSectionUI(k === 'habit' ? 'daily' : selectedSection);
       iconField.refresh();
       renderGoalField();
+      followGroup();
     }
 
     document.querySelectorAll('#exKindList .option-row').forEach((b) => {
       b.addEventListener('click', () => { if (!b.disabled) setKindUI(b.dataset.kind); });
     });
+    paintGroup();
     setKindUI(selectedKind);
 
     document.getElementById('saveExerciseBtn').addEventListener('click', () => {
@@ -4962,6 +5544,8 @@
         ex.name = name;
         ex.kind = selectedKind;
         ex.section = selectedSection;
+        ex.group = selectedGroup;
+        ex.favorite = selectedFavorite;
         if (selectedKind === 'weight') {
           ex.bodyRegion = selectedRegion; ex.liftType = selectedLiftType || null;
           ex.goalMode = usingStandardGoal ? 'standard' : 'fixed';
@@ -4977,7 +5561,7 @@
         if (selectedKind === 'habit') ex.repeat = selectedRepeat; else delete ex.repeat;
         if (iconField.value()) ex.icon = iconField.value(); else delete ex.icon;
       } else {
-        const newEx = { id: genId('ex'), name, kind: selectedKind, section: selectedSection, goal, goalMode: 'fixed', goalTier: null, archived: false, createdAt: new Date().toISOString() };
+        const newEx = { id: genId('ex'), name, kind: selectedKind, section: selectedSection, group: selectedGroup, favorite: selectedFavorite, goal, goalMode: 'fixed', goalTier: null, archived: false, createdAt: new Date().toISOString() };
         if (selectedKind === 'weight') {
           newEx.bodyRegion = selectedRegion; newEx.liftType = selectedLiftType || null;
           newEx.goalMode = usingStandardGoal ? 'standard' : 'fixed';
@@ -5609,36 +6193,6 @@
     renderMacroTrackChips();
     renderMacroGoalRows();
     renderNutritionCalcCard();
-  }
-
-  function renderExerciseManageList() {
-    if (!renderDomainTrackToggle('workout')) return;
-    const wrap = document.getElementById('exerciseManageList');
-    const groups = groupBySection(state.exercises);
-    wrap.innerHTML = ['goal', 'daily', 'accessory'].map((sec) => {
-      if (!groups[sec].length) return '';
-      return `<div class="manage-group-label">${SECTION_LABELS[sec]}</div>` + groups[sec].map((ex) => `
-        <div class="entry-row is-manage${ex.archived ? ' is-toggled-off' : ''}" data-exercise-id="${ex.id}">
-          ${exerciseIconHtml(ex, true)}
-          <div class="entry-row-main">
-            <div class="entry-row-title">${escapeHtml(ex.name)} ${ex.archived ? '<span class="chip chip-archived">archived</span>' : ''}</div>
-            <div class="entry-row-sub">${kindBadge(ex)}${exerciseGoalSummary(ex)}</div>
-          </div>
-          <div class="entry-row-actions">
-            ${ex.archived ? `<button class="btn btn-secondary btn-sm" data-action="unarchive-exercise" data-id="${ex.id}">Unarchive</button>` : ''}
-            <button class="btn btn-secondary btn-sm" data-action="edit-exercise" data-id="${ex.id}">Edit</button>
-          </div>
-        </div>`).join('');
-    }).join('');
-    wrap.querySelectorAll('[data-action="edit-exercise"]').forEach((btn) => btn.addEventListener('click', () => openExerciseForm(btn.dataset.id)));
-    wrap.querySelectorAll('[data-action="unarchive-exercise"]').forEach((btn) => btn.addEventListener('click', () => {
-      const ex = exerciseById(btn.dataset.id);
-      if (!ex) return;
-      ex.archived = false;
-      if (!save()) return;
-      toast('Exercise unarchived');
-      renderAll();
-    }));
   }
 
   function trackerManageRowHtml(tracker) {
@@ -6475,8 +7029,14 @@
         ev.target.value = '';
         return;
       }
+      logEx.pickerOpen = false;
       renderDynamicFields(document.getElementById('logDynamicFields'), exerciseById(ev.target.value));
+      syncLogWorkoutUI();
     });
+    wireLogExercisePicker();
+    wireManageExercises();
+    wireFoodLog();
+    wireManageFood();
     document.getElementById('logForm').addEventListener('submit', handleLogSubmit);
 
     // Reuses renderLogMeasurementForm() rather than re-deriving the label/

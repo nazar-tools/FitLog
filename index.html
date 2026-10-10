@@ -120,11 +120,25 @@
         <p>Every domain is turned off. Turn one back on in Manage to start logging.</p>
       </div>
 
+      <!-- Log -> Workout. Nothing chosen yet (or "Switch exercise" tapped):
+           the searchable picker below, same pattern as Log -> Food. Once an
+           exercise is chosen the form leads, with the list collapsed to the
+           "Switch exercise" row. #logExercise stays the single source of
+           truth for the chosen exercise (hidden). -->
+      <div id="logExercisePicker" class="card form-card" style="gap:12px" hidden>
+        <div class="field">
+          <span class="field-label">Exercises — tap one to log it</span>
+          <div class="segmented seg-sm" id="logExSeg" role="radiogroup" aria-label="Which exercises to list"></div>
+        </div>
+        <label class="search"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg><input type="search" id="logExSearch" placeholder="Search exercises" aria-label="Search exercises" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="search" /></label>
+        <div class="f-scroll incard"><div class="f-chips" id="logExChips" role="radiogroup"></div><button type="button" class="f-more" aria-label="See more filters"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg></button></div>
+        <div id="logExList" class="entry-list"></div>
+        <button type="button" class="showall" id="logExShowAll" hidden></button>
+      </div>
+
       <form id="logForm" class="card form-card">
-        <label class="field">
-          <span class="field-label">Exercise</span>
-          <select id="logExercise" required></select>
-        </label>
+        <div class="log-head" id="logExerciseHead"></div>
+        <select id="logExercise" hidden aria-hidden="true" tabindex="-1"></select>
         <label class="field">
           <span class="field-label">Date</span>
           <input type="date" id="logDate" required />
@@ -136,6 +150,10 @@
         </label>
         <button type="submit" class="btn btn-primary btn-block">Save entry</button>
       </form>
+
+      <div id="logSwitchCard" class="card card-list" hidden>
+        <button type="button" class="setting-row row-switch" id="logSwitchBtn"></button>
+      </div>
 
       <form id="logMeasurementForm" class="card form-card" hidden>
         <label class="field">
@@ -179,6 +197,23 @@
         </label>
       </div>
 
+      <!-- Log -> Food leads with saved foods (the one-tap path used every
+           day); typing a food in by hand is collapsed under it. -->
+      <div id="savedFoodsWrap" class="card form-card" style="gap:12px" hidden>
+        <div class="field">
+          <span class="field-label">Saved foods — tap one to log it</span>
+          <div class="segmented seg-sm" id="foodSeg" role="radiogroup" aria-label="Which saved foods to list"></div>
+        </div>
+        <label class="search"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg><input type="search" id="foodSearch" placeholder="Search saved foods" aria-label="Search saved foods" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="search" /></label>
+        <div class="f-scroll incard"><div class="f-chips" id="savedFoodCategorySegmented" role="radiogroup"></div><button type="button" class="f-more" aria-label="See more filters"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg></button></div>
+        <div id="savedFoodLogList" class="entry-list"></div>
+        <button type="button" class="showall" id="foodShowAll" hidden></button>
+      </div>
+
+      <div id="logFoodManualCard" class="card card-list" hidden>
+        <button type="button" class="setting-row row-switch" id="logFoodManualBtn"></button>
+      </div>
+
       <form id="logFoodForm" class="card form-card" hidden>
         <label class="field">
           <span class="field-label">Date</span>
@@ -191,14 +226,6 @@
         </label>
         <button type="submit" class="btn btn-primary btn-block">Save entry</button>
       </form>
-
-      <div id="savedFoodsWrap" class="card form-card" hidden>
-        <div class="field">
-          <span class="field-label">Saved foods — tap one to log it</span>
-          <div class="segmented" id="savedFoodCategorySegmented" role="radiogroup" aria-label="Filter saved foods"></div>
-        </div>
-        <div id="savedFoodLogList" class="entry-list"></div>
-      </div>
 
       <div class="section-head">
         <h2>Recent entries</h2>
@@ -276,7 +303,9 @@
             <h2>Exercises</h2>
             <button class="btn btn-secondary btn-sm btn-icon-label" data-action="add-exercise"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg><span>Add exercise</span></button>
           </div>
-          <div id="exerciseManageList" class="entry-list"></div>
+          <label class="search"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg><input type="search" id="exManageSearch" placeholder="Search exercises" aria-label="Search exercises" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="search" /></label>
+          <div class="f-scroll pg"><div class="f-chips" id="exManageChips" role="radiogroup"></div><button type="button" class="f-more" aria-label="See more filters"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg></button></div>
+          <div id="exerciseManageList" class="org-list"></div>
         </div>
       </div>
 
@@ -340,10 +369,12 @@
                trailing after two setup-once sections. -->
           <div class="section-head">
             <h2>Saved foods</h2>
-            <button class="btn btn-secondary btn-sm btn-icon-label" data-action="add-saved-food"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg><span>Save a new food</span></button>
+            <button class="btn btn-secondary btn-sm btn-icon-label" data-action="add-saved-food"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg><span>Save a food</span></button>
           </div>
-          <p class="muted-text">Research a food's numbers once, save it here, then log it in one tap from Log &rarr; Food — optionally scaling the quantity.</p>
-          <div id="savedFoodManageList" class="entry-list"></div>
+          <label class="search"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg><input type="search" id="foodManageSearch" placeholder="Search saved foods" aria-label="Search saved foods" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="search" /></label>
+          <div class="f-scroll pg"><div class="f-chips" id="foodManageChips" role="radiogroup"></div><button type="button" class="f-more" aria-label="See more filters"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg></button></div>
+          <div class="sortrow"><span id="foodSortLabel"></span><button type="button" id="foodSortBtn"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21 16-4 4-4-4"/><path d="M17 20V4"/><path d="m3 8 4-4 4 4"/><path d="M7 4v16"/></svg>Sort</button></div>
+          <div id="savedFoodManageList" class="org-list"></div>
 
           <div class="section-head"><h2>Tracked macros</h2></div>
           <p class="muted-text">Calories is always tracked and required to log an entry. Tap a macro below to also track it — tap again to stop; nothing already logged is lost either way.</p>

@@ -1021,3 +1021,105 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 1p
 .pr-tile .label { font-size: 11px; color: var(--text-secondary); }
 
 ::selection { background: var(--accent-track); }
+
+/* ============ Organization: favorites, search, filter chips, groups ============
+   Shared by Log -> Workout / Food pickers and Manage -> Workout / Food
+   lists. Filter chips (.f-chip) are the same soft rounded-rect as every
+   other control (radius-sm, 36px) — never pills. A row of them that can
+   scroll sideways gets .f-scroll: a fade on the right edge plus a small
+   arrow button, both removed (.at-end) once scrolled to the end. */
+.segmented.seg-sm button,
+.field > .segmented.seg-sm button,
+.form-card > .segmented.seg-sm button { min-height: 36px; padding: 0 8px; font-size: 14px; white-space: nowrap; }
+.f-chip {
+  display: inline-flex; align-items: center; gap: 6px; flex: none; min-height: 36px; padding: 0 12px;
+  font: inherit; font-size: 14px; font-weight: 600; border-radius: var(--radius-sm);
+  border: 1px solid var(--border); background: var(--surface-2); color: var(--text-primary);
+  white-space: nowrap; cursor: pointer;
+}
+.f-chip[aria-checked="true"], .f-chip.on { background: var(--accent-track); color: var(--accent); }
+.f-chip .n { font-weight: 400; color: var(--text-secondary); }
+.f-chip[aria-checked="true"] .n, .f-chip.on .n { color: var(--accent); opacity: .8; }
+.f-chips { display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+.f-chips::-webkit-scrollbar { display: none; }
+.f-chips.wrap { flex-wrap: wrap; overflow: visible; }
+.f-scroll { position: relative; margin: 0 -20px; --fade: var(--surface-1); }
+.f-scroll .f-chips { padding: 0 20px; }
+.f-scroll.incard { margin: 0 -16px; }
+.f-scroll.incard .f-chips { padding: 0 16px; }
+.f-scroll.pg { --fade: var(--page); }
+.f-scroll::after {
+  content: ''; position: absolute; right: 0; top: 0; bottom: 0; width: 72px; pointer-events: none;
+  background: linear-gradient(to right, transparent, var(--fade) 70%); transition: opacity .15s;
+}
+.f-more {
+  position: absolute; right: 16px; top: 50%; transform: translateY(-50%); z-index: 1;
+  display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0;
+  border-radius: 999px; background: var(--surface-1); border: 1px solid var(--border);
+  color: var(--text-secondary); box-shadow: 0 1px 3px rgba(0,0,0,.12); cursor: pointer;
+}
+.f-more .icon { width: 16px; height: 16px; }
+.f-scroll.incard .f-more { right: 12px; }
+.f-scroll.at-end::after { opacity: 0; }
+.f-scroll.at-end .f-more { display: none; }
+
+.search {
+  display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 14px;
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-md); color: var(--muted);
+}
+.search:focus-within { outline: 2px solid var(--accent); outline-offset: 1px; }
+.search .icon { width: 18px; height: 18px; flex: none; }
+.search input {
+  flex: 1; min-width: 0; border: 0; background: none; padding: 0; min-height: 42px; border-radius: 0;
+  color: var(--text-primary); outline: none; -webkit-appearance: none; appearance: none;
+}
+.search input:focus { outline: none; }
+.search input::-webkit-search-cancel-button { -webkit-appearance: none; display: none; }
+
+.org-star {
+  flex: none; display: flex; align-items: center; justify-content: center; width: 36px; height: 36px; padding: 0;
+  margin: -6px -8px -6px 0; background: none; border: 0; color: var(--muted); cursor: pointer;
+}
+.org-star .icon { width: 20px; height: 20px; }
+.org-star[aria-pressed="true"] { color: #d99a00; }
+.org-star[aria-pressed="true"] .icon { fill: currentColor; }
+
+.showall {
+  display: flex; align-items: center; justify-content: center; gap: 4px; width: 100%; min-height: 44px; padding: 0;
+  background: none; border: 0; border-top: 1px solid var(--gridline); font: inherit; font-size: 14px; font-weight: 600;
+  color: var(--accent); cursor: pointer;
+}
+.showall .icon { width: 16px; height: 16px; }
+.form-card > .showall { margin: 0 -16px -4px; width: calc(100% + 32px); }
+
+.g-head {
+  display: flex; align-items: center; gap: 8px; width: 100%; min-height: 44px; padding: 0; background: none; border: 0;
+  font: inherit; font-size: 15px; font-weight: 700; color: var(--text-primary); text-align: left; cursor: pointer;
+}
+.g-head .n { font-size: 13px; font-weight: 400; color: var(--text-secondary); }
+.g-head .icon { width: 16px; height: 16px; color: var(--muted); }
+.g-sec + .g-sec { border-top: 1px solid var(--gridline); }
+.g-list { display: flex; flex-direction: column; }
+.g-list .entry-row, .org-card .entry-row {
+  border: 0; border-top: 1px solid var(--gridline); border-radius: 0; padding: 10px 0; background: none;
+}
+.org-card { padding: 4px 16px; }
+.org-card.flush { padding: 0 16px; }
+.org-card .g-list > .entry-row:first-child { border-top: 0; }
+.org-card .g-list { padding-bottom: 6px; }
+.org-card .showall { margin: 0 -16px; width: calc(100% + 32px); }
+.org-empty { padding: 18px 0; text-align: center; }
+.sortrow { display: flex; align-items: center; justify-content: space-between; font-size: 13px; color: var(--text-secondary); }
+.sortrow b { color: var(--text-primary); font-weight: 600; }
+.sortrow button { display: inline-flex; align-items: center; gap: 4px; background: none; border: 0; padding: 6px 0 6px 10px; font: inherit; font-size: 13px; font-weight: 600; color: var(--accent); cursor: pointer; }
+.sortrow .icon { width: 14px; height: 14px; }
+
+/* Log -> Workout: once an exercise is chosen, the form leads with who's being logged. */
+.log-head { display: flex; align-items: center; gap: 12px; }
+.log-head-main { flex: 1; min-width: 0; }
+.log-head-label { font-size: 12px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--accent); }
+.log-head-name { font-size: 20px; font-weight: 800; line-height: 1.2; overflow-wrap: anywhere; }
+.log-head .entry-row-sub { white-space: normal; }
+.row-switch { cursor: pointer; }
+.row-switch .icon { width: 18px; height: 18px; color: var(--muted); flex: none; }
+.card-list > .row-switch { width: 100%; border: 0; background: none; font: inherit; color: inherit; text-align: left; }
