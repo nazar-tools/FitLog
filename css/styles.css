@@ -27,10 +27,13 @@
 
   --accent:          #2a78d6;   /* THE app color — meter fill, buttons, links, active tab */
   --accent-track:    #b7d3f6;   /* the unfilled part of a progress meter (a lighter step of --accent) */
-  --accent-strong:   #184f95;   /* a darker step of --accent, currently unused but kept for contrast needs */
+  --accent-strong:   #184f95;   /* a darker step of --accent: text and icons sitting on --accent-soft */
+  --accent-soft:     #dbe9fb;   /* a quiet tint of --accent: selected chips, icon tiles, info notes */
   --good:            #2f9a5c;   /* "goal reached" green */
   --good-bg:         #e3f3ea;   /* unused background tint for --good, kept for future use */
   --warning:         #fab219;   /* the BMI standards table's "Overweight" category dot */
+  --warn-bg:         #fdf1d4;   /* soft amber background for "over a limit" tags and notes (never red) */
+  --warning-ink:     #8a5a00;   /* readable text/icon color on --warn-bg */
   --critical:        #d03b3b;   /* delete/danger buttons */
   --critical-bg:     #fbe7e6;   /* the soft red background behind a danger button */
   --dot-body:        #8b5cf6;   /* History calendar's "body measurement logged" dot (workout reuses --good, water reuses --accent) */
@@ -61,9 +64,12 @@
     --accent:          #3987e5;
     --accent-track:    #184f95;
     --accent-strong:   #86b6ef;
+    --accent-soft:     #17365c;
     --good:            #4dba7f;
     --good-bg:         rgba(77,186,127,0.16);
     --warning:         #fab219;
+    --warn-bg:         rgba(250,178,25,0.14);
+    --warning-ink:     #fab219;
     --critical:        #e66767;
     --critical-bg:     rgba(224,90,90,0.16);
     --dot-body:        #a78bfa;
@@ -86,9 +92,12 @@
   --accent:          #3987e5;
   --accent-track:    #184f95;
   --accent-strong:   #86b6ef;
+  --accent-soft:     #17365c;
   --good:            #4dba7f;
   --good-bg:         rgba(77,186,127,0.16);
   --warning:         #fab219;
+  --warn-bg:         rgba(250,178,25,0.14);
+  --warning-ink:     #fab219;
   --critical:        #e66767;
   --critical-bg:     rgba(224,90,90,0.16);
   --dot-body:        #a78bfa;
@@ -361,9 +370,16 @@ button { font-family: inherit; }
 /* ============ Icon field and picker ============
    "Icon" in the Add/Edit forms: a row showing the current icon that opens
    a grid to choose another. */
-.icon-field { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 44px; padding: 0 14px; font: inherit; font-size: 15px; color: var(--text-primary); text-align: left; background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-sm); cursor: pointer; }
-.icon-field .item-icon { background: var(--surface-1); }
-.icon-field-action { margin-left: auto; font-size: 13px; color: var(--muted); }
+.name-icon-row { display: flex; align-items: center; gap: 12px; }
+.name-icon-row input { flex: 1; min-width: 0; }
+/* The large, tappable icon tile at the top of every Add/Edit form. */
+.itile { position: relative; flex: none; display: flex; align-items: center; justify-content: center; width: 56px; height: 56px; padding: 0; color: var(--accent-strong); background: var(--accent-soft); border: 1.5px solid var(--border); border-radius: var(--radius-md); cursor: pointer; }
+.itile[aria-expanded="true"] { border-color: var(--accent); }
+.itile-ico .icon { width: 28px; height: 28px; }
+.itile-badge { position: absolute; right: -6px; bottom: -6px; display: flex; align-items: center; justify-content: center; width: 22px; height: 22px; color: var(--text-primary); background: var(--surface-1); border: 1px solid var(--border); border-radius: 50%; box-shadow: var(--shadow-1); }
+.itile-badge .icon { width: 12px; height: 12px; }
+.itile:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.field-hint { font-size: 12.5px; color: var(--muted); }
 .icon-picker { display: flex; flex-direction: column; gap: 12px; }
 .icon-picker > .segmented { display: flex; }
 .icon-picker > .segmented button { flex: 1 1 0; min-width: 0; min-height: 44px; padding: 8px; }
@@ -1123,3 +1139,108 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 1p
 .row-switch { cursor: pointer; }
 .row-switch .icon { width: 18px; height: 18px; color: var(--muted); flex: none; }
 .card-list > .row-switch { width: 100%; border: 0; background: none; font: inherit; color: inherit; text-align: left; }
+
+.segmented-fill { display: flex; }
+.segmented-fill button { flex: 1 1 0; min-width: 0; }
+
+/* ---------- Add from catalog sheet ---------- */
+.head-actions { display: flex; gap: 8px; align-items: center; }
+.cat-row { cursor: pointer; align-items: center; gap: 12px; }
+.cat-row.is-toggled-off { opacity: .6; cursor: default; }
+.cat-check {
+  flex: none; width: 24px; height: 24px; border-radius: 8px;
+  border: 2px solid var(--border-strong, var(--border)); background: var(--surface-1);
+  display: inline-flex; align-items: center; justify-content: center; color: #fff;
+}
+.cat-check svg { width: 16px; height: 16px; }
+.cat-check.is-on { background: var(--accent); border-color: var(--accent); }
+.cat-check.is-disabled.is-on { background: var(--muted); border-color: var(--muted); }
+.cat-variants {
+  display: flex; flex-wrap: wrap; gap: 8px; padding: 10px 14px 14px 50px;
+  background: var(--surface-2); border-radius: 0 0 var(--radius-md) var(--radius-md); margin-top: -4px;
+}
+.cat-variants .field-hint { flex: 1 0 100%; margin: 2px 0 0; }
+.chip-option.is-added { opacity: .65; cursor: default; }
+.cat-tier {
+  font-size: 12px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+  color: var(--muted); padding: 12px 2px 4px;
+}
+.cat-packs { display: flex; flex-direction: column; gap: 8px; margin: 4px 0 8px; }
+.cat-packs .btn { align-self: flex-start; }
+.sheet-foot {
+  position: sticky; bottom: 0; margin: 12px -4px -4px; padding: 12px 4px 4px;
+  background: linear-gradient(to top, var(--surface-1) 70%, transparent);
+}
+#catList { margin-top: 8px; }
+.chip-option.is-active.is-added { background: var(--accent-soft); color: var(--accent); border-color: transparent; }
+
+/* ---------- Home sections ---------- */
+.tag { display: inline-block; font-size: 11.5px; font-weight: 700; padding: 2px 8px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); }
+.tag-good { background: var(--good-bg, #e3f4ea); color: var(--good); }
+.link-btn { background: none; border: 0; padding: 4px 0; font: inherit; font-size: 13px; font-weight: 700; color: var(--accent); cursor: pointer; }
+.head-actions .icon-btn-sm { width: 32px; height: 32px; }
+.home-card-foot { display: flex; flex-direction: column; gap: 12px; padding: 12px 16px 16px; border-top: 1px solid var(--gridline); }
+.glance-row + .home-card-foot, .home-card-body + .home-card-foot { border-top: 1px solid var(--gridline); }
+.home-card-body { padding: 16px; display: flex; flex-direction: column; gap: 14px; cursor: pointer; }
+.quick-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.quick-chip {
+  display: inline-flex; align-items: center; gap: 6px; max-width: 100%;
+  padding: 7px 12px; min-height: 36px; border-radius: 999px; border: 1px solid var(--border);
+  background: var(--surface-2); color: var(--text-primary); font: inherit; font-size: 13.5px; font-weight: 600; cursor: pointer;
+}
+.quick-chip svg { width: 15px; height: 15px; flex: none; color: var(--accent); }
+.quick-chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nutri-top { display: flex; align-items: center; gap: 16px; }
+.nutri-total { display: flex; flex-direction: column; }
+.nutri-total .big { font-size: 34px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.nutri-bars { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 9px; }
+.nutri-bars .macro .top { display: flex; justify-content: space-between; font-size: 12.5px; color: var(--text-secondary); gap: 8px; }
+.nutri-bars .macro .top b { color: var(--text-primary); font-variant-numeric: tabular-nums; }
+.nutri-bars .macro.is-over .meter-fill { background: var(--warning); }
+.food-ring { flex: none; }
+.food-ring-arc { stroke: var(--dot-food); }
+.food-ring.is-over .food-ring-arc { stroke: var(--warning); }
+.mini-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(84px, 1fr)); gap: 8px; }
+.mini-tile { display: flex; flex-direction: column; gap: 2px; padding: 10px; border-radius: var(--radius-md); background: var(--surface-2); }
+.mini-tile b { font-size: 16px; font-variant-numeric: tabular-nums; }
+.mini-tile span { font-size: 11.5px; color: var(--text-secondary); }
+.mini-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 12px; }
+.home-mini { padding: 14px; display: flex; flex-direction: column; gap: 8px; min-width: 0; cursor: pointer; }
+.home-mini .btn { margin-top: auto; }
+.mini-head { display: flex; justify-content: space-between; align-items: center; gap: 6px; min-height: 28px; }
+.mini-label { font-size: 12px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); }
+.mini-value { font-size: 22px; font-weight: 800; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.mini-value .muted-text { font-size: 12.5px; font-weight: 500; }
+.spark { width: 100%; height: 34px; }
+.mini-delta { font-size: 12.5px; color: var(--text-secondary); }
+.mini-delta.is-good { color: var(--good); }
+.segmented-fill + #progressGoals, #progressSeg + div { margin-top: 12px; }
+#goalsGroups, #progressGoals, #progressCharts { display: flex; flex-direction: column; gap: 12px; }
+#goalsGroups .section-head { margin-top: 4px; }
+.mini-head .icon-btn-sm { width: 32px; height: 32px; }
+#home-log-icon, .btn svg.icon { flex: none; }
+#homeLogSetBtn, #homeAddFoodBtn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+.home-mini [data-cup-id] { display: flex; flex-direction: column; align-items: center; gap: 0; line-height: 1.25; padding-block: 6px; height: auto; }
+.home-mini [data-cup-id] .muted-text { font-size: 11.5px; font-weight: 500; }
+
+/* ---------- Servings stepper ---------- */
+.stepper { display: inline-flex; align-items: center; gap: 0; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface-2); overflow: hidden; align-self: flex-start; }
+.stepper-btn { width: 48px; height: 48px; display: inline-flex; align-items: center; justify-content: center; border: 0; background: transparent; color: var(--text-primary); cursor: pointer; }
+.stepper-btn:active { background: var(--accent-soft); }
+.stepper input { width: 72px; height: 48px; text-align: center; border: 0; border-inline: 1px solid var(--border); background: var(--surface-1); font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--text-primary); -moz-appearance: textfield; }
+.stepper input::-webkit-outer-spin-button, .stepper input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+
+/* ---------- Tidy up ---------- */
+.tidy-card { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 16px; background: var(--accent-soft); border-color: transparent; }
+.tidy-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.tidy-text .muted-text { font-size: 13px; }
+.tidy-actions { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; flex: none; }
+
+/* ---------- Equipment variant chips (Log) ---------- */
+.variant-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.variant-chip { padding: 5px 11px; min-height: 30px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface-2); color: var(--text-primary); font: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer; }
+.variant-chip.is-active { background: var(--accent); border-color: var(--accent); color: #fff; }
+.variant-chip.is-new { background: transparent; border-style: dashed; color: var(--text-secondary); }
+#logExerciseHead { flex-wrap: wrap; }
+#logExerciseHead .variant-chips { flex: 1 0 100%; margin-top: 0; }
+.entry-row-actions .icon-btn { width: 38px; height: 38px; }

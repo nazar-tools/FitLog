@@ -1,12 +1,13 @@
 // Fit Log service worker — app-shell caching for offline use.
 // Bump CACHE_VERSION whenever any cached file changes so clients pick up the update.
-const CACHE_VERSION = 'fitlog-v46';
+const CACHE_VERSION = 'fitlog-v47';
 const APP_SHELL = [
   './',
   './index.html',
   './css/styles.css',
   './js/app.js',
   './js/charts.js',
+  './js/catalog.js',
   './manifest.json',
   './icons/icon-192.png',
   './icons/icon-512.png',

@@ -195,7 +195,7 @@
      import path runs the exact same migrations.
      ========================================================================== */
 
-  const SCHEMA_VERSION = 13;
+  const SCHEMA_VERSION = 14;
 
   // Known "daily" exercise ids from before the Goal/Daily/Other split
   // existed (schema v1). Used only by the v1->v2 migration below.
@@ -515,7 +515,24 @@
       if (data.settings.trackWater === undefined) data.settings.trackWater = true;
       return data;
     },
-    // Next migration goes here, keyed `13: (data) => { ...; return data; }`.
+    // v13 -> v14: the first step of the redesign, and strictly additive.
+    // (1) `settings.trackHabits` — habits and daily-rep targets used to
+    // switch on and off with Workout; they now have their own "Track this"
+    // switch. Defaults to true so everything visible before stays visible.
+    // (2) `settings.catalogPacksSeen` — ids of starter packs from the
+    // built-in catalog (js/catalog.js) that were already offered, added or
+    // skipped, so a pack is never suggested twice. Nothing in the catalog
+    // is ever added unasked. No exercise, set, entry, tracker, cup or food
+    // is read or changed here. (Optional per-exercise fields the catalog
+    // uses — `catalogId`, `equipment` — are written only when that
+    // feature is used; a missing value means "not linked".)
+    13: (data) => {
+      if (!data.settings) data.settings = {};
+      if (data.settings.trackHabits === undefined) data.settings.trackHabits = true;
+      if (!Array.isArray(data.settings.catalogPacksSeen)) data.settings.catalogPacksSeen = [];
+      return data;
+    },
+    // Next migration goes here, keyed `14: (data) => { ...; return data; }`.
   };
 
   /** Walks `data` forward through MIGRATIONS until it matches SCHEMA_VERSION. */
@@ -625,6 +642,12 @@
     trackMeasurements: true,
     trackWater: true,
     trackFood: true,
+    // Habits and daily-rep targets (Home's Checklist). Its own switch,
+    // separate from Workout, so lifting-only people can hide the checklist
+    // and habit-only people can hide the lifting tools.
+    trackHabits: true,
+    // Starter packs from js/catalog.js already offered/added/skipped.
+    catalogPacksSeen: [],
     // Each macro's `enabled` flag now does double duty: whether the field
     // is tracked at all (shown in the log form / today's totals), and
     // whether it additionally has a daily GOAL set. Calories has no
@@ -670,7 +693,7 @@
     const now = new Date().toISOString();
     return {
       version: SCHEMA_VERSION,
-      settings: Object.assign({}, DEFAULT_SETTINGS),
+      settings: Object.assign({}, DEFAULT_SETTINGS, { catalogPacksSeen: [] }),
       profile: defaultProfile(),
       exercises: [
         { id: 'ex_bench', name: 'Bench Press', kind: 'weight', bodyRegion: 'upper', section: 'goal', goal: PLATE_GOALS.bench, liftType: 'bench', goalMode: 'fixed', goalTier: null, archived: false, createdAt: now },
@@ -897,7 +920,16 @@
 
   /* ============================== Derived data ============================== */
 
-  function activeExercises() { return state.exercises.filter((e) => !e.archived); }
+  // Habits and daily-rep targets have their own "Track this" switch
+  // (settings.trackHabits); everything else follows Workout. Either switch
+  // off simply hides what it owns — nothing logged is touched.
+  function habitsTracked() { return state.settings.trackHabits !== false; }
+  function isHabitLike(ex) { return ex.kind === 'habit' || (ex.section || 'goal') === 'daily'; }
+  function activeExercises() {
+    const lifts = state.settings.trackWorkout !== false;
+    const habits = habitsTracked();
+    return state.exercises.filter((e) => !e.archived && (isHabitLike(e) ? habits : lifts));
+  }
   function exerciseById(id) { return state.exercises.find((e) => e.id === id); }
   function entriesFor(exId) { return state.entries.filter((e) => e.exerciseId === exId); }
   function sectionOf(ex) { return ex.section || 'goal'; }
@@ -1813,6 +1845,22 @@
     return { calories, protein, tdee: Math.round(tdee) };
   }
 
+  // How the calorie target is set — one choice instead of two separate
+  // switches. It is only a clearer face for the two settings that already
+  // exist, so no data changes: Calculator = nutritionCalc.enabled,
+  // Manual = a calories goal with the calculator off, No Target = neither.
+  function calorieMode() {
+    if (state.settings.nutritionCalc.enabled) return 'calc';
+    return macroGoalInfo('calories').enabled ? 'manual' : 'none';
+  }
+  function setCalorieMode(mode) {
+    state.settings.nutritionCalc.enabled = mode === 'calc';
+    if (mode === 'manual') macroGoalInfo('calories').enabled = true;
+    // Calculator keeps whatever target it last applied switched on.
+    if (mode === 'calc' && macroGoalInfo('calories').goal != null) macroGoalInfo('calories').enabled = true;
+    if (mode === 'none') macroGoalInfo('calories').enabled = false;
+  }
+
   // The explicit "Apply to daily goals" action (see the Nutrition
   // calculator's card in renderFoodManagePanel()) — writes the computed
   // numbers into the same macroGoals.calories/.protein fields a manual goal
@@ -2610,7 +2658,7 @@
     return `
       <div class="card ex-card" data-exercise-id="${ex.id}">
         <div class="ex-card-top">
-          <div class="ex-card-name">${exerciseIconHtml(ex, true)}${escapeHtml(ex.name)}</div>
+          <div class="ex-card-name">${exerciseIconHtml(ex, true)}${exerciseLabelHtml(ex)}</div>
           <div class="ex-card-badge">${kindBadge(ex)}</div>
         </div>
         ${progressHtml}
@@ -2670,35 +2718,13 @@
           ${exerciseIconHtml(ex)}
           <div class="glance-main">
             <div class="glance-line">
-              <span class="glance-name">${escapeHtml(ex.name)}</span>
+              <span class="glance-name">${exerciseLabelHtml(ex)}</span>
               <span class="glance-value">${complete ? CHECK_ICON_SVG : ''}<span>${prog.curText}<span class="muted-text"> ${prog.goalText}</span></span></span>
             </div>
             ${glanceMeterHtml(ex, prog.pct)}
           </div>
         </div>
         <button type="button" class="btn btn-secondary btn-sm glance-btn" data-action="${isHabit ? 'log-habit' : 'log-daily'}">${isHabit ? (complete ? '+1' : 'Done') : 'Add'}</button>
-      </div>`;
-  }
-
-  // One row of Home's "Logged today": a goal exercise trained today, with
-  // its all-time best against its goal.
-  function loggedTodayRowHtml(ex) {
-    const metric = ex.kind === 'cardio' ? (cardioMetricsOf(ex)[0] || 'distance') : undefined;
-    const { pct, best: b } = progressPct(ex, metric);
-    const goal = ex.kind === 'cardio' ? cardioGoalFor(ex, metric) : ex.goal;
-    return `
-      <div class="glance-row${goal && pct >= 100 ? ' is-complete' : ''}" data-exercise-id="${ex.id}">
-        <div class="glance-open">
-          ${exerciseIconHtml(ex)}
-          <div class="glance-main">
-            <div class="glance-line">
-              <span class="glance-name">${escapeHtml(ex.name)}</span>
-              <span class="glance-value">${formatValueForExercise(ex, b, metric)}${goal ? `<span class="muted-text"> / ${goalLabelForExercise(ex, metric).replace('Goal ', '')}</span>` : ''}</span>
-            </div>
-            ${goal ? glanceMeterHtml(ex, pct) : ''}
-          </div>
-          ${CHEVRON_RIGHT_SVG}
-        </div>
       </div>`;
   }
 
@@ -2829,78 +2855,6 @@
     renderHistory();
   }
 
-  // Home's "Water & food": one row each. Water shows today's total against
-  // its goal with a one-tap button per cup; Food shows calories (against
-  // their goal, if set) with the other tracked macros underneath, and opens
-  // the food detail.
-  function waterRowHtml() {
-    const { pct, total } = waterProgressPct(todayISO());
-    const goal = state.water.goalMl;
-    return `
-      <div class="glance-row glance-row-stack${goal && pct >= 100 ? ' is-complete' : ''}">
-        <div class="glance-head">
-          ${itemIconHtml('droplets')}
-          <div class="glance-main">
-            <div class="glance-line">
-              <span class="glance-name">Water</span>
-              <span class="glance-value">${goal && pct >= 100 ? CHECK_ICON_SVG : ''}<span>${fmtVolume(total)}${goal ? `<span class="muted-text"> / ${fmtVolume(goal)}</span>` : ''}</span></span>
-            </div>
-            ${goal ? glanceMeterHtml({}, pct) : ''}
-          </div>
-        </div>
-        <div class="glance-actions">
-          ${state.water.cups.map((cup) => `<button type="button" class="btn btn-secondary" data-cup-id="${cup.id}">+ ${escapeHtml(cup.name)} · ${fmtVolume(cup.amountMl)}</button>`).join('')}
-        </div>
-      </div>`;
-  }
-
-  function foodRowHtml() {
-    const totals = foodTotalsForDate(todayISO());
-    const cal = macroGoalInfo('calories');
-    const hasGoal = cal.enabled && cal.goal != null;
-    const pct = hasGoal ? ((totals.calories || 0) / cal.goal) * 100 : null;
-    const otherKeys = trackedMacroKeys().filter((k) => k !== 'calories');
-    const compactMacros = otherKeys.length > 2;
-    const others = otherKeys.map((k) => {
-      const info = macroGoalInfo(k);
-      const goalText = !compactMacros && info.enabled && info.goal != null ? ` / ${fmtMacroValue(k, info.goal)}` : '';
-      const over = state.settings.showMacroGuidance && macroDvOver(k, totals[k]);
-      return compactMacros
-        ? `<span class="glance-macro${over ? ' is-over-dv' : ''}"><span class="glance-macro-name">${MACRO_LABELS[k]}</span><span class="glance-macro-val">${fmtMacroValue(k, totals[k])}</span></span>`
-        : `<span${over ? ' class="is-over-dv"' : ''}>${MACRO_LABELS[k]} ${fmtMacroValue(k, totals[k])}${goalText}</span>`;
-    });
-    return `
-      <div class="glance-row${hasGoal && pct >= 100 ? ' is-complete' : ''}">
-        <div class="glance-open" id="foodGlance">
-          ${itemIconHtml('apple')}
-          <div class="glance-main">
-            <div class="glance-line">
-              <span class="glance-name">Calories</span>
-              <span class="glance-value">${hasGoal && pct >= 100 ? CHECK_ICON_SVG : ''}<span>${totals.calories == null ? '0' : fmtMacroValue('calories', totals.calories)}${hasGoal ? `<span class="muted-text"> / ${fmtMacroValue('calories', cal.goal)} cal</span>` : '<span class="muted-text"> cal</span>'}</span></span>
-            </div>
-            ${hasGoal ? glanceMeterHtml({}, pct) : ''}
-            ${others.length ? (compactMacros ? `<div class="glance-macros">${others.join('')}</div>` : `<div class="glance-sub">${others.join(' · ')}</div>`) : ''}
-          </div>
-          ${CHEVRON_RIGHT_SVG}
-        </div>
-      </div>`;
-  }
-
-  function renderWaterFood() {
-    const hasWater = domainTracked('water') && state.water.cups.length > 0;
-    const hasFood = state.settings.trackFood;
-    document.getElementById('waterFoodHead').hidden = !(hasWater || hasFood);
-    const wrap = document.getElementById('waterFoodWrap');
-    wrap.hidden = !(hasWater || hasFood);
-    wrap.innerHTML = (hasWater ? waterRowHtml() : '') + (hasFood ? foodRowHtml() : '');
-    wrap.querySelectorAll('[data-cup-id]').forEach((btn) => btn.addEventListener('click', () => {
-      const cup = cupById(btn.dataset.cupId);
-      if (cup) logWaterAmount(cup.amountMl, cup.id);
-    }));
-    const food = document.getElementById('foodGlance');
-    if (food) wireOpenable(food, openFoodDetail);
-  }
-
   // The id of exId's most-recently-logged entry for today, or '' if it
   // hasn't been logged today — genId() prefixes every id with a base36
   // timestamp (see genId), so plain string comparison of ids sorts
@@ -2910,38 +2864,6 @@
     return entriesFor(exId)
       .filter((en) => en.date === todayISO())
       .reduce((max, en) => (en.id > max ? en.id : max), '');
-  }
-
-  // Home's "To log today": one row per dashboard-visible tracker (Weight,
-  // Sleep, or any custom one) that hasn't been logged yet today — just a
-  // prompt, not the tracker's card (that lives in Progress). A tracker drops
-  // off this list the moment it's logged.
-  function renderTodayAttention() {
-    // Trackers are the Body domain — off there means no prompts for them either.
-    const pending = domainTracked('measurements') ? activeTrackers()
-      .filter((t) => t.showOnDashboard !== false)
-      .filter((t) => !state.measurements.some((m) => m.trackerId === t.id && m.date === todayISO())) : [];
-    document.getElementById('todayAttentionHead').hidden = pending.length === 0;
-    document.getElementById('todayAttentionCount').textContent = `${pending.length} left`;
-    const wrap = document.getElementById('todayAttentionWrap');
-    wrap.hidden = pending.length === 0;
-    wrap.innerHTML = pending.map((t) => {
-      const last = measurementsFor(t.id).slice().sort((a, b) => b.date.localeCompare(a.date))[0];
-      return `
-      <div class="glance-row" data-tracker-id="${t.id}">
-        <div class="glance-open">
-          ${trackerIconHtml(t)}
-          <div class="glance-main">
-            <div class="glance-name">${escapeHtml(t.name)}</div>
-            <div class="glance-sub">${last ? `Last ${fmtTrackerValue(t, last.value)}` : 'Not logged yet'}</div>
-          </div>
-        </div>
-        <button type="button" class="btn btn-secondary btn-sm glance-btn" data-action="log-tracker-prompt">Log</button>
-      </div>`;
-    }).join('');
-    wrap.querySelectorAll('[data-action="log-tracker-prompt"]').forEach((btn) => {
-      btn.addEventListener('click', () => logTrackerFromDetail(btn.closest('[data-tracker-id]').getAttribute('data-tracker-id')));
-    });
   }
 
   /* ============================== Returning-user setup review ==============================
@@ -3019,6 +2941,7 @@
       <div class="card form-card">
         <div class="section-head"><h2>What do you track?</h2></div>
         ${setupBoolRowHtml('review_trackWorkout', 'Workout', s.trackWorkout)}
+        ${setupBoolRowHtml('review_trackHabits', 'Habits & daily reps', s.trackHabits)}
         ${setupBoolRowHtml('review_trackMeasurements', 'Body', s.trackMeasurements)}
         ${setupBoolRowHtml('review_trackWater', 'Water', s.trackWater)}
         ${setupBoolRowHtml('review_trackFood', 'Food', s.trackFood)}
@@ -3042,6 +2965,7 @@
 
     const rerender = () => openSetupReviewModal();
     wireSetupBoolRow('review_trackWorkout', (v) => { s.trackWorkout = v; if (!save()) return; renderAll(); rerender(); });
+    wireSetupBoolRow('review_trackHabits', (v) => { s.trackHabits = v; if (!save()) return; renderAll(); rerender(); });
     wireSetupBoolRow('review_trackMeasurements', (v) => { s.trackMeasurements = v; if (!save()) return; renderAll(); rerender(); });
     wireSetupBoolRow('review_trackWater', (v) => { s.trackWater = v; if (!save()) return; renderAll(); rerender(); });
     wireSetupBoolRow('review_trackFood', (v) => { s.trackFood = v; if (!save()) return; renderAll(); rerender(); });
@@ -3063,6 +2987,271 @@
     });
   }
 
+  /* ============================== Home sections ==============================
+     Each section belongs to one module and disappears with it. Home only
+     reads data the app already has — nothing here stores anything new. */
+
+  const dayLabel = (iso) => new Date(iso + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'short' });
+  function openLogCategory(cat) { logCategory = cat; switchTab('log'); }
+  function openManageCategory(cat) { manageCategory = cat; switchTab('manage'); }
+
+  // Exercises that belong in Training: lifts and cardio, not the daily
+  // counters and habits that live in the Checklist.
+  function trainingExercises() {
+    return activeExercises().filter((e) => e.kind !== 'habit' && sectionOf(e) !== 'daily');
+  }
+
+  function renderChecklist(all) {
+    const daily = all.filter((e) => sectionOf(e) === 'daily' && (e.kind !== 'habit' || habitDueToday(e)));
+    document.getElementById('dailyTargetsHead').hidden = daily.length === 0;
+    const done = daily.filter((e) => { const p = todayProgressOf(e); return p.pct != null && p.pct >= 100; }).length;
+    document.getElementById('checklistCount').textContent = `${done} of ${daily.length} done`;
+    const wrap = document.getElementById('dailyTargetsWrap');
+    wrap.hidden = daily.length === 0;
+    wrap.innerHTML = daily.map(dailyTargetRowHtml).join('');
+    wrap.querySelectorAll('.glance-row').forEach((row) => {
+      const exId = row.getAttribute('data-exercise-id');
+      wireOpenable(row.querySelector('.glance-open'), () => openExerciseDetail(exId));
+      row.querySelector('.glance-btn').addEventListener('click', () => {
+        if (row.querySelector('.glance-btn').dataset.action === 'log-habit') logHabit(exId);
+        else openLogFor(exId);
+      });
+    });
+  }
+
+  function renderTraining() {
+    const show = domainTracked('workout') && state.settings.trackWorkout;
+    document.getElementById('trainingHead').hidden = !show;
+    const wrap = document.getElementById('trainingWrap');
+    wrap.hidden = !show;
+    if (!show) return;
+    const lifts = trainingExercises();
+    const today = todayISO();
+    const doneToday = lifts
+      .filter((e) => entriesFor(e.id).some((en) => en.date === today))
+      .sort((a, b) => latestTodayEntryId(b.id).localeCompare(latestTodayEntryId(a.id)));
+    const rows = doneToday.map((ex) => {
+      const en = entriesFor(ex.id).filter((x) => x.date === today).slice(-1)[0];
+      const sets = en.sets ? en.sets.length : 0;
+      const top = topSetOf(ex, en);
+      const prior = entriesFor(ex.id).filter((x) => x.date < today).map((x) => entryValue(ex, x)).filter((v) => v != null);
+      const val = entryValue(ex, en);
+      const isBest = val != null && prior.length > 0 && (isLowerBetter(ex) ? val < Math.min(...prior) : val > Math.max(...prior));
+      const topText = top && ex.kind === 'weight' ? ` · top ${fmtWeight(top.weight)} × ${top.reps}` : '';
+      return `
+        <div class="glance-row" data-exercise-id="${ex.id}">
+          <div class="glance-open">
+            ${exerciseIconHtml(ex)}
+            <div class="glance-main">
+              <div class="glance-name">${exerciseLabelHtml(ex)}${isBest ? ' <span class="tag tag-good">New best</span>' : ''}</div>
+              <div class="glance-sub">Today · ${sets} set${sets === 1 ? '' : 's'}${topText}</div>
+            </div>
+            ${CHEVRON_RIGHT_SVG}
+          </div>
+        </div>`;
+    }).join('');
+    let empty = '';
+    if (!doneToday.length) {
+      const last = lifts.flatMap((e) => entriesFor(e.id).map((en) => ({ e, en }))).sort((a, b) => b.en.date.localeCompare(a.en.date));
+      const lastDate = last.length ? last[0].en.date : null;
+      const names = lastDate ? Array.from(new Set(last.filter((x) => x.en.date === lastDate).map((x) => exerciseLabel(x.e)))).slice(0, 3).join(', ') : '';
+      empty = `
+        <div class="glance-row">
+          <div class="glance-open">
+            ${itemIconHtml('dumbbell')}
+            <div class="glance-main">
+              <div class="glance-name">Nothing lifted yet today</div>
+              <div class="glance-sub">${lastDate ? `Last lifted ${dayLabel(lastDate)} · ${escapeHtml(names)}` : 'Log your first set to get started'}</div>
+            </div>
+          </div>
+        </div>`;
+    }
+    const favs = lifts.filter(isFavoriteExercise).slice(0, 3);
+    wrap.innerHTML = `${rows}${empty}
+      <div class="home-card-foot">
+        ${favs.length ? `<div class="quick-chips">${favs.map((e) => `<button type="button" class="quick-chip" data-quick-ex="${e.id}">${itemIconSvg(exerciseIconKey(e))}<span>${exerciseLabelHtml(e)}</span></button>`).join('')}</div>` : ''}
+        <button type="button" class="btn btn-primary btn-block" id="homeLogSetBtn">${uiIcon('plus')}Log a set</button>
+      </div>`;
+    wrap.querySelectorAll('.glance-row[data-exercise-id]').forEach((row) => wireOpenable(row.querySelector('.glance-open'), () => openExerciseDetail(row.getAttribute('data-exercise-id'))));
+    wrap.querySelectorAll('[data-quick-ex]').forEach((b) => b.addEventListener('click', () => openLogFor(b.dataset.quickEx)));
+    document.getElementById('homeLogSetBtn').addEventListener('click', () => openLogCategory('workout'));
+  }
+
+  function foodRingHtml(eaten, goal) {
+    const r = 38, c = 2 * Math.PI * r;
+    const pct = Math.max(0, Math.min(1, eaten / goal));
+    const over = eaten > goal;
+    return `<svg class="food-ring${over ? ' is-over' : ''}" width="92" height="92" viewBox="0 0 92 92" role="img" aria-label="${Math.round(eaten)} of ${Math.round(goal)} calories">
+      <circle cx="46" cy="46" r="${r}" fill="none" stroke="var(--surface-2)" stroke-width="10"/>
+      ${pct > 0 ? `<circle class="food-ring-arc" cx="46" cy="46" r="${r}" fill="none" stroke-width="10" stroke-linecap="round" stroke-dasharray="${(c * pct).toFixed(1)} ${c.toFixed(1)}" transform="rotate(-90 46 46)"/>` : ''}
+      <text x="46" y="45" text-anchor="middle" font-size="19" font-weight="800" fill="var(--text-primary)">${Math.round(eaten).toLocaleString()}</text>
+      <text x="46" y="60" text-anchor="middle" font-size="10.5" fill="var(--muted)">of ${Math.round(goal).toLocaleString()}</text>
+    </svg>`;
+  }
+
+  function renderNutrition() {
+    const show = state.settings.trackFood;
+    document.getElementById('nutritionHead').hidden = !show;
+    const wrap = document.getElementById('nutritionWrap');
+    wrap.hidden = !show;
+    if (!show) return;
+    const totals = foodTotalsForDate(todayISO());
+    const cal = macroGoalInfo('calories');
+    const hasGoal = cal.enabled && cal.goal != null;
+    const eaten = totals.calories || 0;
+    const keys = trackedMacroKeys().filter((k) => k !== 'calories');
+    const bars = keys.filter((k) => macroGoalInfo(k).enabled && macroGoalInfo(k).goal != null && ['protein', 'carbs', 'fat'].includes(k)).slice(0, 3);
+    const rest = keys.filter((k) => !bars.includes(k));
+    const barHtml = bars.map((k) => {
+      const info = macroGoalInfo(k); const v = totals[k] || 0; const pct = Math.min(100, (v / info.goal) * 100);
+      return `<div class="macro${v > info.goal ? ' is-over' : ''}"><div class="top"><span>${MACRO_LABELS[k]}</span><span><b>${Math.round(v)}</b> / ${fmtMacroValue(k, info.goal)}</span></div><div class="meter meter-sm"><div class="meter-fill" style="--fill:${pct}%"></div></div></div>`;
+    }).join('');
+    const tiles = rest.map((k) => `<div class="mini-tile"><b>${totals[k] == null ? '—' : fmtMacroValue(k, totals[k])}</b><span>${MACRO_LABELS[k]}</span></div>`).join('');
+    const lastUsed = savedFoodLastUsedMap();
+    const recent = state.food.savedFoods.filter((f) => lastUsed[f.id]).sort((a, b) => lastUsed[b.id].localeCompare(lastUsed[a.id])).slice(0, 3);
+    wrap.innerHTML = `
+      <div class="home-card-body" id="foodGlance" role="button" tabindex="0" aria-label="Open today's food">
+        <div class="nutri-top">
+          ${hasGoal ? foodRingHtml(eaten, cal.goal) : `<div class="nutri-total"><span class="big">${Math.round(eaten).toLocaleString()}</span><span class="muted-text">cal today</span></div>`}
+          ${barHtml ? `<div class="nutri-bars">${barHtml}</div>` : ''}
+        </div>
+        ${tiles ? `<div class="mini-tiles">${tiles}</div>` : ''}
+      </div>
+      <div class="home-card-foot">
+        ${recent.length ? `<div class="quick-chips">${recent.map((f) => `<button type="button" class="quick-chip" data-quick-food="${f.id}">${uiIcon('plus')}<span>${escapeHtml(f.name)}</span></button>`).join('')}</div>` : ''}
+        <button type="button" class="btn btn-primary btn-block" id="homeAddFoodBtn">${uiIcon('plus')}Add food</button>
+      </div>`;
+    wireOpenable(document.getElementById('foodGlance'), openFoodDetail);
+    wrap.querySelectorAll('[data-quick-food]').forEach((b) => b.addEventListener('click', () => logSavedFood(b.dataset.quickFood, 1)));
+    document.getElementById('homeAddFoodBtn').addEventListener('click', () => openLogCategory('food'));
+  }
+
+  function sparklineHtml(values) {
+    if (values.length < 2) return '';
+    const lo = Math.min(...values), hi = Math.max(...values), span = hi - lo || 1;
+    const pts = values.map((v, i) => `${(i / (values.length - 1)) * 120},${(30 - ((v - lo) / span) * 26 - 2).toFixed(1)}`).join(' ');
+    return `<svg class="spark" viewBox="0 0 120 34" preserveAspectRatio="none" aria-hidden="true"><polyline points="${pts}" fill="none" stroke="var(--accent)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+  }
+
+  function trackerMiniHtml(t) {
+    const list = measurementsFor(t.id).slice().sort((a, b) => (a.date + a.id).localeCompare(b.date + b.id));
+    const last = list[list.length - 1];
+    const loggedToday = list.some((m) => m.date === todayISO());
+    const insights = (t.id === BODY_WEIGHT_TRACKER_ID && state.settings.showWeightInsights) ? weightInsights() : null;
+    let delta = '';
+    if (insights && insights.trend) {
+      const d = Units.lbToDisplay(insights.trend.delta);
+      delta = `<span class="mini-delta is-${deltaSentiment(t, insights.trend.delta)}">${d > 0 ? '+' : ''}${round(d, 1)} ${Units.weightUnitLabel()} in ${humanizeDays(insights.trend.days)}</span>`;
+    }
+    return `
+      <div class="card home-mini" data-tracker-id="${t.id}">
+        <div class="mini-head"><span class="mini-label">${escapeHtml(t.name)}</span></div>
+        <div class="mini-value">${last ? fmtTrackerValue(t, last.value) : '—'}</div>
+        ${sparklineHtml(list.slice(-9).map((m) => m.value))}
+        ${delta}
+        <button type="button" class="btn btn-secondary btn-sm" data-action="log-tracker-prompt">${loggedToday ? 'Log again' : 'Log'}</button>
+      </div>`;
+  }
+
+  function waterMiniHtml() {
+    const { pct, total } = waterProgressPct(todayISO());
+    const goal = state.water.goalMl;
+    return `
+      <div class="card home-mini" id="homeWaterCard">
+        <div class="mini-head"><span class="mini-label">Water</span><button type="button" class="icon-btn icon-btn-sm" id="homeWaterPencil" aria-label="Edit water">${EDIT_ICON_SVG}</button></div>
+        <div class="mini-value">${fmtVolume(total)}${goal ? `<span class="muted-text"> / ${fmtVolume(goal)}</span>` : ''}</div>
+        ${goal ? glanceMeterHtml({}, pct) : ''}
+        ${state.water.cups.slice(0, 2).map((cup) => `<button type="button" class="btn btn-secondary btn-sm" data-cup-id="${cup.id}"><span>+ ${escapeHtml(cup.name)}</span><span class="muted-text">${fmtVolume(cup.amountMl)}</span></button>`).join('')}
+      </div>`;
+  }
+
+  function renderMiniGrid() {
+    const water = domainTracked('water') && state.water.cups.length > 0;
+    const trackers = domainTracked('measurements') ? activeTrackers().filter((t) => t.showOnDashboard !== false) : [];
+    const wrap = document.getElementById('miniGrid');
+    wrap.hidden = !(water || trackers.length);
+    wrap.innerHTML = (water ? waterMiniHtml() : '') + trackers.map(trackerMiniHtml).join('');
+    wrap.querySelectorAll('[data-cup-id]').forEach((btn) => btn.addEventListener('click', () => {
+      const cup = cupById(btn.dataset.cupId);
+      if (cup) logWaterAmount(cup.amountMl, cup.id);
+    }));
+    const wp = document.getElementById('homeWaterPencil');
+    if (wp) wp.addEventListener('click', () => openManageCategory('water'));
+    wrap.querySelectorAll('[data-tracker-id]').forEach((card) => {
+      wireOpenable(card, () => openTrackerDetail(card.dataset.trackerId));
+      card.querySelector('[data-action="log-tracker-prompt"]').addEventListener('click', (ev) => { ev.stopPropagation(); logTrackerFromDetail(card.dataset.trackerId); });
+    });
+  }
+
+  // Every goal in one list, computed from the logs each time it is shown:
+  // a goal stores only what you want, never how far along you are.
+  function collectGoals() {
+    const items = [];
+    activeExercises().forEach((ex) => {
+      const sec = sectionOf(ex);
+      if (ex.kind === 'habit' || sec === 'daily') {
+        if (!ex.goal && ex.kind !== 'habit') return;
+        if (ex.kind === 'habit' && !habitDueToday(ex)) return;
+        const p = todayProgressOf(ex);
+        if (p.pct == null) return;
+        items.push({ type: 'daily', ex, name: exerciseLabel(ex), icon: exerciseIconHtml(ex), cur: p.curText, goal: p.goalText.replace(/^\/ /, ''), pct: p.pct, met: p.pct >= 100, open: () => openExerciseDetail(ex.id) });
+        return;
+      }
+      const metric = ex.kind === 'cardio' ? (cardioMetricsOf(ex)[0] || 'distance') : undefined;
+      const goal = ex.kind === 'cardio' ? cardioGoalFor(ex, metric) : ex.goal;
+      if (!goal) return;
+      const { pct, best: b } = progressPct(ex, metric);
+      items.push({ type: ex.kind === 'cardio' ? 'cardio' : 'lift', ex, name: exerciseLabel(ex), icon: exerciseIconHtml(ex), cur: formatValueForExercise(ex, b, metric), goal: goalLabelForExercise(ex, metric).replace('Goal ', ''), pct, met: pct >= 100, open: () => openExerciseDetail(ex.id) });
+    });
+    if (domainTracked('measurements')) {
+      activeTrackers().forEach((t) => {
+        if (t.goal == null) return;
+        const latest = t.kind === 'sleep' ? null : latestMeasurement(t.id);
+        if (!latest) return;
+        const { pct, achieved } = trackerProgressPct(t, latest.value);
+        items.push({ type: 'body', tracker: t, name: t.name, icon: trackerIconHtml(t), cur: fmtTrackerValue(t, latest.value), goal: fmtTrackerValue(t, t.goal), arrow: true, pct: achieved ? pct : Math.min(pct, 99), met: achieved, open: () => openTrackerDetail(t.id) });
+      });
+    }
+    if (state.settings.trackFood) {
+      const totals = foodTotalsForDate(todayISO());
+      ['calories', 'protein'].forEach((k) => {
+        const info = macroGoalInfo(k);
+        if (!info || !info.enabled || info.goal == null || (k !== 'calories' && !macroTracked(k))) return;
+        const v = totals[k] || 0;
+        items.push({ type: 'food', name: `${MACRO_LABELS[k]} today`, icon: itemIconHtml('apple'), cur: fmtMacroValue(k, v), goal: fmtMacroValue(k, info.goal), pct: (v / info.goal) * 100, met: k === 'protein' && v >= info.goal, open: () => openFoodDetail() });
+      });
+    }
+    return items;
+  }
+
+  function goalRowHtml(g, idx) {
+    const pct = Math.min(100, g.pct || 0);
+    return `
+      <div class="glance-row${g.met ? ' is-complete' : ''}" data-goal-idx="${idx}">
+        <div class="glance-open">
+          ${g.icon}
+          <div class="glance-main">
+            <div class="glance-line">
+              <span class="glance-name">${escapeHtml(g.name)}</span>
+              <span class="glance-value">${g.met ? '<span class="tag tag-good">Goal met</span>' : `<span>${g.cur}<span class="muted-text"> ${g.arrow ? '→' : '/'} ${g.goal}</span></span>`}</span>
+            </div>
+            <div class="meter meter-sm"><div class="meter-fill ${g.met ? 'is-complete' : ''}" style="--fill:${pct}%"></div></div>
+          </div>
+        </div>
+      </div>`;
+  }
+
+  function renderGoalsStrip() {
+    const all = collectGoals().filter((g) => g.type === 'lift' || g.type === 'cardio' || g.type === 'body');
+    const open = all.filter((g) => !g.met).sort((a, b) => b.pct - a.pct);
+    const pick = (open.length ? open : all).slice(0, 3);
+    document.getElementById('goalsHead').hidden = pick.length === 0;
+    const wrap = document.getElementById('goalsWrap');
+    wrap.hidden = pick.length === 0;
+    wrap.innerHTML = pick.map((g, i) => goalRowHtml(g, i)).join('');
+    wrap.querySelectorAll('[data-goal-idx]').forEach((row) => wireOpenable(row.querySelector('.glance-open'), pick[Number(row.dataset.goalIdx)].open));
+  }
+
   // Home: what needs doing or is happening today, top to bottom — the streak
   // card, trackers still to log, the daily targets (always shown, so they act
   // as a standing reminder), goal exercises trained today, then water and
@@ -3077,42 +3266,45 @@
   function renderHome() {
     renderSetupReviewBanner();
     renderSummary();
-    renderTodayAttention();
-    // Workout toggled off in Manage (Track this) hides the whole domain.
-    const all = domainTracked('workout') ? activeExercises() : [];
-    const daily = all.filter((e) => sectionOf(e) === 'daily' && (e.kind !== 'habit' || habitDueToday(e)));
-    const logged = all
-      .filter((e) => sectionOf(e) === 'goal' && entriesFor(e.id).some((en) => en.date === todayISO()))
-      .sort((a, b) => latestTodayEntryId(b.id).localeCompare(latestTodayEntryId(a.id)));
-
-    document.getElementById('dailyTargetsHead').hidden = daily.length === 0;
-    const dailyWrap = document.getElementById('dailyTargetsWrap');
-    dailyWrap.hidden = daily.length === 0;
-    dailyWrap.innerHTML = daily.map(dailyTargetRowHtml).join('');
-    dailyWrap.querySelectorAll('.glance-row').forEach((row) => {
-      const exId = row.getAttribute('data-exercise-id');
-      wireOpenable(row.querySelector('.glance-open'), () => openExerciseDetail(exId));
-      row.querySelector('.glance-btn').addEventListener('click', () => {
-        if (row.querySelector('.glance-btn').dataset.action === 'log-habit') logHabit(exId);
-        else openLogFor(exId);
-      });
-    });
-
-    document.getElementById('todayActivityHead').hidden = logged.length === 0;
-    const loggedWrap = document.getElementById('todayActivityList');
-    loggedWrap.hidden = logged.length === 0;
-    loggedWrap.innerHTML = logged.map(loggedTodayRowHtml).join('');
-    loggedWrap.querySelectorAll('.glance-row').forEach((row) => {
-      wireOpenable(row.querySelector('.glance-open'), () => openExerciseDetail(row.getAttribute('data-exercise-id')));
-    });
-
-    renderWaterFood();
+    renderChecklist(activeExercises());
+    renderTraining();
+    renderNutrition();
+    renderMiniGrid();
+    renderGoalsStrip();
   }
 
   // Progress: every goal card (including ones also shown on Home today),
   // then the body & wellness trends.
+  let progressSeg = 'goals';
+
+  function renderProgressGoals() {
+    const goals = collectGoals();
+    const groups = [
+      ['Lifts', (g) => g.type === 'lift'],
+      ['Body', (g) => g.type === 'body'],
+      ['Today', (g) => g.type === 'food'],
+      ['Daily reps and habits', (g) => g.type === 'daily'],
+      ['Cardio', (g) => g.type === 'cardio'],
+    ];
+    const wrap = document.getElementById('goalsGroups');
+    let idx = 0; const flat = [];
+    wrap.innerHTML = groups.map(([title, test]) => {
+      const list = goals.filter(test);
+      if (!list.length) return '';
+      const rows = list.map((g) => { flat.push(g); return goalRowHtml(g, idx++); }).join('');
+      const met = list.filter((g) => g.met).length;
+      return `<div class="section-head"><h2>${title}</h2><span class="muted-text">${met ? `${met} of ${list.length} met` : ''}</span></div><div class="card card-list">${rows}</div>`;
+    }).join('');
+    document.getElementById('goalsEmpty').hidden = goals.length > 0;
+    wrap.querySelectorAll('[data-goal-idx]').forEach((row) => wireOpenable(row.querySelector('.glance-open'), flat[Number(row.dataset.goalIdx)].open));
+  }
+
   function renderProgress() {
-    const all = domainTracked('workout') ? activeExercises() : [];
+    document.querySelectorAll('#progressSeg [data-progress-seg]').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.progressSeg === progressSeg)));
+    document.getElementById('progressGoals').hidden = progressSeg !== 'goals';
+    document.getElementById('progressCharts').hidden = progressSeg !== 'charts';
+    renderProgressGoals();
+    const all = activeExercises();
     const goalList = all.filter((e) => sectionOf(e) === 'goal');
     document.getElementById('dashboardEmpty').hidden = !domainTracked('workout') || (goalList.length + all.filter((e) => sectionOf(e) === 'daily').length) > 0;
 
@@ -3318,6 +3510,8 @@
     'chevron-right': '<path d="m9 18 6-6-6-6"/>',
     'chevron-down': '<path d="m6 9 6 6 6-6"/>',
     'chevron-up': '<path d="m18 15-6-6-6 6"/>',
+    plus: '<path d="M5 12h14"/><path d="M12 5v14"/>',
+    minus: '<path d="M5 12h14"/>',
   };
   const uiIcon = (name) => lucide(UI_ICON_PATHS[name]);
 
@@ -3431,6 +3625,434 @@
     return (ev) => { if ((ev.key === 'Enter' || ev.key === ' ') && ev.target === ev.currentTarget.closest('[data-pick]')) { ev.preventDefault(); handler(ev); } };
   }
 
+  /* ============================== Catalog & equipment variants ==============================
+     js/catalog.js is a static list of movements (each with the equipment it
+     can be done on), habits and common foods. It is reference data only:
+     nothing from it reaches the user's data until they tick it in "Add from
+     catalog" and confirm, and a copied item is an ordinary exercise / habit
+     / saved food they can edit like any other.
+
+     A movement done on different equipment is a separate exercise record
+     (same `catalogId`, different `equipment`), shown as "Bench Press ·
+     Dumbbell". That keeps goals, records, charts and suggestions per
+     variant with no changes to how they are computed: a barbell number is
+     never averaged with a dumbbell one. Both fields are optional; an exercise
+     without them behaves exactly as it always has. */
+
+  const CATALOG = window.FitCatalog || { equipment: [], groupIcons: {}, packs: [], movements: [], habits: [], foods: [] };
+  const EQUIPMENT = Object.fromEntries(CATALOG.equipment.map((e) => [e.id, e]));
+  const MOVEMENTS = Object.fromEntries(CATALOG.movements.map((m) => [m.id, m]));
+  const CATALOG_HABITS = Object.fromEntries(CATALOG.habits.map((h) => [h.id, h]));
+
+  function equipmentLabel(id) { return EQUIPMENT[id] ? EQUIPMENT[id].label : ''; }
+  // The name to show for an exercise: "Bench Press · Dumbbell" when it is a
+  // variant, otherwise just its own name.
+  function exerciseLabel(ex) {
+    if (!ex) return '';
+    const mv = ex.catalogId && MOVEMENTS[ex.catalogId];
+    const eq = ex.equipment && mv && mv.equipment.length > 1 && ex.equipment !== 'bodyweight' && equipmentLabel(ex.equipment);
+    return eq ? `${ex.name} · ${eq}` : ex.name;
+  }
+  function exerciseLabelHtml(ex) { return escapeHtml(exerciseLabel(ex)); }
+  const normName = (s) => (s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+
+  function variantRecord(movId, eq) {
+    return state.exercises.find((e) => e.catalogId === movId && (e.equipment || null) === (eq || null));
+  }
+  // An exercise of yours that is already this movement on this equipment but
+  // was created before the catalog existed — matched by name only (e.g. your
+  // own "Bench Press" is the barbell variant). Used so adding from the
+  // catalog links to it instead of creating a duplicate.
+  function legacyVariantMatch(mv, eq) {
+    if ((eq || null) !== (mv.defaultEquipment || null)) return null;
+    return state.exercises.find((e) => !e.catalogId && normName(e.name) === normName(mv.name) && e.kind === mv.kind) || null;
+  }
+
+  // Adds one movement on each ticked piece of equipment. Returns how many
+  // exercises were created or brought back from the archive.
+  function addCatalogMovement(mv, eqIds) {
+    let n = 0;
+    const list = eqIds && eqIds.length ? eqIds : [null];
+    list.forEach((eq) => {
+      const existing = variantRecord(mv.id, eq) || legacyVariantMatch(mv, eq);
+      if (existing) {
+        if (!existing.catalogId) { existing.catalogId = mv.id; if (eq) existing.equipment = eq; n += 1; }
+        else if (existing.archived) { existing.archived = false; n += 1; }
+        return;
+      }
+      const ex = {
+        id: genId('ex'), name: mv.name, kind: mv.kind, section: 'accessory', group: mv.group,
+        goal: null, goalMode: 'fixed', goalTier: null, archived: false, createdAt: new Date().toISOString(),
+        catalogId: mv.id, icon: ITEM_ICONS[mv.icon] ? mv.icon : undefined,
+      };
+      if (eq) ex.equipment = eq;
+      if (mv.kind === 'weight') { ex.bodyRegion = guessBodyRegion(mv.name); ex.liftType = (eq || null) === (mv.defaultEquipment || null) && !state.exercises.some((x) => x.liftType && x.liftType === mv.liftType) ? (mv.liftType || null) : null; }
+      if (mv.kind === 'cardio') { ex.distanceGoal = null; ex.paceGoal = null; }
+      if (!ex.icon) delete ex.icon;
+      state.exercises.push(ex);
+      n += 1;
+    });
+    return n;
+  }
+  function addCatalogHabit(h) {
+    if (state.exercises.some((e) => e.catalogId === h.id && !e.archived)) return 0;
+    const back = state.exercises.find((e) => e.catalogId === h.id);
+    if (back) { back.archived = false; return 1; }
+    state.exercises.push({
+      id: genId('ex'), name: h.name, kind: 'habit', section: 'daily', group: 'other', goal: h.goal || 1, repeat: h.repeat || 'daily',
+      goalMode: 'fixed', goalTier: null, archived: false, createdAt: new Date().toISOString(), catalogId: h.id,
+      ...(ITEM_ICONS[h.icon] && { icon: h.icon }),
+    });
+    return 1;
+  }
+  function addCatalogFood(f) {
+    if (state.food.savedFoods.some((x) => x.catalogId === f.id)) return 0;
+    const food = {
+      id: genId('savedfood'), name: f.name, serving: f.serving, category: f.category, favorite: false, catalogId: f.id,
+      ...(ITEM_ICONS[f.icon] && { icon: f.icon }),
+    };
+    MACRO_KEYS.forEach((k) => { food[k] = f[k] != null ? f[k] : null; });
+    state.food.savedFoods.push(food);
+    return 1;
+  }
+
+  /* ---------- Tidy up: group older exercises under catalog movements ----------
+     Looks at exercises that predate the catalog ("Cable Bicep Curl") and
+     offers to link each one to its movement + equipment ("Bicep Curl ·
+     Cable"). Logged entries and goals stay on the same exercise record, so
+     nothing moves unless a variant already exists (then the two are merged).
+     Nothing happens until ticked rows are applied, and the last tidy up can
+     be undone from Manage. */
+
+  const EQUIPMENT_WORDS = [
+    ['dumbbell', /\b(dumbbells?|dumbells?|db)\b/], ['barbell', /\b(barbell|bb)\b/], ['cable', /\bcable\b/],
+    ['machine', /\b(machine|hammer strength)\b/], ['smith', /\bsmith\b/], ['kettlebell', /\b(kettlebell|kb)\b/],
+    ['trapbar', /\b(trap bar|hex bar)\b/],
+  ];
+  // [pattern on the name once equipment words are removed, movement, note when something is lost]
+  const MOVEMENT_ALIASES = [
+    [/^incline (bench )?press$/, 'incline_press'], [/^bench press$/, 'bench_press'], [/^(flat )?chest press$/, 'bench_press'],
+    [/^decline (bench |chest )?press$/, 'bench_press', 'Loses the decline angle'],
+    [/^biceps? curls?$/, 'curl'], [/^curls?$/, 'curl'], [/^hammer curls?$/, 'hammer_curl'],
+    [/^(overhead )?tricep(s)? (overhead )?extensions?$/, 'overhead_tri'], [/^lateral raises?$/, 'lateral_raise'],
+    [/^(side|lat) raises?$/, 'lateral_raise'], [/^crunch(es)?$/, 'crunch'], [/^push[- ]?ups?$/, 'pushups'],
+    [/^pull[- ]?ups?$/, 'pullups'], [/^rows?$/, 'row'], [/^squats?$/, 'squat'], [/^deadlifts?$/, 'deadlift'],
+    [/^running$/, 'running'],
+  ];
+
+  function tidyCandidates() {
+    const out = [];
+    state.exercises.forEach((ex) => {
+      if (ex.catalogId || ex.archived || ex.kind === 'habit') return;
+      let n = normName(ex.name); let eq = null;
+      EQUIPMENT_WORDS.forEach(([id, re]) => { if (re.test(n)) { eq = eq || id; n = n.replace(re, ' ').replace(/\s+/g, ' ').trim(); } });
+      let hit = MOVEMENT_ALIASES.find(([re]) => re.test(n));
+      let mv = hit ? MOVEMENTS[`cat_mv_${hit[1]}`] : null;
+      if (!mv) mv = CATALOG.movements.find((m) => normName(m.name) === n) || null;
+      if (!mv || mv.kind !== ex.kind) return;
+      if (eq && mv.equipment.length && !mv.equipment.includes(eq)) return;
+      const equipment = eq || (mv.equipment.length ? mv.defaultEquipment : null);
+      if (mv.equipment.length > 1 && !eq && !(normName(ex.name) === normName(mv.name))) return;
+      const target = variantRecord(mv.id, equipment);
+      out.push({
+        ex, mv, equipment, note: (hit && hit[2]) || '', merge: target && target.id !== ex.id ? target : null,
+        entries: state.entries.filter((e) => e.exerciseId === ex.id).length,
+      });
+    });
+    return out;
+  }
+
+  function tidyAfterLabel(c) {
+    return c.equipment && c.mv.equipment.length > 1 ? `${c.mv.name} · ${equipmentLabel(c.equipment)}` : c.mv.name;
+  }
+
+  function applyTidy(items) {
+    const undo = { at: new Date().toISOString(), renamed: [], merged: [] };
+    items.forEach((c) => {
+      const ex = c.ex;
+      if (c.merge) {
+        const target = c.merge;
+        const rec = { ex: JSON.parse(JSON.stringify(ex)), targetId: target.id, targetGoal: { goal: target.goal, goalMode: target.goalMode, goalTier: target.goalTier }, moved: [] };
+        state.entries.forEach((e) => { if (e.exerciseId === ex.id) { rec.moved.push(e.id); e.exerciseId = target.id; } });
+        if (target.goal == null && ex.goal != null) { target.goal = ex.goal; target.goalMode = ex.goalMode; target.goalTier = ex.goalTier; }
+        state.exercises = state.exercises.filter((x) => x.id !== ex.id);
+        undo.merged.push(rec);
+      } else {
+        undo.renamed.push({ id: ex.id, name: ex.name });
+        ex.name = c.mv.name; ex.catalogId = c.mv.id;
+        if (c.equipment) ex.equipment = c.equipment;
+      }
+    });
+    state.settings.tidyUndo = undo;
+    return save();
+  }
+
+  function undoTidy() {
+    const u = state.settings.tidyUndo; if (!u) return;
+    u.renamed.forEach((r) => {
+      const ex = state.exercises.find((x) => x.id === r.id); if (!ex) return;
+      ex.name = r.name; delete ex.catalogId; delete ex.equipment;
+    });
+    u.merged.forEach((m) => {
+      state.exercises.push(m.ex);
+      const moved = new Set(m.moved);
+      state.entries.forEach((e) => { if (moved.has(e.id)) e.exerciseId = m.ex.id; });
+      const target = state.exercises.find((x) => x.id === m.targetId);
+      if (target) Object.assign(target, m.targetGoal);
+    });
+    state.settings.tidyUndo = null;
+    save(); renderAll(); toast('Tidy up undone');
+  }
+
+  function renderTidyCard() {
+    const host = document.getElementById('tidyCard'); if (!host) return;
+    const items = state.settings.tidyDismissed ? [] : tidyCandidates();
+    const u = state.settings.tidyUndo;
+    if (!items.length && !u) { host.hidden = true; return; }
+    host.hidden = false;
+    host.innerHTML = items.length ? `
+      <div class="tidy-text"><b>Tidy up your exercises</b><span class="muted-text">${items.length} can be grouped by equipment, like Bicep Curl · Cable. Nothing changes until you pick.</span></div>
+      <div class="tidy-actions"><button type="button" class="btn btn-primary btn-sm" id="tidyReviewBtn">Review</button>${u ? '<button type="button" class="link-btn" id="tidyUndoBtn">Undo last</button>' : '<button type="button" class="link-btn" id="tidyDismissBtn">Not now</button>'}</div>`
+      : `<div class="tidy-text"><b>Tidied up ${u.exercises.length} exercise${u.exercises.length === 1 ? '' : 's'}</b><span class="muted-text">Entries and goals came along.</span></div>
+      <div class="tidy-actions"><button type="button" class="btn btn-secondary btn-sm" id="tidyUndoBtn">Undo</button></div>`;
+    const r = document.getElementById('tidyReviewBtn'); if (r) r.addEventListener('click', openTidySheet);
+    const d = document.getElementById('tidyDismissBtn'); if (d) d.addEventListener('click', () => { state.settings.tidyDismissed = true; save(); renderTidyCard(); });
+    const un = document.getElementById('tidyUndoBtn'); if (un) un.addEventListener('click', undoTidy);
+  }
+
+  function openTidySheet() {
+    const items = tidyCandidates();
+    const on = new Set(items.map((c, i) => (c.note ? -1 : i)).filter((i) => i >= 0));
+    openModal(`
+      <div class="modal-title-row"><h2>Tidy up</h2><button class="modal-close" data-action="close-modal">${CLOSE_ICON_SVG}</button></div>
+      <p class="muted-text">Tick the ones you want grouped. Your entries and goals stay with each exercise${items.some((c) => c.merge) ? '; where a variant already exists the two are merged' : ''}.</p>
+      <div id="tidyList" class="org-list"></div>
+      <div class="sheet-foot"><button type="button" class="btn btn-primary btn-block" id="tidyApplyBtn"></button></div>`, { tall: true });
+    const paint = () => {
+      document.getElementById('tidyList').innerHTML = items.map((c, i) => `
+        <div class="entry-row cat-row" data-tidy="${i}" role="checkbox" aria-checked="${on.has(i)}" tabindex="0">
+          ${catCheck(on.has(i), false)}
+          <div class="entry-row-main"><div class="entry-row-title">${escapeHtml(c.ex.name)} <span class="muted-text">→</span> ${escapeHtml(tidyAfterLabel(c))}</div>
+            <div class="entry-row-sub">${c.entries} logged entr${c.entries === 1 ? 'y' : 'ies'}${c.merge ? ' · merges into your existing one' : ''}${c.note ? ` · ${escapeHtml(c.note)}` : ''}</div></div>
+        </div>`).join('');
+      const btn = document.getElementById('tidyApplyBtn');
+      btn.disabled = on.size === 0; btn.textContent = on.size ? `Tidy up ${on.size}` : 'Pick something to tidy';
+    };
+    paint();
+    document.getElementById('tidyList').addEventListener('click', (ev) => {
+      const row = ev.target.closest('[data-tidy]'); if (!row) return;
+      const i = Number(row.dataset.tidy); if (on.has(i)) on.delete(i); else on.add(i); paint();
+    });
+    document.getElementById('tidyApplyBtn').addEventListener('click', () => {
+      const chosen = items.filter((c, i) => on.has(i));
+      if (!applyTidy(chosen)) return;
+      closeModal(); renderAll(); toast(`Tidied up ${chosen.length}`);
+    });
+  }
+
+  /* ---------- the Add-from-catalog sheet ---------- */
+
+  // Transient UI state (never saved). `pick` holds what is ticked per tab.
+  const cat = { tab: 'exercises', query: '', group: 'all', pack: 'all', cat: 'all', open: null, pick: { exercises: new Set(), habits: new Set(), foods: new Set() } };
+
+  function openCatalogSheet(tab) {
+    cat.tab = tab || 'exercises'; cat.query = ''; cat.group = 'all'; cat.pack = 'all'; cat.cat = 'all'; cat.open = null;
+    cat.pick = { exercises: new Set(), habits: new Set(), foods: new Set() };
+    openModal(`
+      <div class="modal-title-row"><h2>Add from catalog</h2><button class="modal-close" data-action="close-modal">${CLOSE_ICON_SVG}</button></div>
+      <p class="muted-text">Tick what you want and add it. Nothing is added until you do, and everything stays editable.</p>
+      <div class="segmented segmented-fill" id="catTabs" role="radiogroup" aria-label="Catalog">
+        <button type="button" role="radio" data-cat-tab="exercises">Exercises</button>
+        <button type="button" role="radio" data-cat-tab="habits">Habits</button>
+        <button type="button" role="radio" data-cat-tab="foods">Foods</button>
+      </div>
+      <div id="catBody"></div>
+      <div class="sheet-foot"><button type="button" class="btn btn-primary btn-block" id="catAddBtn" disabled>Add</button></div>`, { tall: true });
+    const body = document.getElementById('catBody');
+    document.getElementById('catTabs').addEventListener('click', (ev) => {
+      const b = ev.target.closest('[data-cat-tab]'); if (!b) return;
+      cat.tab = b.dataset.catTab; cat.query = ''; cat.open = null; renderCatalogSheet();
+    });
+    body.addEventListener('input', (ev) => {
+      if (ev.target.id !== 'catSearch') return;
+      cat.query = ev.target.value; renderCatalogList();
+    });
+    body.addEventListener('click', onCatalogClick);
+    document.getElementById('catAddBtn').addEventListener('click', applyCatalogPicks);
+    renderCatalogSheet();
+  }
+
+  function catPickCount() { return cat.pick[cat.tab].size; }
+
+  function renderCatalogSheet() {
+    document.querySelectorAll('#catTabs button').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.catTab === cat.tab)));
+    const body = document.getElementById('catBody');
+    let chips = '';
+    if (cat.tab === 'exercises') {
+      chips = `<div class="f-scroll pg"><div class="f-chips" id="catGroupChips" role="radiogroup">
+        ${chipHtml('all', 'All', null, cat.group === 'all')}
+        ${EXERCISE_GROUPS.filter(([g]) => CATALOG.movements.some((m) => m.group === g)).map(([g, l]) => chipHtml(g, l, null, cat.group === g)).join('')}
+      </div></div>
+      <div class="cat-packs"><span class="field-label">Starter packs</span>
+        <div class="f-chips" id="catPackChips" role="radiogroup">
+          ${chipHtml('all', 'Everything', null, cat.pack === 'all')}
+          ${CATALOG.packs.map((p) => chipHtml(p.id, escapeHtml(p.name), null, cat.pack === p.id)).join('')}
+        </div>
+        ${cat.pack !== 'all' ? `<p class="muted-text field-hint">${escapeHtml((CATALOG.packs.find((p) => p.id === cat.pack) || {}).description || '')} Nothing is ticked for you.</p>
+          <button type="button" class="btn btn-secondary btn-sm" data-cat-selpack="1">Tick everything in this pack</button>` : ''}
+      </div>`;
+    } else if (cat.tab === 'foods') {
+      chips = `<div class="f-scroll pg"><div class="f-chips" id="catFoodChips" role="radiogroup">
+        ${chipHtml('all', 'All', null, cat.cat === 'all')}
+        ${SAVED_FOOD_CATEGORIES.filter((c) => CATALOG.foods.some((f) => f.category === c.value)).map((c) => chipHtml(c.value, SAVED_FOOD_CHIP_LABELS[c.value], null, cat.cat === c.value)).join('')}
+      </div></div>`;
+    }
+    body.innerHTML = `
+      <label class="search"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+        <input type="search" id="catSearch" placeholder="Search ${cat.tab}" aria-label="Search ${cat.tab}" autocomplete="off" autocapitalize="off" spellcheck="false" value="${escapeHtml(cat.query)}" /></label>
+      ${chips}
+      <div id="catList" class="org-list"></div>`;
+    ['catGroupChips', 'catFoodChips', 'catPackChips'].forEach((id) => { const el = document.getElementById(id); if (el) wireFScroll(el); });
+    renderCatalogList();
+  }
+
+  const catCheck = (on, disabled) => `<span class="cat-check${on ? ' is-on' : ''}${disabled ? ' is-disabled' : ''}" aria-hidden="true">${on ? CHECK_ICON_SVG : ''}</span>`;
+
+  function renderCatalogList() {
+    const list = document.getElementById('catList');
+    const q = cat.query.trim().toLowerCase();
+    let html = '';
+    if (cat.tab === 'exercises') {
+      let items = CATALOG.movements.filter((m) => (cat.group === 'all' || m.group === cat.group) && (cat.pack === 'all' || m.packs.includes(cat.pack)));
+      if (q) items = items.filter((m) => m.name.toLowerCase().includes(q) || (EXERCISE_GROUP_LABELS[m.group] || '').toLowerCase().includes(q));
+      html = items.map((m) => {
+        const eqs = m.equipment.length ? m.equipment : [null];
+        const added = eqs.filter((eq) => variantRecord(m.id, eq) || legacyVariantMatch(m, eq)).length;
+        const picked = eqs.filter((eq) => cat.pick.exercises.has(`${m.id}|${eq || ''}`)).length;
+        const open = cat.open === m.id && m.equipment.length > 0;
+        const sub = m.equipment.length ? m.equipment.map(equipmentLabel).join(', ') : 'No equipment';
+        return `
+          <div class="entry-row cat-row" data-cat-mv="${m.id}" role="button" tabindex="0" aria-expanded="${open}">
+            ${catCheck(picked > 0, false)}
+            ${itemIconHtml(ITEM_ICONS[m.icon] ? m.icon : 'dumbbell', true)}
+            <div class="entry-row-main"><div class="entry-row-title">${escapeHtml(m.name)}</div>
+              <div class="entry-row-sub">${EXERCISE_GROUP_LABELS[m.group]} · ${escapeHtml(sub)}</div></div>
+            ${added ? `<span class="chip">${added === eqs.length && eqs.length === 1 ? 'Added' : `${added} added`}</span>` : ''}
+            ${m.equipment.length ? (open ? uiIcon('chevron-up') : uiIcon('chevron-down')) : ''}
+          </div>
+          ${open ? `<div class="cat-variants" role="group" aria-label="Equipment for ${escapeHtml(m.name)}">
+            ${m.equipment.map((eq) => {
+              const have = !!(variantRecord(m.id, eq) || legacyVariantMatch(m, eq));
+              const on = cat.pick.exercises.has(`${m.id}|${eq}`);
+              return `<button type="button" class="chip-option${on || have ? ' is-active' : ''}${have ? ' is-added' : ''}" data-cat-eq="${m.id}|${eq}" role="checkbox" aria-checked="${on || have}" ${have ? 'disabled' : ''}>${escapeHtml(equipmentLabel(eq))}${have ? ' · added' : ''}</button>`;
+            }).join('')}
+            <p class="muted-text field-hint">${escapeHtml(EQUIPMENT[m.defaultEquipment] ? `Most people use ${equipmentLabel(m.defaultEquipment).toLowerCase()}. ` : '')}Each equipment keeps its own records and goals.</p>
+          </div>` : ''}`;
+      }).join('');
+    } else if (cat.tab === 'habits') {
+      let items = CATALOG.habits;
+      if (q) items = items.filter((h) => h.name.toLowerCase().includes(q));
+      html = items.map((h) => {
+        const have = state.exercises.some((e) => e.catalogId === h.id && !e.archived);
+        const on = cat.pick.habits.has(h.id);
+        return `
+          <div class="entry-row cat-row${have ? ' is-toggled-off' : ''}" data-cat-habit="${h.id}" role="button" tabindex="0">
+            ${catCheck(on || have, have)}
+            ${itemIconHtml(ITEM_ICONS[h.icon] ? h.icon : 'standing', true)}
+            <div class="entry-row-main"><div class="entry-row-title">${escapeHtml(h.name)}</div>
+              <div class="entry-row-sub">${escapeHtml((HABIT_REPEATS.find((r) => r[0] === h.repeat) || HABIT_REPEATS[0])[1])} · ${escapeHtml(h.note || '')}</div></div>
+            ${have ? '<span class="chip">Added</span>' : ''}
+          </div>`;
+      }).join('');
+    } else {
+      let items = CATALOG.foods.filter((f) => cat.cat === 'all' || f.category === cat.cat);
+      if (q) items = items.filter((f) => f.name.toLowerCase().includes(q));
+      items = items.slice().sort((a, b) => (a.tier === b.tier ? a.name.localeCompare(b.name) : a.tier === 'starter' ? -1 : 1));
+      let lastTier = null;
+      html = items.map((f) => {
+        const have = state.food.savedFoods.some((x) => x.catalogId === f.id);
+        const on = cat.pick.foods.has(f.id);
+        const head = f.tier !== lastTier && !q ? `<div class="cat-tier">${f.tier === 'starter' ? 'Everyday foods' : 'More foods'}</div>` : '';
+        lastTier = f.tier;
+        return `${head}
+          <div class="entry-row cat-row${have ? ' is-toggled-off' : ''}" data-cat-food="${f.id}" role="button" tabindex="0">
+            ${catCheck(on || have, have)}
+            ${itemIconHtml(ITEM_ICONS[f.icon] ? f.icon : 'utensils', true)}
+            <div class="entry-row-main"><div class="entry-row-title">${escapeHtml(f.name)}</div>
+              <div class="entry-row-sub">${escapeHtml(f.serving)} · ${f.calories} cal · ${f.protein != null ? `${f.protein} g protein` : ''}</div></div>
+            ${have ? '<span class="chip">Added</span>' : ''}
+          </div>`;
+      }).join('');
+    }
+    list.innerHTML = html || '<p class="muted-text org-empty">Nothing matches.</p>';
+    const n = catPickCount();
+    const btn = document.getElementById('catAddBtn');
+    btn.disabled = n === 0;
+    btn.textContent = n ? `Add ${n} ${cat.tab === 'foods' ? (n === 1 ? 'food' : 'foods') : cat.tab === 'habits' ? (n === 1 ? 'habit' : 'habits') : (n === 1 ? 'exercise' : 'exercises')}` : 'Choose something to add';
+  }
+
+  function toggleSet(set, key) { if (set.has(key)) set.delete(key); else set.add(key); }
+
+  function onCatalogClick(ev) {
+    const chip = ev.target.closest('[data-chip]');
+    if (chip) {
+      const wrapId = chip.parentElement.id;
+      if (wrapId === 'catGroupChips') cat.group = chip.dataset.chip;
+      else if (wrapId === 'catPackChips') cat.pack = chip.dataset.chip;
+      else if (wrapId === 'catFoodChips') cat.cat = chip.dataset.chip;
+      cat.open = null; renderCatalogSheet(); return;
+    }
+    if (ev.target.closest('[data-cat-selpack]')) {
+      CATALOG.movements.filter((m) => m.packs.includes(cat.pack)).forEach((m) => {
+        const eq = m.defaultEquipment || '';
+        if (!(variantRecord(m.id, eq || null) || legacyVariantMatch(m, eq || null))) cat.pick.exercises.add(`${m.id}|${eq}`);
+      });
+      renderCatalogList(); return;
+    }
+    const eqBtn = ev.target.closest('[data-cat-eq]');
+    if (eqBtn) { toggleSet(cat.pick.exercises, eqBtn.dataset.catEq); renderCatalogList(); return; }
+    const mvRow = ev.target.closest('[data-cat-mv]');
+    if (mvRow) {
+      const m = MOVEMENTS[mvRow.dataset.catMv];
+      if (!m.equipment.length) { toggleSet(cat.pick.exercises, `${m.id}|`); }
+      else cat.open = cat.open === m.id ? null : m.id;
+      renderCatalogList(); return;
+    }
+    const hRow = ev.target.closest('[data-cat-habit]');
+    if (hRow) { if (!state.exercises.some((e) => e.catalogId === hRow.dataset.catHabit && !e.archived)) toggleSet(cat.pick.habits, hRow.dataset.catHabit); renderCatalogList(); return; }
+    const fRow = ev.target.closest('[data-cat-food]');
+    if (fRow) { if (!state.food.savedFoods.some((x) => x.catalogId === fRow.dataset.catFood)) toggleSet(cat.pick.foods, fRow.dataset.catFood); renderCatalogList(); }
+  }
+
+  function applyCatalogPicks() {
+    let added = 0; let label = 'exercise';
+    if (cat.tab === 'exercises') {
+      const byMv = {};
+      cat.pick.exercises.forEach((k) => { const [id, eq] = k.split('|'); (byMv[id] = byMv[id] || []).push(eq); });
+      const packsTouched = new Set();
+      Object.keys(byMv).forEach((id) => {
+        const m = MOVEMENTS[id]; if (!m) return;
+        added += addCatalogMovement(m, byMv[id].filter(Boolean));
+        m.packs.forEach((p) => packsTouched.add(p));
+      });
+      if (cat.pack !== 'all' && packsTouched.has(cat.pack)) {
+        const seen = state.settings.catalogPacksSeen || [];
+        if (!seen.includes(cat.pack)) state.settings.catalogPacksSeen = [...seen, cat.pack];
+      }
+    } else if (cat.tab === 'habits') {
+      label = 'habit';
+      cat.pick.habits.forEach((id) => { if (CATALOG_HABITS[id]) added += addCatalogHabit(CATALOG_HABITS[id]); });
+    } else {
+      label = 'food';
+      const byId = Object.fromEntries(CATALOG.foods.map((f) => [f.id, f]));
+      cat.pick.foods.forEach((id) => { if (byId[id]) added += addCatalogFood(byId[id]); });
+    }
+    if (!save()) return;
+    closeModal();
+    toast(added ? `Added ${added} ${label}${added === 1 ? '' : 's'}` : 'Nothing new to add');
+    renderAll();
+  }
+
   /* ---------- Log -> Workout ---------- */
 
   // Transient UI state (never saved).
@@ -3488,7 +4110,7 @@
         <div class="entry-row" data-pick="${ex.id}" role="button" tabindex="0">
           ${exerciseIconHtml(ex, true)}
           <div class="entry-row-main">
-            <div class="entry-row-title">${escapeHtml(ex.name)}</div>
+            <div class="entry-row-title">${exerciseLabelHtml(ex)}</div>
             <div class="entry-row-sub">${escapeHtml(exercisePickSub(ex, lastMap))}</div>
           </div>
           ${starButtonHtml('data-fav', ex.id, isFavoriteExercise(ex))}
@@ -3507,10 +4129,34 @@
       ${exerciseIconHtml(ex)}
       <div class="log-head-main">
         <div class="log-head-label">Logging</div>
-        <div class="log-head-name">${escapeHtml(ex.name)}</div>
+        <div class="log-head-name">${exerciseLabelHtml(ex)}</div>
         <div class="entry-row-sub">${escapeHtml(exercisePickSub(ex, lastEntryMap()))}</div>
       </div>
-      <button type="button" class="btn btn-secondary btn-sm" id="logChangeBtn">Change</button>`;
+      <button type="button" class="btn btn-secondary btn-sm" id="logChangeBtn">Change</button>
+      ${variantChipsHtml(ex)}`;
+    head.querySelectorAll('[data-variant]').forEach((btn) => btn.addEventListener('click', () => {
+      const mv = MOVEMENTS[ex.catalogId]; const eq = btn.dataset.variant;
+      let target = variantRecord(mv.id, eq) || legacyVariantMatch(mv, eq);
+      if (!target) {
+        addCatalogMovement(mv, [eq]);
+        target = variantRecord(mv.id, eq);
+        if (!save()) return;
+        renderAll();
+      }
+      if (target && target.id !== ex.id) openLogFor(target.id);
+    }));
+  }
+
+  // Equipment chips on the Log form: switch to (or start) the same movement
+  // on other equipment. Each variant keeps its own records and goals.
+  function variantChipsHtml(ex) {
+    const mv = ex.catalogId && MOVEMENTS[ex.catalogId];
+    if (!mv || mv.equipment.length < 2) return '';
+    return `<div class="variant-chips" role="group" aria-label="Equipment">${mv.equipment.map((eq) => {
+      const rec = variantRecord(mv.id, eq) || legacyVariantMatch(mv, eq);
+      const current = (ex.equipment || null) === eq;
+      return `<button type="button" class="variant-chip${current ? ' is-active' : ''}${rec ? '' : ' is-new'}" data-variant="${eq}" aria-pressed="${current}">${rec ? '' : '+ '}${escapeHtml(equipmentLabel(eq))}</button>`;
+    }).join('')}</div>`;
   }
 
   // One place decides what shows on Log -> Workout: the picker (nothing
@@ -3530,7 +4176,7 @@
     if (formShown) renderLogExerciseHead();
     if (on && ex) {
       document.getElementById('logSwitchBtn').innerHTML = logEx.pickerOpen
-        ? `<span>Back to ${escapeHtml(ex.name)}<span class="muted-text">Close the list</span></span>${uiIcon('chevron-up')}`
+        ? `<span>Back to ${exerciseLabelHtml(ex)}<span class="muted-text">Close the list</span></span>${uiIcon('chevron-up')}`
         : `<span>Switch exercise<span class="muted-text">Search or browse your list</span></span>${uiIcon('chevron-down')}`;
     }
   }
@@ -3597,12 +4243,12 @@
       <div class="entry-row is-manage${ex.archived ? ' is-toggled-off' : ''}" data-exercise-id="${ex.id}">
         ${exerciseIconHtml(ex, true)}
         <div class="entry-row-main">
-          <div class="entry-row-title">${escapeHtml(ex.name)}</div>
+          <div class="entry-row-title">${exerciseLabelHtml(ex)}</div>
           <div class="entry-row-sub">${kindBadge(ex)}${exerciseGoalSummary(ex)}</div>
         </div>
         <div class="entry-row-actions">
           ${ex.archived ? `<button class="btn btn-secondary btn-sm" data-action="unarchive-exercise" data-id="${ex.id}">Unarchive</button>` : ''}
-          <button class="btn btn-secondary btn-sm" data-action="edit-exercise" data-id="${ex.id}">Edit</button>
+          <button class="icon-btn" data-action="edit-exercise" data-id="${ex.id}" aria-label="Edit">${EDIT_ICON_SVG}</button>
         </div>
         ${ex.archived ? '' : starButtonHtml('data-fav', ex.id, isFavoriteExercise(ex))}
       </div>`;
@@ -3612,7 +4258,7 @@
     if (!renderDomainTrackToggle('workout')) return;
     const wrap = document.getElementById('exerciseManageList');
     const q = manageEx.query.trim().toLowerCase();
-    const matchesQ = (ex) => !q || ex.name.toLowerCase().includes(q) || exerciseGroupLabel(ex).toLowerCase().includes(q);
+    const matchesQ = (ex) => !q || exerciseLabel(ex).toLowerCase().includes(q) || exerciseGroupLabel(ex).toLowerCase().includes(q);
     const queried = state.exercises.filter(matchesQ);
 
     const fcounts = {};
@@ -3724,7 +4370,7 @@
     ['goal', 'daily', 'accessory'].forEach((sec) => {
       if (!groups[sec].length) return;
       html += `<optgroup label="${SECTION_LABELS[sec]}">` +
-        groups[sec].map((ex) => `<option value="${ex.id}">${escapeHtml(ex.name)}${ex.archived ? ' (archived)' : ''}</option>`).join('') +
+        groups[sec].map((ex) => `<option value="${ex.id}">${exerciseLabelHtml(ex)}${ex.archived ? ' (archived)' : ''}</option>`).join('') +
         `</optgroup>`;
     });
     html += `<option value="__add_new__">+ Add new exercise…</option>`;
@@ -3814,6 +4460,7 @@
     chart: lucide('<path d="M3 3v16a2 2 0 0 0 2 2h16"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/>'),
     calendar: lucide('<path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/>'),
     contrast: lucide('<circle cx="12" cy="12" r="10"/><path d="M12 18a6 6 0 0 0 0-12v12z"/>'),
+    habits: lucide('<path d="m3 17 2 2 4-4"/><path d="m3 7 2 2 4-4"/><path d="M13 6h8"/><path d="M13 12h8"/><path d="M13 18h8"/>'),
     calculator: lucide('<rect width="16" height="20" x="4" y="2" rx="2"/><line x1="8" x2="16" y1="6" y2="6"/><line x1="16" x2="16" y1="14" y2="18"/><path d="M16 10h.01"/><path d="M12 10h.01"/><path d="M8 10h.01"/><path d="M12 14h.01"/><path d="M8 14h.01"/><path d="M12 18h.01"/><path d="M8 18h.01"/>'),
     download: lucide('<path d="M12 15V3"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/>'),
     upload: lucide('<path d="M12 3v12"/><path d="m17 8-5-5-5 5"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>'),
@@ -3882,6 +4529,91 @@
     pizza: ['Pizza', 'food', '<path d="m12 14-1 1"/><path d="m13.75 18.25-1.25 1.42"/><path d="M17.775 5.654a15.68 15.68 0 0 0-12.121 12.12"/><path d="M18.8 9.3a1 1 0 0 0 2.1 7.7"/><path d="M21.964 20.732a1 1 0 0 1-1.232 1.232l-18-5a1 1 0 0 1-.695-1.232A19.68 19.68 0 0 1 15.732 2.037a1 1 0 0 1 1.232.695z"/>'],
     soup: ['Soup', 'food', '<path d="M12 21a9 9 0 0 0 9-9H3a9 9 0 0 0 9 9Z"/><path d="M7 21h10"/><path d="M19.5 12 22 6"/><path d="M16.25 3c.27.1.8.53.75 1.36-.06.83-.93 1.2-1 2.02-.05.78.34 1.24.73 1.62"/><path d="M11.25 3c.27.1.8.53.74 1.36-.05.83-.93 1.2-.98 2.02-.06.78.33 1.24.72 1.62"/><path d="M6.25 3c.27.1.8.53.75 1.36-.06.83-.93 1.2-1 2.02-.05.78.34 1.24.74 1.62"/>'],
     utensils: ['Utensils', 'food', '<path d="M3 2v7c0 1.1.9 2 2 2h4a2 2 0 0 0 2-2V2"/><path d="M7 2v20"/><path d="M21 15V2a5 5 0 0 0-5 5v6c0 1.1.9 2 2 2h3Zm0 0v7"/>'],
+    'arrow-big-up': ['Arrow big up', 'training', '<path d="M9 19a1 1 0 0 0 1 1h4a1 1 0 0 0 1-1v-6a1 1 0 0 1 1-1h3.293a.707.707 0 0 0 .5-1.207l-7.086-7.086a1 1 0 0 0-1.414 0l-7.086 7.086a.707.707 0 0 0 .5 1.207H8a1 1 0 0 1 1 1z"/>'],
+    'arrow-down-from-line': ['Arrow down from line', 'training', '<path d="M19 3H5"/> <path d="M12 21V7"/> <path d="m6 15 6 6 6-6"/>'],
+    'arrow-down-to-dot': ['Arrow down to dot', 'training', '<path d="M12 2v14"/> <path d="m19 9-7 7-7-7"/> <circle cx="12" cy="21" r="1"/>'],
+    'arrow-down-to-line': ['Arrow down to line', 'training', '<path d="M12 17V3"/> <path d="m6 11 6 6 6-6"/> <path d="M19 21H5"/>'],
+    'arrow-down-up': ['Arrow down up', 'training', '<path d="m3 16 4 4 4-4"/> <path d="M7 20V4"/> <path d="m21 8-4-4-4 4"/> <path d="M17 4v16"/>'],
+    'arrow-left-to-line': ['Arrow left to line', 'training', '<path d="M3 19V5"/> <path d="m13 6-6 6 6 6"/> <path d="M7 12h14"/>'],
+    'arrow-up-from-line': ['Arrow up from line', 'training', '<path d="m18 9-6-6-6 6"/> <path d="M12 3v14"/> <path d="M5 21h14"/>'],
+    'arrow-up-to-line': ['Arrow up to line', 'training', '<path d="M5 3h14"/> <path d="m18 13-6-6-6 6"/> <path d="M12 7v14"/>'],
+    barbell: ['Barbell', 'training', '<path d="M6 7v10"/><path d="M18 7v10"/><path d="M3 9.5v5"/><path d="M21 9.5v5"/><path d="M6 12h12"/>'],
+    bean: ['Bean', 'food', '<path d="M10.165 6.598C9.954 7.478 9.64 8.36 9 9c-.64.64-1.521.954-2.402 1.165A6 6 0 0 0 8 22c7.732 0 14-6.268 14-14a6 6 0 0 0-11.835-1.402Z"/> <path d="M5.341 10.62a4 4 0 1 0 5.279-5.28"/>'],
+    beer: ['Beer', 'food', '<path d="M17 11h1a3 3 0 0 1 0 6h-1"/> <path d="M9 12v6"/> <path d="M13 12v6"/> <path d="M14 7.5c-1 0-1.44.5-3 .5s-2-.5-3-.5-1.72.5-2.5.5a2.5 2.5 0 0 1 0-5c.78 0 1.57.5 2.5.5S9.44 2 11 2s2 1.5 3 1.5 1.72-.5 2.5-.5a2.5 2.5 0 0 1 0 5c-.78 0-1.5-.5-2.5-.5Z"/> <path d="M5 8v12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V8"/>'],
+    blender: ['Blender', 'food', '<path d="M8 14a2 2 0 0 0-1.963 1.615l-1.018 5.193A1 1 0 0 0 6 22h12a1 1 0 0 0 .981-1.192l-1.018-5.193A2 2 0 0 0 16 14z"/> <path d="m17 2-1 12"/> <path d="M8.006 14 7 2"/> <path d="M7.565 8.787A5 5 0 0 0 12 8a5 5 0 0 1 4.56-.75"/> <path d="M19 2H5a2 2 0 0 0-2 2v5a2 2 0 0 0 .688 1.5"/> <path d="M12 18h.01"/>'],
+    'book-open': ['Book open', 'body', '<path d="M12 5v16"/> <path d="M20.001 19A2 2 0 0022 17V5a2 2 0 00-1.999-2L16 3.002A5 5 0 0012 5a5 5 0 00-4-2H4a2 2 0 00-2 2v12a2 2 0 001.999 2H8a5 5 0 014 2 5 5 0 014-2z"/>'],
+    briefcase: ['Briefcase', 'training', '<path d="M16 20V4a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/> <rect width="20" height="14" x="2" y="6" rx="2"/>'],
+    broccoli: ['Broccoli', 'food', '<path d="M10 13a3 3 0 01-2.121-5.121"/> <path d="M15.606 14.204c-3.5 1.5-5.899 4.503-8.899 7.503A1 1 0 016 22c-2 0-4-2-4-4a1 1 0 01.293-.707c1.911-1.911 3.823-3.578 5.347-5.441"/> <path d="M16.573 14.737A4 4 0 0114 11"/> <path d="M7.14 10.907a4 4 0 112.756-7.43A4 4 0 0116.7 4.48a2 2 0 012.82 2.82 4 4 0 011.002 6.805 4 4 0 11-7.51 1.59"/>'],
+    cable: ['Cable', 'training', '<path d="M17 19a1 1 0 0 1-1-1v-2a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2a1 1 0 0 1-1 1z"/> <path d="M17 21v-2"/> <path d="M19 14V6.5a1 1 0 0 0-7 0v11a1 1 0 0 1-7 0V10"/> <path d="M21 21v-2"/> <path d="M3 5V3"/> <path d="M4 10a2 2 0 0 1-2-2V6a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2a2 2 0 0 1-2 2z"/> <path d="M7 5V3"/>'],
+    camera: ['Camera', 'body', '<path d="M13.997 4a2 2 0 0 1 1.76 1.05l.486.9A2 2 0 0 0 18.003 7H20a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2h1.997a2 2 0 0 0 1.759-1.048l.489-.904A2 2 0 0 1 10.004 4z"/> <circle cx="12" cy="13" r="3"/>'],
+    'can-soda': ['Can soda', 'food', '<path d="m17 22 1.664-2.496a2 2 0 00.336-1.11V5.606a2 2 0 00-.336-1.11L17 2"/> <path d="M18 22H6"/> <path d="M18 2H6"/> <path d="M5 17h14"/> <path d="M5 7h14"/> <path d="m7 22-1.664-2.496A2 2 0 015 18.394V5.606a2 2 0 01.336-1.11L7 2"/>'],
+    candy: ['Candy', 'food', '<path d="M10 7v10.9"/> <path d="M14 6.1V17"/> <path d="M16 7V3a1 1 0 0 1 1.707-.707 2.5 2.5 0 0 0 2.152.717 1 1 0 0 1 1.131 1.131 2.5 2.5 0 0 0 .717 2.152A1 1 0 0 1 21 8h-4"/> <path d="M16.536 7.465a5 5 0 0 0-7.072 0l-2 2a5 5 0 0 0 0 7.07 5 5 0 0 0 7.072 0l2-2a5 5 0 0 0 0-7.07"/> <path d="M8 17v4a1 1 0 0 1-1.707.707 2.5 2.5 0 0 0-2.152-.717 1 1 0 0 1-1.131-1.131 2.5 2.5 0 0 0-.717-2.152A1 1 0 0 1 3 16h4"/>'],
+    'chef-hat': ['Chef hat', 'body', '<path d="M17 21a1 1 0 0 0 1-1v-5.35c0-.457.316-.844.727-1.041a4 4 0 0 0-2.134-7.589 5 5 0 0 0-9.186 0 4 4 0 0 0-2.134 7.588c.411.198.727.585.727 1.041V20a1 1 0 0 0 1 1Z"/> <path d="M6 17h12"/>'],
+    'chevrons-down': ['Chevrons down', 'training', '<path d="m7 6 5 5 5-5"/> <path d="m7 13 5 5 5-5"/>'],
+    'chevrons-up': ['Chevrons up', 'training', '<path d="m17 11-5-5-5 5"/> <path d="m17 18-5-5-5 5"/>'],
+    cog: ['Cog', 'training', '<path d="M11 10.27 7 3.34"/> <path d="m11 13.73-4 6.93"/> <path d="M12 22v-2"/> <path d="M12 2v2"/> <path d="M14 12h8"/> <path d="m17 20.66-1-1.73"/> <path d="m17 3.34-1 1.73"/> <path d="M2 12h2"/> <path d="m20.66 17-1.73-1"/> <path d="m20.66 7-1.73 1"/> <path d="m3.34 17 1.73-1"/> <path d="m3.34 7 1.73 1"/> <circle cx="12" cy="12" r="2"/> <circle cx="12" cy="12" r="8"/>'],
+    cookie: ['Cookie', 'food', '<path d="M11 17h.01"/> <path d="M11.496 2c.324-.016.558.292.529.615a4 4 0 004.235 4.368.713.713 0 01.758.757 4 4 0 004.366 4.237c.323-.03.63.204.614.527a10 10 0 01-2.915 6.566A1 1 0 114.93 4.918 10 10 0 0111.496 2"/> <path d="M12 12h.01"/> <path d="M16 16h.01"/> <path d="M16 3h.01"/> <path d="M21 4h.01"/> <path d="M21 8h.01"/> <path d="M7 14h.01"/> <path d="M9 8h.01"/>'],
+    'cooking-pot': ['Cooking pot', 'food', '<path d="M2 12h20"/> <path d="M20 12v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-8"/> <path d="m4 8 16-4"/> <path d="m8.86 6.78-.45-1.81a2 2 0 0 1 1.45-2.43l1.94-.48a2 2 0 0 1 2.43 1.46l.45 1.8"/>'],
+    croissant: ['Croissant', 'food', '<path d="M10.2 18H4.774a1.5 1.5 0 0 1-1.352-.97 11 11 0 0 1 .132-6.487"/> <path d="M18 10.2V4.774a1.5 1.5 0 0 0-.97-1.352 11 11 0 0 0-6.486.132"/> <path d="M18 5a4 3 0 0 1 4 3 2 2 0 0 1-2 2 10 10 0 0 0-5.139 1.42"/> <path d="M5 18a3 4 0 0 0 3 4 2 2 0 0 0 2-2 10 10 0 0 1 1.42-5.14"/> <path d="M8.709 2.554a10 10 0 0 0-6.155 6.155 1.5 1.5 0 0 0 .676 1.626l9.807 5.42a2 2 0 0 0 2.718-2.718l-5.42-9.807a1.5 1.5 0 0 0-1.626-.676"/>'],
+    cylinder: ['Cylinder', 'body', '<ellipse cx="12" cy="5" rx="9" ry="3"/> <path d="M3 5v14a9 3 0 0 0 18 0V5"/>'],
+    disc: ['Disc', 'training', '<circle cx="12" cy="12" r="10"/> <circle cx="12" cy="12" r="2"/>'],
+    donut: ['Donut', 'food', '<path d="M20.5 10a2.5 2.5 0 0 1-2.4-3H18a2.95 2.95 0 0 1-2.6-4.4 10 10 0 1 0 6.3 7.1c-.3.2-.8.3-1.2.3"/> <circle cx="12" cy="12" r="3"/>'],
+    'door-stairwell': ['Door stairwell', 'training', '<path d="M12 17v-3a1 1 0 011-1h6"/> <path d="M19 17h-9a1 1 0 00-1 1v3"/> <path d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16"/> <path d="M19 9h-3a1 1 0 00-1 1v3"/> <path d="M22 21H2"/>'],
+    droplet: ['Droplet', 'food', '<path d="M12 22a7 7 0 0 0 7-7c0-2-1-3.9-3-5.5s-3.5-4-4-6.5c-.5 2.5-2 4.9-4 6.5C6 11.1 5 13 5 15a7 7 0 0 0 7 7z"/>'],
+    drumstick: ['Drumstick', 'food', '<path d="M15.4 15.63a7.875 6 135 1 1 6.23-6.23 4.5 3.43 135 0 0-6.23 6.23"/> <path d="m8.29 12.71-2.6 2.6a2.5 2.5 0 1 0-1.65 4.65A2.5 2.5 0 1 0 8.7 18.3l2.59-2.59"/>'],
+    'egg-fried': ['Egg fried', 'food', '<circle cx="11.5" cy="12.5" r="3.5"/> <path d="M3 8c0-3.5 2.5-6 6.5-6 5 0 4.83 3 7.5 5s5 2 5 6c0 4.5-2.5 6.5-7 6.5-2.5 0-2.5 2.5-6 2.5s-7-2-7-5.5c0-3 1.5-3 1.5-5C3.5 10 3 9 3 8Z"/>'],
+    fence: ['Fence', 'training', '<path d="M4 3 2 5v15c0 .6.4 1 1 1h2c.6 0 1-.4 1-1V5Z"/> <path d="M6 8h4"/> <path d="M6 18h4"/> <path d="m12 3-2 2v15c0 .6.4 1 1 1h2c.6 0 1-.4 1-1V5Z"/> <path d="M14 8h4"/> <path d="M14 18h4"/> <path d="m20 3-2 2v15c0 .6.4 1 1 1h2c.6 0 1-.4 1-1V5Z"/>'],
+    'fish-symbol': ['Fish symbol', 'food', '<path d="M2 16s9-15 20-4C11 23 2 8 2 8"/>'],
+    'flask-conical': ['Flask conical', 'body', '<path d="M14 2v6a2 2 0 0 0 .245.96l5.51 10.08A2 2 0 0 1 18 22H6a2 2 0 0 1-1.755-2.96l5.51-10.08A2 2 0 0 0 10 8V2"/> <path d="M6.453 15h11.094"/> <path d="M8.5 2h7"/>'],
+    'flower-2': ['Flower', 'body', '<path d="M12 5a3 3 0 1 1 3 3m-3-3a3 3 0 1 0-3 3m3-3v1M9 8a3 3 0 1 0 3 3M9 8h1m5 0a3 3 0 1 1-3 3m3-3h-1m-2 3v-1"/> <circle cx="12" cy="8" r="2"/> <path d="M12 10v12"/> <path d="M12 22c4.2 0 7-1.667 7-5-4.2 0-7 1.667-7 5Z"/> <path d="M12 22c-4.2 0-7-1.667-7-5 4.2 0 7 1.667 7 5Z"/>'],
+    grape: ['Grape', 'food', '<path d="M22 5V2l-5.89 5.89"/> <circle cx="16.6" cy="15.89" r="3"/> <circle cx="8.11" cy="7.4" r="3"/> <circle cx="12.35" cy="11.65" r="3"/> <circle cx="13.91" cy="5.85" r="3"/> <circle cx="18.15" cy="10.09" r="3"/> <circle cx="6.56" cy="13.2" r="3"/> <circle cx="10.8" cy="17.44" r="3"/> <circle cx="5" cy="19" r="3"/>'],
+    'grid-3x2': ['Grid 3x2', 'training', '<path d="M15 3v18"/> <path d="M3 12h18"/> <path d="M9 3v18"/> <rect x="3" y="3" width="18" height="18" rx="2"/>'],
+    ham: ['Ham', 'food', '<path d="M13.144 21.144A7.274 10.445 45 1 0 2.856 10.856"/> <path d="M13.144 21.144A7.274 4.365 45 0 0 2.856 10.856a7.274 4.365 45 0 0 10.288 10.288"/> <path d="M16.565 10.435 18.6 8.4a2.501 2.501 0 1 0 1.65-4.65 2.5 2.5 0 1 0-4.66 1.66l-2.024 2.025"/> <path d="m8.5 16.5-1-1"/>'],
+    hammer: ['Hammer', 'training', '<path d="m15 12-9.373 9.373a1 1 0 0 1-3.001-3L12 9"/> <path d="m18 15 4-4"/> <path d="m21.5 11.5-1.914-1.914A2 2 0 0 1 19 8.172v-.344a2 2 0 0 0-.586-1.414l-1.657-1.657A6 6 0 0 0 12.516 3H9l1.243 1.243A6 6 0 0 1 12 8.485V10l2 2h1.172a2 2 0 0 1 1.414.586L18.5 14.5"/>'],
+    'hand-platter': ['Hand platter', 'food', '<path d="M12 3V2"/> <path d="m15.4 17.4 3.2-2.8a2 2 0 1 1 2.8 2.9l-3.6 3.3c-.7.8-1.7 1.2-2.8 1.2h-4c-1.1 0-2.1-.4-2.8-1.2l-1.302-1.464A1 1 0 0 0 6.151 19H5"/> <path d="M2 14h12a2 2 0 0 1 0 4h-2"/> <path d="M4 10h16"/> <path d="M5 10a7 7 0 0 1 14 0"/> <path d="M5 14v6a1 1 0 0 1-1 1H2"/>'],
+    hexagon: ['Hexagon', 'training', '<path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>'],
+    'hiking-stick': ['Hiking stick', 'training', '<path d="M13.5 10.5 2 22"/> <path d="M16.352 11.648a1.205 1.205 0 01-1.704 0l-2.296-2.296a1.205 1.205 0 010-1.704l.72-.72a2 2 0 011.022-.546l.599-.12a2 2 0 001.569-1.57l.12-.598a2 2 0 01.546-1.022l.72-.72a1.205 1.205 0 011.704 0l2.296 2.296a1.205 1.205 0 010 1.704l-6.02 6.02a1 1 0 103 3l.201-.201A7.4 7.4 0 0021 9.93V7"/> <path d="m6 21-3-3"/>'],
+    'ice-cream-bowl': ['Ice cream bowl', 'food', '<path d="M12 17c5 0 8-2.69 8-6H4c0 3.31 3 6 8 6m-4 4h8m-4-3v3M5.14 11a3.5 3.5 0 1 1 6.71 0"/> <path d="M12.14 11a3.5 3.5 0 1 1 6.71 0"/> <path d="M15.5 6.5a3.5 3.5 0 1 0-7 0"/>'],
+    'ice-cream-cone': ['Ice cream cone', 'food', '<path d="m7 11 4.08 10.35a1 1 0 0 0 1.84 0L17 11"/> <path d="M17 7A5 5 0 0 0 7 7"/> <path d="M17 7a2 2 0 0 1 0 4H7a2 2 0 0 1 0-4"/>'],
+    kayak: ['Kayak', 'training', '<path d="M18 17a1 1 0 0 0-1 1v1a2 2 0 1 0 2-2z"/> <path d="M20.97 3.61a.45.45 0 0 0-.58-.58C10.2 6.6 6.6 10.2 3.03 20.39a.45.45 0 0 0 .58.58C13.8 17.4 17.4 13.8 20.97 3.61"/> <path d="m6.707 6.707 10.586 10.586"/> <path d="M7 5a2 2 0 1 0-2 2h1a1 1 0 0 0 1-1z"/>'],
+    layers: ['Layers', 'training', '<path d="M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83z"/> <path d="M2 12a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 12"/> <path d="M2 17a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 17"/>'],
+    leaf: ['Leaf', 'food', '<path d="M11 20a10 10 0 0010-10 25.9 25.9 0 00-1.04-7.281 1 1 0 00-1.755-.325C15.833 5.5 13 5.5 9.8 6.1A7 7 0 0011 20"/> <path d="M2 21a5 5 0 012.911-4.544C7.613 15.212 8.351 15.24 11 13"/>'],
+    'leafy-green': ['Leafy green', 'food', '<path d="M2 22c1.25-.987 2.27-1.975 3.9-2.2a5.56 5.56 0 0 1 3.8 1.5 4 4 0 0 0 6.187-2.353 3.5 3.5 0 0 0 3.69-5.116A3.5 3.5 0 0 0 20.95 8 3.5 3.5 0 1 0 16 3.05a3.5 3.5 0 0 0-5.831 1.373 3.5 3.5 0 0 0-5.116 3.69 4 4 0 0 0-2.348 6.155C3.499 15.42 4.409 16.712 4.2 18.1 3.926 19.743 3.014 20.732 2 22"/> <path d="M2 22 17 7"/>'],
+    milk: ['Milk', 'food', '<path d="M8 2h8"/> <path d="M9 2v2.789a4 4 0 0 1-.672 2.219l-.656.984A4 4 0 0 0 7 10.212V20a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2v-9.789a4 4 0 0 0-.672-2.219l-.656-.984A4 4 0 0 1 15 4.788V2"/> <path d="M7 15a6.472 6.472 0 0 1 5 0 6.47 6.47 0 0 0 5 0"/>'],
+    'milk-off': ['Milk off', 'food', '<path d="M8 2h8"/> <path d="M9 2v1.343M15 2v2.789a4 4 0 0 0 .672 2.219l.656.984a4 4 0 0 1 .672 2.22v1.131M7.8 7.8l-.128.192A4 4 0 0 0 7 10.212V20a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2v-3"/> <path d="M7 15a6.47 6.47 0 0 1 5 0 6.472 6.472 0 0 0 3.435.435"/> <line x1="2" x2="22" y1="2" y2="22"/>'],
+    'mountain-snow': ['Mountain snow', 'training', '<path d="m8 3 4 8 5-5 5 15H2L8 3z"/> <path d="M4.14 15.08c2.62-1.57 5.24-1.43 7.86.42 2.74 1.94 5.49 2 8.23.19"/>'],
+    'move-diagonal': ['Move diagonal', 'training', '<path d="M11 19H5v-6"/> <path d="M13 5h6v6"/> <path d="M19 5 5 19"/>'],
+    'move-down': ['Move down', 'training', '<path d="M8 18L12 22L16 18"/> <path d="M12 2V22"/>'],
+    'move-horizontal': ['Move horizontal', 'training', '<path d="m18 8 4 4-4 4"/> <path d="M2 12h20"/> <path d="m6 8-4 4 4 4"/>'],
+    'move-up': ['Move up', 'training', '<path d="M8 6L12 2L16 6"/> <path d="M12 2V22"/>'],
+    'move-up-right': ['Move up right', 'training', '<path d="M13 5H19V11"/> <path d="M19 5L5 19"/>'],
+    'notebook-pen': ['Notebook pen', 'body', '<path d="M13.4 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7.4"/> <path d="M2 6h4"/> <path d="M2 10h4"/> <path d="M2 14h4"/> <path d="M2 18h4"/> <path d="M21.378 5.626a1 1 0 1 0-3.004-3.004l-5.01 5.012a2 2 0 0 0-.506.854l-.837 2.87a.5.5 0 0 0 .62.62l2.87-.837a2 2 0 0 0 .854-.506z"/>'],
+    nut: ['Nut', 'food', '<path d="M16.847 5.847 20 9a7.23 7.23 0 011.551 7.516C21.241 17.352 21 17.932 21 19v1a1 1 0 01-1 1h-1c-1.069 0-1.648.242-2.485.552A7.2 7.2 0 019.002 20l-3.155-3.153"/> <path d="M18.21 5.43c-1.71.69-5.07 1.07-6.71 1.07.46 1.38.91 2.74.61 4.88a.88.88 0 01-.73.74c-1.78.28-3.54-.17-4.88-.62 0 1.64-.38 5-1.07 6.71-.21.52-.82.55-1.17.12A10 10 0 0118.33 4.26c.43.35.4.97-.12 1.17"/> <path d="M4.93 4.93 3 3a.7.7 0 010-1"/>'],
+    'pill-bottle': ['Pill bottle', 'body', '<path d="M18 11h-4a1 1 0 0 0-1 1v5a1 1 0 0 0 1 1h4"/> <path d="M6 7v13a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7"/> <rect width="16" height="5" x="4" y="2" rx="1"/>'],
+    popcorn: ['Popcorn', 'food', '<path d="M18 8a2 2 0 0 0 0-4 2 2 0 0 0-4 0 2 2 0 0 0-4 0 2 2 0 0 0-4 0 2 2 0 0 0 0 4"/> <path d="M10 22 9 8"/> <path d="m14 22 1-14"/> <path d="M20 8c.5 0 .9.4.8 1l-2.6 12c-.1.5-.7 1-1.2 1H7c-.6 0-1.1-.4-1.2-1L3.2 9c-.1-.6.3-1 .8-1Z"/>'],
+    'redo-2': ['Redo', 'training', '<path d="m15 14 5-5-5-5"/> <path d="M20 9H9.5A5.5 5.5 0 0 0 4 14.5A5.5 5.5 0 0 0 9.5 20H13"/>'],
+    'refresh-cw': ['Refresh cw', 'training', '<path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/> <path d="M21 3v5h-5"/> <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/> <path d="M8 16H3v5"/>'],
+    repeat: ['Repeat', 'training', '<path d="m17 2 4 4-4 4"/> <path d="M3 11v-1a4 4 0 0 1 4-4h14"/> <path d="m7 22-4-4 4-4"/> <path d="M21 13v1a4 4 0 0 1-4 4H3"/>'],
+    shield: ['Shield', 'training', '<path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/>'],
+    shrimp: ['Shrimp', 'food', '<path d="M10 2a3.28 3.28 0 003.227 1.798l6.17-.561A1 1 0 1119.614 8H8.5a6.44 6.44 0 00-5.63 9.75A6.5 6.5 0 008.5 21c1.38 0 2-.5 2.5-1"/> <path d="M10 8a8.5 8.5 0 000 8"/> <path d="M11 22c-.5-.5-1.12-1-2.5-1a1 1 0 010-5H12a7 7 0 007-7V8"/> <path d="M13 12h.01"/> <path d="M8 16c-2 0-4.5-4-4-6"/>'],
+    skull: ['Skull', 'training', '<path d="m12.5 17-.5-1-.5 1h1z"/> <path d="M15 22a1 1 0 0 0 1-1v-1a2 2 0 0 0 1.56-3.25 8 8 0 1 0-11.12 0A2 2 0 0 0 8 20v1a1 1 0 0 0 1 1z"/> <circle cx="15" cy="12" r="1"/> <circle cx="9" cy="12" r="1"/>'],
+    slice: ['Slice', 'food', '<path d="M11 16.586V19a1 1 0 0 1-1 1H2L18.37 3.63a1 1 0 1 1 3 3l-9.663 9.663a1 1 0 0 1-1.414 0L8 14"/>'],
+    'sport-shoe': ['Sport shoe', 'training', '<path d="m15 10.42 4.8-5.07"/> <path d="M19 18h3"/> <path d="M9.5 22 21.414 9.415A2 2 0 0 0 21.2 6.4l-5.61-4.208A1 1 0 0 0 14 3v2a2 2 0 0 1-1.394 1.906L8.677 8.053A1 1 0 0 0 8 9c-.155 6.393-2.082 9-4 9a2 2 0 0 0 0 4h14"/>'],
+    'stretch-horizontal': ['Stretch horizontal', 'training', '<rect width="20" height="6" x="2" y="4" rx="2"/> <rect width="20" height="6" x="2" y="14" rx="2"/>'],
+    sunrise: ['Sunrise', 'body', '<path d="M12 2v8"/> <path d="m4.93 10.93 1.41 1.41"/> <path d="M2 18h2"/> <path d="M20 18h2"/> <path d="m19.07 10.93-1.41 1.41"/> <path d="M22 22H2"/> <path d="m8 6 4-4 4 4"/> <path d="M16 18a4 4 0 0 0-8 0"/>'],
+    'thermometer-snowflake': ['Thermometer snowflake', 'body', '<path d="m10 20-1.25-2.5L6 18"/> <path d="M10 4 8.75 6.5 6 6"/> <path d="M10.585 15H10"/> <path d="M2 12h6.5L10 9"/> <path d="M20 14.54a4 4 0 1 1-4 0V4a2 2 0 0 1 4 0z"/> <path d="m4 10 1.5 2L4 14"/> <path d="m7 21 3-6-1.5-3"/> <path d="m7 3 3 6h2"/>'],
+    'thermometer-sun': ['Thermometer sun', 'body', '<path d="M12 2v2"/> <path d="M12 8a4 4 0 0 0-1.645 7.647"/> <path d="M2 12h2"/> <path d="M20 14.54a4 4 0 1 1-4 0V4a2 2 0 0 1 4 0z"/> <path d="m4.93 4.93 1.41 1.41"/> <path d="m6.34 17.66-1.41 1.41"/>'],
+    toothbrush: ['Toothbrush', 'body', '<path d="M15 11c-2 2-4 2-6 4l-7 7"/> <path d="m22 4-7.414 7.414-2-2A2 2 0 0114 6c0-.512.196-1.024.586-1.414A2 2 0 0116 4a2 2 0 013.262-1.552l2.152 2.138"/>'],
+    'trending-up': ['Trending up', 'training', '<path d="M16 7h6v6"/> <path d="m22 7-8.5 8.5-5-5L2 17"/>'],
+    'tube-lotion': ['Tube lotion', 'body', '<path d="M15 18v3a1 1 0 0 1-1 1h-4a1 1 0 0 1-1-1v-3"/> <path d="M17 2a2 2 0 0 1 1.6 3.2A8 8 0 0 0 17 10v6a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2v-6a8 8 0 0 0-1.6-4.8A2 2 0 0 1 7 2z"/> <path d="M7 10a6.47 6.47 0 0 1 5 0 6.47 6.47 0 0 0 5 0"/>'],
+    'undo-2': ['Undo', 'training', '<path d="M9 14 4 9l5-5"/> <path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5a5.5 5.5 0 0 1-5.5 5.5H11"/>'],
+    'unfold-horizontal': ['Unfold horizontal', 'training', '<path d="M16 12h6"/> <path d="M8 12H2"/> <path d="M12 2v2"/> <path d="M12 8v2"/> <path d="M12 14v2"/> <path d="M12 20v2"/> <path d="m19 15 3-3-3-3"/> <path d="m5 9-3 3 3 3"/>'],
+    vegan: ['Vegan', 'food', '<path d="M16 8q6 0 6-6-6 0-6 6"/> <path d="M17.41 3.59a10 10 0 1 0 3 3"/> <path d="M2 2a26.6 26.6 0 0 1 10 20c.9-6.82 1.5-9.5 4-14"/>'],
+    'waves-ladder': ['Waves ladder', 'training', '<path d="M19 5a2 2 0 0 0-2 2v11"/> <path d="M2 18c.6.5 1.2 1 2.5 1 2.5 0 2.5-2 5-2 2.6 0 2.4 2 5 2 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1"/> <path d="M7 13h10"/> <path d="M7 9h10"/> <path d="M9 5a2 2 0 0 0-2 2v11"/>'],
+    'weight-tilde': ['Weight tilde', 'training', '<path d="M6.5 8a2 2 0 0 0-1.906 1.46L2.1 18.5A2 2 0 0 0 4 21h16a2 2 0 0 0 1.925-2.54L19.4 9.5A2 2 0 0 0 17.48 8z"/> <path d="M7.999 15a2.5 2.5 0 0 1 4 0 2.5 2.5 0 0 0 4 0"/> <circle cx="12" cy="5" r="3"/>'],
+    wind: ['Wind', 'body', '<path d="M12.8 19.6A2 2 0 1 0 14 16H2"/> <path d="M17.5 8a2.5 2.5 0 1 1 2 4H2"/> <path d="M9.8 4.4A2 2 0 1 1 11 8H2"/>'],
+    wine: ['Wine', 'food', '<path d="M8 22h8"/> <path d="M7 10h10"/> <path d="M12 15v7"/> <path d="M12 15a5 5 0 0 0 5-5c0-2-.5-4-2-8H9c-1.5 4-2 6-2 8a5 5 0 0 0 5 5Z"/>'],
+    'wine-off': ['Wine off', 'body', '<path d="M8 22h8"/> <path d="M7 10h3m7 0h-1.343"/> <path d="M12 15v7"/> <path d="M7.307 7.307A12.33 12.33 0 0 0 7 10a5 5 0 0 0 7.391 4.391M8.638 2.981C8.75 2.668 8.872 2.34 9 2h6c1.5 4 2 6 2 8 0 .407-.05.809-.145 1.198"/> <line x1="2" x2="22" y1="2" y2="22"/>'],
   };
   const ITEM_ICON_CATEGORIES = [['common', 'Common'], ['training', 'Training'], ['body', 'Body'], ['food', 'Food']];
   const COMMON_ICONS = ['dumbbell', 'weight', 'activity', 'footprints', 'bike', 'timer', 'flame', 'scale', 'ruler', 'heart', 'moon', 'droplets', 'glass', 'apple', 'utensils', 'coffee', 'biceps', 'pill'];
@@ -3905,15 +4637,24 @@
   // that opens a grid to pick another. `getDefault` is what shows with
   // nothing chosen (it can change as the form's type does); the returned
   // `value()` is the chosen key, or null for the default.
-  function iconFieldHtml(id) {
+  const PENCIL_ICON_SVG = '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/></svg>';
+  // The top of every Add/Edit form: a large icon tile with a small pencil
+  // badge beside the Name field. Tapping the tile opens the icon search and
+  // picker right under it. (Exercise, tracker, cup and saved-food forms all
+  // use this one helper, so they stay identical.)
+  function nameIconHtml({ iconId, inputId, value, placeholder, maxlength, label = 'Name' }) {
     return `
       <div class="field">
-        <span class="field-label">Icon</span>
-        <button type="button" class="icon-field" id="${id}" aria-expanded="false"></button>
-        <div class="icon-picker" id="${id}Picker" hidden>
-          <input type="search" id="${id}Search" placeholder="Search icons" aria-label="Search icons" />
+        <span class="field-label">${label}</span>
+        <div class="name-icon-row">
+          <button type="button" class="itile" id="${iconId}" aria-expanded="false" aria-label="Change icon"></button>
+          <input type="text" id="${inputId}" value="${value ? escapeHtml(value) : ''}" placeholder="${placeholder}" maxlength="${maxlength}" aria-label="${label}" />
+        </div>
+        <span class="field-hint">Tap the icon to change it</span>
+        <div class="icon-picker" id="${iconId}Picker" hidden>
+          <input type="search" id="${iconId}Search" placeholder="Search icons" aria-label="Search icons" />
           <div class="segmented" role="radiogroup" aria-label="Icon category">
-            ${ITEM_ICON_CATEGORIES.map(([k, label]) => `<button type="button" data-icon-cat="${k}" role="radio">${label}</button>`).join('')}
+            ${ITEM_ICON_CATEGORIES.map(([k, l]) => `<button type="button" data-icon-cat="${k}" role="radio">${l}</button>`).join('')}
           </div>
           <div class="icon-grid" role="radiogroup" aria-label="Icons"></div>
           <button type="button" class="btn btn-secondary btn-block" data-action="icon-default">Use default icon</button>
@@ -3929,7 +4670,8 @@
     const grid = picker.querySelector('.icon-grid');
     const current = () => chosen || getDefault();
     function paintRow() {
-      row.innerHTML = `${itemIconHtml(current(), true)}<span>${ITEM_ICONS[current()][0]}${chosen ? '' : ' (default)'}</span><span class="icon-field-action">Change ›</span>`;
+      row.innerHTML = `<span class="itile-ico">${itemIconSvg(current())}</span><span class="itile-badge">${PENCIL_ICON_SVG}</span>`;
+      row.title = `${ITEM_ICONS[current()][0]}${chosen ? '' : ' (default)'} — tap to change`;
     }
     function paintGrid() {
       const q = search.value.trim().toLowerCase();
@@ -3945,11 +4687,12 @@
       picker.hidden = true;
       row.setAttribute('aria-expanded', 'false');
       paintRow();
+      row.focus();
     }
     row.addEventListener('click', () => {
       picker.hidden = !picker.hidden;
       row.setAttribute('aria-expanded', String(!picker.hidden));
-      if (!picker.hidden) paintGrid();
+      if (!picker.hidden) { paintGrid(); if (picker.scrollIntoView) picker.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }
     });
     search.addEventListener('input', paintGrid);
     picker.querySelectorAll('[data-icon-cat]').forEach((b) => b.addEventListener('click', () => { category = b.dataset.iconCat; paintGrid(); }));
@@ -3979,7 +4722,7 @@
   // (archived exercises/trackers, individual macro tracking) already
   // existed underneath it.
   function domainTracked(id) {
-    if (id === 'workout') return state.settings.trackWorkout;
+    if (id === 'workout') return state.settings.trackWorkout || habitsTracked();
     if (id === 'measurements') return state.settings.trackMeasurements;
     if (id === 'water') return state.settings.trackWater;
     return state.settings.trackFood;
@@ -4236,7 +4979,7 @@
       <div class="entry-row" data-entry-id="${entry.id}">
         ${exerciseIconHtml(ex, true)}
         <div class="entry-row-main">
-          <div class="entry-row-title">${escapeHtml(ex ? ex.name : 'Deleted exercise')}</div>
+          <div class="entry-row-title">${escapeHtml(ex ? exerciseLabel(ex) : 'Deleted exercise')}</div>
           <div class="entry-row-sub">${escapeHtml(entrySummaryText(ex, entry))}${entry.note ? ` — “${escapeHtml(entry.note)}”` : ''}</div>
         </div>
         <div class="entry-row-date">${fmtDateShort(entry.date)}</div>
@@ -4438,11 +5181,12 @@
     let selectedCategory = (seed && seed.category) || 'other';
     let selectedFavorite = !!(food && food.favorite);
     openModal(`
-      <div class="modal-title-row"><h2>${editing ? 'Edit saved food' : 'Save a new food'}</h2><button class="modal-close" data-action="close-modal">${CLOSE_ICON_SVG}</button></div>
+      <div class="modal-title-row"><h2>${editing ? 'Edit food' : 'Add a food'}</h2><button class="modal-close" data-action="close-modal">${CLOSE_ICON_SVG}</button></div>
       <div class="form-card">
-        <label class="field"><span class="field-label">Name</span>
-          <input type="text" id="savedFoodName" value="${seed && seed.name ? escapeHtml(seed.name) : ''}" placeholder="e.g. Chicken breast, 6oz" maxlength="60" /></label>
-        ${iconFieldHtml('savedFoodIcon')}
+        ${nameIconHtml({ iconId: 'savedFoodIcon', inputId: 'savedFoodName', value: seed && seed.name, placeholder: 'e.g. Chicken breast, 6oz', maxlength: 60 })}
+        <label class="field"><span class="field-label">Serving <span class="muted-text">(optional)</span></span>
+          <input type="text" id="savedFoodServing" maxlength="40" placeholder="e.g. 1 cup, 100 g, 1 medium" value="${escapeHtml((seed && seed.serving) || '')}" autocomplete="off" />
+          <span class="muted-text field-hint">The numbers below are for one serving. You pick how many when you log it.</span></label>
         <div class="field">
           <span class="field-label">Category</span>
           <div class="segmented" id="savedFoodCategorySegmentedForm" role="radiogroup" aria-label="Category">
@@ -4492,10 +5236,12 @@
         food.name = name;
         food.category = selectedCategory;
         food.favorite = selectedFavorite;
+        const serving = document.getElementById('savedFoodServing').value.trim();
+        if (serving) food.serving = serving; else delete food.serving;
         Object.assign(food, values);
         if (iconField.value()) food.icon = iconField.value(); else delete food.icon;
       } else {
-        state.food.savedFoods.push({ id: genId('savedfood'), name, category: selectedCategory, favorite: selectedFavorite, ...values, ...(iconField.value() && { icon: iconField.value() }) });
+        state.food.savedFoods.push({ id: genId('savedfood'), name, category: selectedCategory, favorite: selectedFavorite, ...values, ...(document.getElementById('savedFoodServing').value.trim() && { serving: document.getElementById('savedFoodServing').value.trim() }), ...(iconField.value() && { icon: iconField.value() }) });
       }
       if (!save()) return;
       closeModal();
@@ -4524,8 +5270,7 @@
   // suggestion-info modal).
   let expandedSavedFoodId = null;
   let savedFoodQty = 1;
-  const SAVED_FOOD_QTY_PRESETS = [0.5, 0.75, 1, 1.5, 2];
-
+  
   // Every tracked macro on `food`, scaled by `qty` and rounded to one
   // decimal place — e.g. 1.5x on 280 cal / 53g protein logs 420 cal /
   // 79.5g protein. A macro the saved food has no value for stays null, same
@@ -4585,46 +5330,40 @@
     }
     list.innerHTML = shown.map((food) => {
       const expanded = expandedSavedFoodId === food.id;
-      const isCustomQty = !SAVED_FOOD_QTY_PRESETS.includes(savedFoodQty);
       return `
         <div class="entry-row saved-food-log-row" data-saved-food-id="${food.id}" role="button" tabindex="0">
           ${savedFoodIconHtml(food, true)}
           <div class="entry-row-main">
             <div class="entry-row-title">${escapeHtml(food.name)}</div>
-            <div class="entry-row-sub">${macroSummaryText(food)}</div>
+            <div class="entry-row-sub">${food.serving ? `${escapeHtml(food.serving)} · ` : ''}${macroSummaryText(food)}</div>
           </div>
           ${starButtonHtml('data-fav', food.id, food.favorite)}
         </div>
         ${expanded ? `
         <div class="card form-card saved-food-qty-card">
-          <div class="chip-picker" id="savedFoodQtyChips" role="radiogroup" aria-label="Quantity">
-            ${SAVED_FOOD_QTY_PRESETS.map((q) => `<button type="button" class="chip-option${savedFoodQty === q ? ' is-active' : ''}" data-qty="${q}" role="radio" aria-checked="${savedFoodQty === q}">${q}&times;</button>`).join('')}
-            <button type="button" class="chip-option${isCustomQty ? ' is-active' : ''}" data-qty="custom" role="radio" aria-checked="${isCustomQty}">Custom&hellip;</button>
-          </div>
-          ${isCustomQty ? `
-          <label class="field"><span class="field-label">Custom quantity (&times;)</span>
-            <input type="number" step="any" min="0" id="savedFoodCustomQty" value="${savedFoodQty}" /></label>` : ''}
+          <div class="field"><span class="field-label">Servings${food.serving ? ` <span class="muted-text">(1 = ${escapeHtml(food.serving)})</span>` : ''}</span>
+            <div class="stepper" id="savedFoodStepper" role="group" aria-label="Servings">
+              <button type="button" class="stepper-btn" data-step="-1" aria-label="Fewer servings">${uiIcon('minus')}</button>
+              <input type="number" inputmode="decimal" step="0.25" min="0.25" id="savedFoodCustomQty" value="${savedFoodQty}" aria-label="Servings" />
+              <button type="button" class="stepper-btn" data-step="1" aria-label="More servings">${uiIcon('plus')}</button>
+            </div></div>
           <label class="field"><span class="field-label">Date</span>
             <input type="date" id="savedFoodDate" value="${savedFoodDate || todayISO()}" /></label>
           <p class="muted-text field-hint">Logs: ${macroSummaryText(scaledSavedFoodValues(food, savedFoodQty))}</p>
           <button type="button" class="btn btn-primary btn-block" id="logSavedFoodBtn">Log it</button>
         </div>` : ''}`;
     }).join('');
-    const chips = document.getElementById('savedFoodQtyChips');
-    if (chips) {
-      chips.querySelectorAll('.chip-option').forEach((btn) => {
-        btn.addEventListener('click', () => {
-          if (btn.dataset.qty === 'custom') { savedFoodQty = 1.25; } // any non-preset value switches the picker into "Custom" mode
-          else savedFoodQty = parseFloat(btn.dataset.qty);
-          renderSavedFoodLogList();
-        });
-      });
-    }
-    const customInput = document.getElementById('savedFoodCustomQty');
-    if (customInput) {
+    const stepper = document.getElementById('savedFoodStepper');
+    if (stepper) {
+      stepper.querySelectorAll('[data-step]').forEach((btn) => btn.addEventListener('click', () => {
+        const next = Math.round((savedFoodQty + Number(btn.dataset.step) * 0.25) * 100) / 100;
+        savedFoodQty = Math.min(99, Math.max(0.25, next));
+        renderSavedFoodLogList();
+      }));
+      const customInput = document.getElementById('savedFoodCustomQty');
       customInput.addEventListener('change', () => {
         const raw = parseFloat(customInput.value);
-        if (!Number.isNaN(raw) && raw > 0) savedFoodQty = raw;
+        if (!Number.isNaN(raw) && raw > 0) savedFoodQty = Math.min(99, raw);
         renderSavedFoodLogList();
       });
     }
@@ -4703,10 +5442,10 @@
         ${savedFoodIconHtml(food, true)}
         <div class="entry-row-main">
           <div class="entry-row-title">${escapeHtml(food.name)}</div>
-          <div class="entry-row-sub">${savedFoodCategoryLabel(food)} · ${macroSummaryText(food)}</div>
+          <div class="entry-row-sub">${savedFoodCategoryLabel(food)}${food.serving ? ` · ${escapeHtml(food.serving)}` : ''} · ${macroSummaryText(food)}</div>
         </div>
         <div class="entry-row-actions">
-          <button class="btn btn-secondary btn-sm" data-action="edit-saved-food" data-id="${food.id}">Edit</button>
+          <button class="icon-btn" data-action="edit-saved-food" data-id="${food.id}" aria-label="Edit">${EDIT_ICON_SVG}</button>
         </div>
         ${starButtonHtml('data-fav', food.id, food.favorite)}
       </div>`;
@@ -4874,7 +5613,7 @@
     ['goal', 'daily', 'accessory'].forEach((sec) => {
       if (!groups[sec].length) return;
       html += `<optgroup label="${SECTION_LABELS[sec]}">` +
-        groups[sec].map((ex) => `<option value="${ex.id}">${escapeHtml(ex.name)}${ex.archived ? ' (archived)' : ''}</option>`).join('') +
+        groups[sec].map((ex) => `<option value="${ex.id}">${exerciseLabelHtml(ex)}${ex.archived ? ' (archived)' : ''}</option>`).join('') +
         `</optgroup>`;
     });
     select.innerHTML = html;
@@ -4986,7 +5725,7 @@
     const ex = exerciseById(entry.exerciseId);
     openModal(`
       <div class="modal-title-row"><h2>Edit entry</h2><button class="modal-close" data-action="close-modal">${CLOSE_ICON_SVG}</button></div>
-      <p class="muted-text modal-subtitle">${escapeHtml(ex ? ex.name : 'Deleted exercise')}</p>
+      <p class="muted-text modal-subtitle">${escapeHtml(ex ? exerciseLabel(ex) : 'Deleted exercise')}</p>
       <div class="form-card">
         <label class="field"><span class="field-label">Date</span><input type="date" id="editEntryDate" value="${entry.date}" /></label>
         <div id="editEntryFields"></div>
@@ -5065,7 +5804,7 @@
     }
     openModal(`
       <div class="modal-title-row">
-        <h2 class="title-with-icon">${exerciseIconHtml(ex)}${escapeHtml(ex.name)}</h2>
+        <h2 class="title-with-icon">${exerciseIconHtml(ex)}${exerciseLabelHtml(ex)}</h2>
         <div class="modal-title-actions">
           <button class="icon-btn" id="editExerciseBtn" aria-label="Edit exercise">${EDIT_ICON_SVG}</button>
           <button class="modal-close" data-action="close-modal">${CLOSE_ICON_SVG}</button>
@@ -5124,7 +5863,7 @@
 
     openModal(`
       <div class="modal-title-row">
-        <h2 class="title-with-icon">${exerciseIconHtml(ex)}${escapeHtml(ex.name)}</h2>
+        <h2 class="title-with-icon">${exerciseIconHtml(ex)}${exerciseLabelHtml(ex)}</h2>
         <div class="modal-title-actions">
           <button class="icon-btn" id="editExerciseBtn" aria-label="Edit exercise">${EDIT_ICON_SVG}</button>
           <button class="modal-close" data-action="close-modal">${CLOSE_ICON_SVG}</button>
@@ -5228,7 +5967,7 @@
   function openSuggestionInfoModal(exId, scale, activeMetric, sugg) {
     const ex = exerciseById(exId);
     openModal(`
-      <button type="button" class="modal-back-link" data-action="back-to-exercise">${BACK_CHEVRON_ICON_SVG}${ex ? escapeHtml(ex.name) : 'Back'}</button>
+      <button type="button" class="modal-back-link" data-action="back-to-exercise">${BACK_CHEVRON_ICON_SVG}${ex ? exerciseLabelHtml(ex) : 'Back'}</button>
       <div class="modal-title-row"><h2>Next session</h2><button class="modal-close" data-action="close-modal">${CLOSE_ICON_SVG}</button></div>
 
       ${sugg.detail || sugg.method ? `
@@ -5267,10 +6006,7 @@
     openModal(`
       <div class="modal-title-row"><h2>${editing ? 'Edit exercise' : 'Add exercise'}</h2><button class="modal-close" data-action="close-modal">${CLOSE_ICON_SVG}</button></div>
       <div class="form-card">
-        <label class="field"><span class="field-label">Name</span>
-          <input type="text" id="exName" value="${ex ? escapeHtml(ex.name) : ''}" placeholder="e.g. Overhead Press" maxlength="60" /></label>
-
-        ${iconFieldHtml('exIcon')}
+        ${nameIconHtml({ iconId: 'exIcon', inputId: 'exName', value: ex && ex.name, placeholder: 'e.g. Overhead Press', maxlength: 60 })}
 
         <div class="field">
           <span class="field-label">Muscle group</span>
@@ -5794,10 +6530,7 @@
     openModal(`
       <div class="modal-title-row"><h2>${editing ? 'Edit tracker' : 'Add tracker'}</h2><button class="modal-close" data-action="close-modal">${CLOSE_ICON_SVG}</button></div>
       <div class="form-card">
-        <label class="field"><span class="field-label">Name</span>
-          <input type="text" id="trkName" value="${tracker ? escapeHtml(tracker.name) : ''}" placeholder="e.g. Waist, Protein, Resting Heart Rate" maxlength="60" /></label>
-
-        ${iconFieldHtml('trkIcon')}
+        ${nameIconHtml({ iconId: 'trkIcon', inputId: 'trkName', value: tracker && tracker.name, placeholder: 'e.g. Waist, Protein, Resting Heart Rate', maxlength: 60 })}
 
         <div class="field">
           <span class="field-label">Value type${isSleep ? ' (fixed — Sleep also tracks quality)' : hasEntries ? ' (locked — has logged entries)' : ''}</span>
@@ -5952,7 +6685,7 @@
           <div class="entry-row-sub">${fmtVolume(cup.amountMl)}</div>
         </div>
         <div class="entry-row-actions">
-          <button class="btn btn-secondary btn-sm" data-action="edit-cup" data-id="${cup.id}">Edit</button>
+          <button class="icon-btn" data-action="edit-cup" data-id="${cup.id}" aria-label="Edit">${EDIT_ICON_SVG}</button>
         </div>
       </div>`;
   }
@@ -5963,9 +6696,7 @@
     openModal(`
       <div class="modal-title-row"><h2>${editing ? 'Edit cup' : 'Add cup'}</h2><button class="modal-close" data-action="close-modal">${CLOSE_ICON_SVG}</button></div>
       <div class="form-card">
-        <label class="field"><span class="field-label">Name</span>
-          <input type="text" id="cupName" value="${cup ? escapeHtml(cup.name) : ''}" placeholder="e.g. Water bottle" maxlength="40" /></label>
-        ${iconFieldHtml('cupIcon')}
+        ${nameIconHtml({ iconId: 'cupIcon', inputId: 'cupName', value: cup && cup.name, placeholder: 'e.g. Water bottle', maxlength: 40 })}
         <label class="field"><span class="field-label">Amount (${Units.volumeUnitLabel()})</span>
           <input type="number" step="any" min="0" id="cupAmount" value="${cup ? round(Units.mlToDisplay(cup.amountMl), 1) : ''}" placeholder="e.g. 16" /></label>
         <button type="button" class="btn btn-primary btn-block" id="saveCupBtn">${editing ? 'Save changes' : 'Add cup'}</button>
@@ -6068,7 +6799,8 @@
       select.dataset.built = '1';
     }
     const calc = state.settings.nutritionCalc;
-    document.getElementById('nutritionCalcEnabledSwitch').setAttribute('aria-checked', String(calc.enabled));
+    document.querySelectorAll('#calorieModeSegmented button').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.calorieMode === calorieMode())));
+    document.getElementById('nutritionCalcCard').hidden = !calc.enabled;
     document.getElementById('nutritionCalcFields').hidden = !calc.enabled;
     if (!calc.enabled) return;
     select.value = calc.activityLevel;
@@ -6140,7 +6872,6 @@
       wrap.innerHTML = MACRO_KEYS.map((k) => `
         <div class="setting-row" data-macro-goal-row="${k}">
           <span>${MACRO_LABELS[k]} <span class="muted-text" data-macro-hint="${k}"></span></span>
-          ${k === 'calories' ? switchHtml(`data-macro-goal-toggle="${k}"`, 'Calories goal', false) : ''}
         </div>
         <label class="field" data-macro-goal-field="${k}" hidden>
           <span class="field-label">Daily goal (${MACRO_UNITS[k] || 'cal'})</span>
@@ -6148,13 +6879,6 @@
         </label>`).join('');
       wrap.dataset.built = '1';
       wrap.addEventListener('click', (ev) => {
-        const toggle = ev.target.closest('[data-macro-goal-toggle]');
-        if (!toggle) return;
-        const k = toggle.dataset.macroGoalToggle;
-        macroGoalInfo(k).enabled = !isOn(toggle);
-        if (!save()) return;
-        renderMacroGoalRows();
-        renderDashboard();
       });
       wrap.addEventListener('change', (ev) => {
         const input = ev.target.closest('[data-macro-goal-input]');
@@ -6170,18 +6894,15 @@
       const info = macroGoalInfo(k);
       const tracked = macroTracked(k);
       const row = wrap.querySelector(`[data-macro-goal-row="${k}"]`);
-      if (row) row.hidden = !tracked;
-      if (k === 'calories') {
-        wrap.querySelector(`[data-macro-goal-toggle="${k}"]`).setAttribute('aria-checked', String(!!info.enabled));
-      }
+      if (row) row.hidden = k === 'calories' ? calorieMode() === 'none' : !tracked;
       const field = wrap.querySelector(`[data-macro-goal-field="${k}"]`);
-      if (field) field.hidden = k === 'calories' ? !info.enabled : !tracked;
+      if (field) field.hidden = k === 'calories' ? calorieMode() === 'none' : !tracked;
       const input = wrap.querySelector(`[data-macro-goal-input="${k}"]`);
       if (input && document.activeElement !== input) input.value = info.goal != null ? info.goal : '';
       const hint = wrap.querySelector(`[data-macro-hint="${k}"]`);
       if (hint) {
         hint.textContent = k === 'calories'
-          ? (info.enabled && info.goal != null ? `(goal: ${fmtMacroValue(k, info.goal)})` : '(always tracked)')
+          ? (info.enabled && info.goal != null ? `(goal: ${fmtMacroValue(k, info.goal)})` : '(type a number)')
           : (info.goal != null ? `(goal: ${fmtMacroValue(k, info.goal)})` : '(no goal set)');
       }
     });
@@ -6205,7 +6926,7 @@
         </div>
         <div class="entry-row-actions">
           ${tracker.archived ? `<button class="btn btn-secondary btn-sm" data-action="unarchive-tracker" data-id="${tracker.id}">Unarchive</button>` : ''}
-          <button class="btn btn-secondary btn-sm" data-action="edit-tracker" data-id="${tracker.id}">Edit</button>
+          <button class="icon-btn" data-action="edit-tracker" data-id="${tracker.id}" aria-label="Edit">${EDIT_ICON_SVG}</button>
         </div>
       </div>`;
   }
@@ -6241,6 +6962,7 @@
   function renderManage() {
     setManageCategory(manageCategory);
     renderExerciseManageList();
+    renderTidyCard();
     renderTrackerManageList();
     renderWaterManagePanel();
     renderFoodManagePanel();
@@ -6251,7 +6973,7 @@
   // Settings flags driven by a plain on/off switch in index.html.
   const settingSwitches = {
     trackWorkoutSwitch: 'trackWorkout', trackMeasurementsSwitch: 'trackMeasurements',
-    trackWaterSwitch: 'trackWater', trackFoodSwitch: 'trackFood',
+    trackWaterSwitch: 'trackWater', trackFoodSwitch: 'trackFood', trackHabitsSwitch: 'trackHabits',
     showWeightInsightsSwitch: 'showWeightInsights', showStrengthLevelSwitch: 'showStrengthLevel',
     showPaceLevelSwitch: 'showPaceLevel', showSleepInsightsSwitch: 'showSleepInsights',
     showMacroGuidanceSwitch: 'showMacroGuidance',
@@ -6497,7 +7219,11 @@
     // the actual declutter this step was for. Lifting also decides whether
     // the daily bodyweight-target exercises (push-ups/squats/pull-ups) get
     // seeded — those are exercise tracking too, not a separate concern.
-    interests: { lifting: true, running: true, bodyweight: true, sleep: false, water: true, food: false },
+    interests: { lifting: true, running: true, habits: true, bodyweight: true, sleep: false, water: true, food: false },
+    // Starter packs from the catalog — nothing is ticked for you.
+    packs: {},
+    // How the calorie target is set: 'calc' | 'manual' | 'none'.
+    calorieMode: 'none', calorieManual: '',
     heightFt: '', heightIn: '', heightCm: '',
     weight: '', age: '', sex: '',
     lifts: {
@@ -6529,10 +7255,12 @@
     const seq = ['interests', 'about'];
     if (setupAnswers.interests.lifting) seq.push('lifting');
     if (setupAnswers.interests.running) seq.push('running');
+    if (setupAnswers.interests.lifting && CATALOG.packs.length) seq.push('packs');
+    if (setupAnswers.interests.food) seq.push('food');
     seq.push('goals');
     return seq;
   }
-  const SETUP_STEP_TITLES = { interests: 'What do you want to track?', about: 'About you', lifting: 'Lifting goals', running: 'Running goal', goals: 'Other goals' };
+  const SETUP_STEP_TITLES = { interests: 'What do you want to track?', about: 'About you', lifting: 'Lifting goals', running: 'Running goal', packs: 'Starter exercises', food: 'Food targets', goals: 'Other goals' };
 
   // The topbar normally reserves the iOS notch/status-bar area itself (its
   // own top padding includes env(safe-area-inset-top) — see styles.css —
@@ -6585,6 +7313,8 @@
     else if (key === 'about') renderSetupStepAbout();
     else if (key === 'lifting') renderSetupStepLifting();
     else if (key === 'running') renderSetupStepRunning();
+    else if (key === 'packs') renderSetupStepPacks();
+    else if (key === 'food') renderSetupStepFood();
     else renderSetupStepGoals();
   }
 
@@ -6606,6 +7336,7 @@
       <div class="interest-grid">
         ${interestTileHtml('lifting', DOMAIN_TAB_ICONS.workout, 'Lifting', i.lifting)}
         ${interestTileHtml('running', FOOTPRINTS_ICON_SVG, 'Running', i.running)}
+        ${interestTileHtml('habits', STATIC_ICONS.habits, 'Habits', i.habits)}
         ${interestTileHtml('bodyweight', SCALE_ICON_SVG, 'Body weight', i.bodyweight)}
         ${interestTileHtml('sleep', MOON_ICON_SVG, 'Sleep', i.sleep)}
         ${interestTileHtml('water', WATER_DROP_ICON_SVG, 'Water', i.water)}
@@ -6752,6 +7483,38 @@
     wireSetupBoolRow('setupInsightsToggle', (v) => { captureSetupStep(); setupAnswers.insightsEnabled = v; renderSetupStepGoals(); });
   }
 
+  function renderSetupStepPacks() {
+    const picked = setupAnswers.packs;
+    document.getElementById('setupContent').innerHTML = `
+      <p class="muted-text">Optional. Pick a starter pack to fill your exercise list, or skip and add movements one at a time later with Manage → From catalog. Nothing is added unless you tick it.</p>
+      <div class="card card-list">${CATALOG.packs.map((pk) => `
+        <div class="setting-row"><span>${escapeHtml(pk.name)}<span class="muted-text">${escapeHtml(pk.description || '')}</span></span>${switchHtml(`data-pack="${pk.id}"`, pk.name, !!picked[pk.id])}</div>`).join('')}
+      </div>`;
+    document.querySelectorAll('#setupContent [data-pack]').forEach((btn) => btn.addEventListener('click', () => {
+      picked[btn.dataset.pack] = !picked[btn.dataset.pack];
+      btn.setAttribute('aria-checked', String(!!picked[btn.dataset.pack]));
+    }));
+  }
+
+  function renderSetupStepFood() {
+    const m = setupAnswers.calorieMode;
+    const missing = ['heightCm', 'age', 'sex', 'weight'].some((k) => !setupAnswers[k] && !(k === 'heightCm' && (setupAnswers.heightFt || setupAnswers.heightIn)));
+    document.getElementById('setupContent').innerHTML = `
+      <p class="muted-text">How should Fit Log set your daily calorie target? You can change this any time in Manage → Food.</p>
+      <div class="segmented segmented-fill" id="setupCalorieSeg" role="radiogroup" aria-label="Calorie target">
+        <button type="button" role="radio" data-mode="calc" aria-checked="${m === 'calc'}">Calculator</button>
+        <button type="button" role="radio" data-mode="manual" aria-checked="${m === 'manual'}">Manual</button>
+        <button type="button" role="radio" data-mode="none" aria-checked="${m === 'none'}">No Target</button>
+      </div>
+      ${m === 'calc' ? `<p class="muted-text">Estimates a target from your height, weight, age and sex${missing ? ' — fill those in on the About you step first, or the calculator will wait until you do' : ''}. You can adjust activity and goal later.</p>` : ''}
+      ${m === 'manual' ? `<div class="card form-card"><label class="field"><span class="field-label">Daily calories</span>
+        <input type="number" step="any" min="0" id="setupCalories" value="${escapeHtml(setupAnswers.calorieManual)}" placeholder="e.g. 2300" /></label></div>` : ''}
+      ${m === 'none' ? '<p class="muted-text">No ring or target on Home — just your totals for the day.</p>' : ''}`;
+    document.querySelectorAll('#setupCalorieSeg [data-mode]').forEach((btn) => btn.addEventListener('click', () => {
+      captureSetupStep(); setupAnswers.calorieMode = btn.dataset.mode; renderSetupStepFood();
+    }));
+  }
+
   // Plain text/number inputs aren't captured until Back/Next is pressed
   // (unlike the toggles above, which write into setupAnswers immediately on
   // click since they also change what's on screen) — this is what reads
@@ -6776,6 +7539,9 @@
       if (minEl) setupAnswers.runningPaceMin = minEl.value;
       const secEl = document.getElementById('setupRunPaceSec');
       if (secEl) setupAnswers.runningPaceSec = secEl.value;
+    } else if (key === 'food') {
+      const calEl = document.getElementById('setupCalories');
+      if (calEl) setupAnswers.calorieManual = calEl.value;
     } else if (key === 'goals') {
       const waterEl = document.getElementById('setupWaterGoal');
       if (waterEl) setupAnswers.waterGoal = waterEl.value;
@@ -6830,6 +7596,7 @@
           id: `ex_${key}`, name: LIFT_TYPE_LABELS[key], kind: 'weight', bodyRegion: key === 'bench' ? 'upper' : 'lower', section: 'goal',
           goal, liftType: key, goalMode: usingStandard ? 'standard' : 'fixed', goalTier: usingStandard ? lift.tier : null,
           archived: false, createdAt: now,
+          catalogId: key === 'bench' ? 'cat_mv_bench_press' : `cat_mv_${key}`, equipment: 'barbell',
         });
       });
       // Daily bodyweight targets ride along with the Lifting interest — the
@@ -6847,6 +7614,23 @@
       const paceSec = (parseInt(setupAnswers.runningPaceMin, 10) || 0) * 60 + (parseInt(setupAnswers.runningPaceSec, 10) || 0);
       const paceGoal = t !== 'distance' && paceSec > 0 ? Units.displaySecPerUnitToSecPerMi(paceSec) : null;
       exercises.push({ id: 'ex_running', name: 'Running', kind: 'cardio', section: 'goal', distanceGoal, paceGoal, goal: null, archived: false, createdAt: now });
+    }
+
+    if (i.lifting) {
+      CATALOG.packs.filter((pk) => setupAnswers.packs[pk.id]).forEach((pk) => {
+        CATALOG.movements.filter((mv) => mv.packs.includes(pk.id)).forEach((mv) => {
+          const eq = mv.equipment.length ? mv.defaultEquipment : null;
+          const have = exercises.find((e) => e.liftType && e.liftType === mv.liftType && mv.liftType) || exercises.find((e) => normName(e.name) === normName(mv.name)) || exercises.find((e) => e.catalogId === mv.id && (e.equipment || null) === eq);
+          if (have) { if (!have.catalogId) { have.catalogId = mv.id; if (eq) have.equipment = eq; } return; }
+          const ex = { id: genId('ex'), name: mv.name, kind: mv.kind, section: 'accessory', group: mv.group, goal: null, goalMode: 'fixed', goalTier: null, archived: false, createdAt: now, catalogId: mv.id };
+          if (eq) ex.equipment = eq;
+          if (mv.kind === 'weight') { ex.bodyRegion = guessBodyRegion(mv.name); ex.liftType = mv.liftType || null; }
+          if (mv.kind === 'cardio') { ex.distanceGoal = null; ex.paceGoal = null; }
+          if (ITEM_ICONS[mv.icon]) ex.icon = mv.icon;
+          exercises.push(ex);
+        });
+      });
+      state.settings.catalogPacksSeen = CATALOG.packs.filter((pk) => setupAnswers.packs[pk.id]).map((pk) => pk.id);
     }
 
     const trackers = defaultTrackers();
@@ -6902,9 +7686,20 @@
     // both Lifting and Running (either one is enough to keep it on), Body
     // covers Body weight and Sleep the same way, Water/Food map 1:1.
     state.settings.trackWorkout = i.lifting || i.running;
+    state.settings.trackHabits = i.habits;
     state.settings.trackMeasurements = i.bodyweight || i.sleep;
     state.settings.trackWater = i.water;
     state.settings.trackFood = i.food;
+    if (i.food) {
+      const cal = state.settings.macroGoals.calories;
+      if (setupAnswers.calorieMode === 'manual' && parseFloat(setupAnswers.calorieManual) > 0) {
+        cal.enabled = true; cal.goal = Math.round(parseFloat(setupAnswers.calorieManual));
+      } else if (setupAnswers.calorieMode === 'calc') {
+        state.settings.nutritionCalc.enabled = true;
+        const nc = state.settings.nutritionCalc;
+        applyNutritionCalcTargets(nc.activityLevel, nc.goal); // only applies once the profile has what it needs
+      }
+    }
 
     // On failure, stay on the wizard rather than declaring victory and
     // switching away from it — save() already surfaced why, and the
@@ -7074,6 +7869,10 @@
     document.querySelectorAll('[data-action="add-exercise"]').forEach((btn) => btn.addEventListener('click', () => openExerciseForm(null)));
     document.querySelectorAll('[data-action="add-tracker"]').forEach((btn) => btn.addEventListener('click', () => openTrackerForm(null)));
     document.querySelectorAll('[data-action="add-cup"]').forEach((btn) => btn.addEventListener('click', () => openCupForm(null)));
+    document.getElementById('progressSeg').addEventListener('click', (ev) => { const b = ev.target.closest('[data-progress-seg]'); if (!b) return; progressSeg = b.dataset.progressSeg; renderProgress(); });
+    document.getElementById('homeFoodPencil').addEventListener('click', () => openManageCategory('food'));
+    document.getElementById('goalsOpenBtn').addEventListener('click', () => { progressSeg = 'goals'; switchTab('progress'); });
+    document.querySelectorAll('[data-action="open-catalog"]').forEach((btn) => btn.addEventListener('click', () => openCatalogSheet(btn.dataset.catTabOpen)));
     document.querySelectorAll('[data-action="add-saved-food"]').forEach((btn) => btn.addEventListener('click', () => openSavedFoodForm(null)));
 
     // Macro/goal toggle + amount rows are wired inside renderFoodManagePanel()
@@ -7103,10 +7902,13 @@
     // only shows/updates the live preview below; nothing is written into
     // macroGoals until "Apply to daily goals" is tapped (see the comment on
     // applyNutritionCalcTargets()).
-    document.getElementById('nutritionCalcEnabledSwitch').addEventListener('click', () => {
-      state.settings.nutritionCalc.enabled = !state.settings.nutritionCalc.enabled;
+    document.getElementById('calorieModeSegmented').addEventListener('click', (ev) => {
+      const b = ev.target.closest('[data-calorie-mode]');
+      if (!b) return;
+      setCalorieMode(b.dataset.calorieMode);
       if (!save()) return;
       renderManage();
+      renderDashboard();
     });
     document.getElementById('nutritionActivityLevel').addEventListener('change', (ev) => {
       state.settings.nutritionCalc.activityLevel = ev.target.value;

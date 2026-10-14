@@ -82,31 +82,47 @@
 
       <button type="button" id="streakCard" class="streak-card" aria-label="Open history"></button>
 
-      <div class="section-head" id="todayAttentionHead" hidden><h2>To log today</h2><span class="muted-text" id="todayAttentionCount"></span></div>
-      <div id="todayAttentionWrap" class="card card-list" hidden></div>
-
-      <div class="section-head" id="dailyTargetsHead" hidden><h2>Daily targets</h2><span class="muted-text">Resets at midnight</span></div>
+      <div class="section-head" id="dailyTargetsHead" hidden><h2>Checklist</h2><span class="muted-text" id="checklistCount"></span></div>
       <div id="dailyTargetsWrap" class="card card-list" hidden></div>
 
-      <div class="section-head" id="todayActivityHead" hidden><h2>Logged today</h2></div>
-      <div id="todayActivityList" class="card card-list" hidden></div>
+      <div class="section-head" id="trainingHead" hidden><h2>Training</h2><span class="tag">Lifting</span></div>
+      <div id="trainingWrap" class="card card-list" hidden></div>
 
-      <div class="section-head" id="waterFoodHead" hidden><h2>Water &amp; food</h2></div>
-      <div id="waterFoodWrap" class="card card-list" hidden></div>
+      <div class="section-head" id="nutritionHead" hidden><h2>Nutrition</h2><span class="head-actions"><span class="tag">Food</span><button type="button" class="icon-btn icon-btn-sm" id="homeFoodPencil" aria-label="Edit food targets"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/></svg></button></span></div>
+      <div id="nutritionWrap" class="card card-list" hidden></div>
+
+      <div id="miniGrid" class="mini-grid" hidden></div>
+
+      <div class="section-head" id="goalsHead" hidden><h2>Goals</h2><button type="button" class="link-btn" id="goalsOpenBtn">Open in Progress</button></div>
+      <div id="goalsWrap" class="card card-list" hidden></div>
 
     </section>
 
     <!-- PROGRESS — every goal card plus the body & wellness trends -->
     <section id="view-progress" class="view" data-view="progress" hidden>
       <div class="section-head"><h2>Progress</h2></div>
-      <div id="exerciseCards" class="card-grid"></div>
+      <div class="segmented segmented-fill" id="progressSeg" role="radiogroup" aria-label="Progress view">
+        <button type="button" role="radio" data-progress-seg="goals">Goals</button>
+        <button type="button" role="radio" data-progress-seg="charts">Charts</button>
+      </div>
 
-      <div class="section-head" id="bodySectionHead" hidden><h2>Body &amp; wellness</h2></div>
-      <div id="bodyCards" class="card-grid" hidden></div>
+      <div id="progressGoals">
+        <div id="goalsGroups"></div>
+        <div id="goalsEmpty" class="empty-state" hidden>
+          <p>No goals yet. Set a target on an exercise, a body tracker or your daily food and it shows up here.</p>
+        </div>
+      </div>
 
-      <div id="dashboardEmpty" class="empty-state" hidden>
-        <p>No exercises yet.</p>
-        <button class="btn btn-primary" data-action="add-exercise">Add your first exercise</button>
+      <div id="progressCharts" hidden>
+        <div id="exerciseCards" class="card-grid"></div>
+
+        <div class="section-head" id="bodySectionHead" hidden><h2>Body &amp; wellness</h2></div>
+        <div id="bodyCards" class="card-grid" hidden></div>
+
+        <div id="dashboardEmpty" class="empty-state" hidden>
+          <p>No exercises yet.</p>
+          <button class="btn btn-primary" data-action="add-exercise">Add your first exercise</button>
+        </div>
       </div>
     </section>
 
@@ -201,10 +217,10 @@
            day); typing a food in by hand is collapsed under it. -->
       <div id="savedFoodsWrap" class="card form-card" style="gap:12px" hidden>
         <div class="field">
-          <span class="field-label">Saved foods — tap one to log it</span>
+          <span class="field-label">My foods — tap one to log it</span>
           <div class="segmented seg-sm" id="foodSeg" role="radiogroup" aria-label="Which saved foods to list"></div>
         </div>
-        <label class="search"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg><input type="search" id="foodSearch" placeholder="Search saved foods" aria-label="Search saved foods" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="search" /></label>
+        <label class="search"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg><input type="search" id="foodSearch" placeholder="Search my foods" aria-label="Search my foods" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="search" /></label>
         <div class="f-scroll incard"><div class="f-chips" id="savedFoodCategorySegmented" role="radiogroup"></div><button type="button" class="f-more" aria-label="See more filters"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg></button></div>
         <div id="savedFoodLogList" class="entry-list"></div>
         <button type="button" class="showall" id="foodShowAll" hidden></button>
@@ -295,13 +311,18 @@
             <span class="setting-row-label"><span class="setting-icon" data-icon="workout"></span><span>Track this</span></span>
             <button type="button" class="switch" id="trackWorkoutSwitch" role="switch" aria-checked="false" aria-label="Track workout"><span class="switch-track"><span class="switch-thumb"></span></span></button>
           </div>
+          <div class="setting-row">
+            <span class="setting-row-label"><span class="setting-icon" data-icon="habits"></span><span>Habits &amp; daily reps</span></span>
+            <button type="button" class="switch" id="trackHabitsSwitch" role="switch" aria-checked="false" aria-label="Track habits and daily reps"><span class="switch-track"><span class="switch-thumb"></span></span></button>
+          </div>
         </div>
         <p class="muted-text" id="trackWorkoutOffHint" hidden>Workout is off — hidden from the dashboard, Log, and History. Nothing already logged is lost; turn it back on to see it again.</p>
 
         <div id="workoutTrackedFields">
+          <div id="tidyCard" class="card tidy-card" hidden></div>
           <div class="section-head">
             <h2>Exercises</h2>
-            <button class="btn btn-secondary btn-sm btn-icon-label" data-action="add-exercise"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg><span>Add exercise</span></button>
+            <div class="head-actions"><button class="btn btn-secondary btn-sm" data-action="open-catalog" data-cat-tab-open="exercises">From catalog</button><button class="btn btn-secondary btn-sm btn-icon-label" data-action="add-exercise"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg><span>Add</span></button></div>
           </div>
           <label class="search"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg><input type="search" id="exManageSearch" placeholder="Search exercises" aria-label="Search exercises" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="search" /></label>
           <div class="f-scroll pg"><div class="f-chips" id="exManageChips" role="radiogroup"></div><button type="button" class="f-more" aria-label="See more filters"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg></button></div>
@@ -368,10 +389,10 @@
                (one-tap re-logging), so it leads the panel instead of
                trailing after two setup-once sections. -->
           <div class="section-head">
-            <h2>Saved foods</h2>
-            <button class="btn btn-secondary btn-sm btn-icon-label" data-action="add-saved-food"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg><span>Save a food</span></button>
+            <h2>My foods</h2>
+            <div class="head-actions"><button class="btn btn-secondary btn-sm" data-action="open-catalog" data-cat-tab-open="foods">From catalog</button><button class="btn btn-secondary btn-sm btn-icon-label" data-action="add-saved-food"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg><span>Add</span></button></div>
           </div>
-          <label class="search"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg><input type="search" id="foodManageSearch" placeholder="Search saved foods" aria-label="Search saved foods" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="search" /></label>
+          <label class="search"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg><input type="search" id="foodManageSearch" placeholder="Search my foods" aria-label="Search my foods" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="search" /></label>
           <div class="f-scroll pg"><div class="f-chips" id="foodManageChips" role="radiogroup"></div><button type="button" class="f-more" aria-label="See more filters"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg></button></div>
           <div class="sortrow"><span id="foodSortLabel"></span><button type="button" id="foodSortBtn"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21 16-4 4-4-4"/><path d="M17 20V4"/><path d="m3 8 4-4 4 4"/><path d="M7 4v16"/></svg>Sort</button></div>
           <div id="savedFoodManageList" class="org-list"></div>
@@ -384,20 +405,15 @@
                .is-toggled-off dimming. -->
           <div class="chip-picker" id="macroTrackChips" role="group" aria-label="Tracked macros"></div>
 
-          <div class="section-head"><h2>Daily goals</h2></div>
-          <p class="muted-text">Add a goal to any tracked field to see progress against it on the dashboard. Calories is the one field with its own on/off here, since having a goal for it is optional even though tracking it never is.</p>
-          <!-- Populated by renderMacroGoalRows() — Calories keeps its own
-               toggle+amount row; every other row only appears once its
-               macro is turned on above. -->
-          <div class="card card-list" id="macroGoalRows"></div>
+          <div class="section-head"><h2>Daily targets</h2></div>
+          <p class="muted-text">How your calorie target is set. Calculator estimates it from your profile and activity, Manual is a number you type, and No Target hides the calorie ring and shows plain totals.</p>
+          <div class="segmented segmented-fill" id="calorieModeSegmented" role="radiogroup" aria-label="Calorie target">
+            <button type="button" data-calorie-mode="calc" role="radio">Calculator</button>
+            <button type="button" data-calorie-mode="manual" role="radio">Manual</button>
+            <button type="button" data-calorie-mode="none" role="radio">No Target</button>
+          </div>
 
-          <div class="section-head"><h2>Nutrition calculator</h2></div>
-          <p class="muted-text">Estimates daily calories and protein from your Profile, body weight, activity level, and goal (Mifflin-St Jeor formula) — apply it below.</p>
           <div class="card card-list" id="nutritionCalcCard">
-            <div class="setting-row">
-              <span class="setting-row-label"><span class="setting-icon" data-icon="calculator"></span><span>Use calculator</span></span>
-              <button type="button" class="switch" id="nutritionCalcEnabledSwitch" role="switch" aria-checked="false" aria-label="Use nutrition calculator"><span class="switch-track"><span class="switch-thumb"></span></span></button>
-            </div>
             <div id="nutritionCalcFields" hidden>
               <div class="field">
                 <span class="field-label">Activity level</span>
@@ -419,6 +435,9 @@
               <button type="button" class="btn btn-primary btn-block" id="applyNutritionCalcBtn">Apply to daily goals</button>
             </div>
           </div>
+
+          <p class="muted-text">Add a goal to any tracked field to see progress against it on Home. Calories follows the choice above.</p>
+          <div class="card card-list" id="macroGoalRows"></div>
         </div>
       </div>
     </section>
@@ -592,6 +611,7 @@
 <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 
 <script src="js/charts.js"></script>
+<script src="js/catalog.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>
