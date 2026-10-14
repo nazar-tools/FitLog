@@ -206,6 +206,7 @@
         <button type="submit" class="btn btn-primary btn-block">Save entry</button>
       </form>
 
+      <div id="waterTodayBar" class="today-bar" hidden></div>
       <div id="logWaterPanel" class="card form-card" hidden>
         <span class="field-label">Tap a cup to log it for today</span>
         <div id="waterCupButtons" class="cup-button-row"></div>
@@ -220,7 +221,7 @@
 
       <!-- Log -> Food leads with saved foods (the one-tap path used every
            day); typing a food in by hand is collapsed under it. -->
-      <div id="foodTodayBar" class="food-today-bar" hidden></div>
+      <div id="foodTodayBar" class="today-bar" hidden></div>
       <div id="savedFoodsWrap" class="card form-card" style="gap:12px" hidden>
         <div class="segmented seg-sm" id="foodSeg" role="radiogroup" aria-label="Which saved foods to list"></div>
         <label class="search"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg><input type="search" id="foodSearch" placeholder="Search my foods" aria-label="Search my foods" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="search" /></label>
@@ -248,7 +249,8 @@
       </form>
 
       <div class="section-head">
-        <h2>Recent entries</h2>
+        <h2>Latest entry</h2>
+        <button type="button" class="link-btn" id="recentHistoryBtn">See all in History</button>
       </div>
       <div id="recentEntries" class="entry-list"></div>
     </section>
@@ -312,8 +314,12 @@
       <div id="manageExercisesPanel">
         <div class="card card-list">
           <div class="setting-row">
-            <span class="setting-row-label"><span class="setting-icon" data-icon="workout"></span><span>Track this</span></span>
-            <button type="button" class="switch" id="trackWorkoutSwitch" role="switch" aria-checked="false" aria-label="Track workout"><span class="switch-track"><span class="switch-thumb"></span></span></button>
+            <span class="setting-row-label"><span class="setting-icon" data-icon="workout"></span><span>Lifting</span></span>
+            <button type="button" class="switch" id="trackWorkoutSwitch" role="switch" aria-checked="false" aria-label="Track lifting"><span class="switch-track"><span class="switch-thumb"></span></span></button>
+          </div>
+          <div class="setting-row">
+            <span class="setting-row-label"><span class="setting-icon" data-icon="footprints"></span><span>Running &amp; cardio</span></span>
+            <button type="button" class="switch" id="trackCardioSwitch" role="switch" aria-checked="false" aria-label="Track running and cardio"><span class="switch-track"><span class="switch-thumb"></span></span></button>
           </div>
           <div class="setting-row">
             <span class="setting-row-label"><span class="setting-icon" data-icon="habits"></span><span>Habits &amp; daily reps</span></span>
@@ -523,6 +529,31 @@
         </div>
       </div>
 
+      <div class="section-head"><h2>Home screen</h2></div>
+      <div class="card card-list">
+        <div class="setting-row">
+          <span class="setting-row-label"><span class="setting-icon" data-icon="check"></span><span>Daily checklist <span class="muted-text">(targets and habits)</span></span></span>
+          <button type="button" class="switch" id="homeChecklistSwitch" role="switch" aria-checked="true" aria-label="Daily checklist"><span class="switch-track"><span class="switch-thumb"></span></span></button>
+        </div>
+        <div class="setting-row">
+          <span class="setting-row-label"><span class="setting-icon" data-icon="dumbbell"></span><span>Training today <span class="muted-text">(what you logged)</span></span></span>
+          <button type="button" class="switch" id="homeTrainingSwitch" role="switch" aria-checked="true" aria-label="Training today"><span class="switch-track"><span class="switch-thumb"></span></span></button>
+        </div>
+        <div class="setting-row">
+          <span class="setting-row-label"><span class="setting-icon" data-icon="apple"></span><span>Food today <span class="muted-text">(calories and macros)</span></span></span>
+          <button type="button" class="switch" id="homeNutritionSwitch" role="switch" aria-checked="true" aria-label="Food today"><span class="switch-track"><span class="switch-thumb"></span></span></button>
+        </div>
+        <div class="setting-row">
+          <span class="setting-row-label"><span class="setting-icon" data-icon="water"></span><span>Water and trackers <span class="muted-text">(quick log tiles)</span></span></span>
+          <button type="button" class="switch" id="homeMiniSwitch" role="switch" aria-checked="true" aria-label="Water and trackers"><span class="switch-track"><span class="switch-thumb"></span></span></button>
+        </div>
+        <div class="setting-row">
+          <span class="setting-row-label"><span class="setting-icon" data-icon="trophy"></span><span>Goals <span class="muted-text">(closest three)</span></span></span>
+          <button type="button" class="switch" id="homeGoalsSwitch" role="switch" aria-checked="true" aria-label="Goals"><span class="switch-track"><span class="switch-thumb"></span></span></button>
+        </div>
+        <p class="muted-text field-hint">Hiding a block only changes what Home shows. Nothing is deleted.</p>
+      </div>
+
       <div class="section-head"><h2>Insights</h2></div>
       <div class="card card-list">
         <div class="setting-row">
@@ -553,7 +584,7 @@
           <button type="button" class="switch" id="showPaceLevelSwitch" role="switch" aria-checked="false" aria-label="Pace level"><span class="switch-track"><span class="switch-thumb"></span></span></button>
         </div>
         <div class="setting-row">
-          <span class="setting-row-label"><span class="setting-icon" data-icon="moon"></span><span>Sleep insights <span class="muted-text">(trend over last 7 nights)</span></span></span>
+          <span class="setting-row-label"><span class="setting-icon" data-icon="moon"></span><span>Sleep insights <span class="muted-text">(last 7 nights)</span></span></span>
           <button type="button" class="switch" id="showSleepInsightsSwitch" role="switch" aria-checked="false" aria-label="Sleep insights"><span class="switch-track"><span class="switch-thumb"></span></span></button>
         </div>
         <div class="setting-row">
@@ -575,7 +606,8 @@
 
       <div class="section-head"><h2>About</h2></div>
       <div class="card">
-        <p class="muted-text">Fit Log v1.14 &middot; installed as a home-screen app, all data stored on-device.</p>
+        <p class="muted-text">Fit Log v1.15 &middot; installed as a home-screen app, all data stored on-device.</p>
+        <button type="button" class="setting-row row-switch" id="aboutNumbersBtn"><span class="row-lead"><b class="link-text">About the numbers</b><span class="muted-text">Every formula and reference behind your streak, sleep, strength, BMI and nutrition numbers</span></span></button>
       </div>
     </section>
 
@@ -615,6 +647,13 @@
 <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 
 <script src="js/charts.js"></script>
+<script src="js/icons.js"></script>
+<script src="js/units.js"></script>
+<script src="js/calc.js"></script>
+<script src="js/features.js"></script>
+<script src="js/standards.js"></script>
+<script src="js/backup.js"></script>
+<script src="js/migrations.js"></script>
 <script src="js/catalog.js"></script>
 <script src="js/app.js"></script>
 </body>

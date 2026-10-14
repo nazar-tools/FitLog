@@ -1,572 +1,46 @@
 /* ============================================================================
-   FIT LOG — app.js
-   ============================================================================
-   A plain HTML/CSS/JavaScript app — no build step, no framework, no
-   third-party libraries. Every screen is one page (index.html) whose content
-   is swapped out by this file; "screens" are <section> elements shown and
-   hidden here rather than separate pages. All application data lives in the
-   browser's localStorage on-device — nothing is ever sent over the network.
+   FIT LOG - app.js
+   Plain HTML/CSS/JavaScript: no build step, no framework, no libraries. index.html holds
+   every screen as a <section>; this file shows and hides them. All data lives in
+   localStorage on the device and is never sent over the network.
 
-   The file is organized top-to-bottom as one list of sections, each marked
-   with a banner comment like the one below. An editor's "find" (Ctrl+F /
-   Cmd+F) on a section's name is the fastest way to jump to it — line numbers
-   are omitted here since they drift as the file changes. Reading order, and
-   what each section is responsible for:
+   One IIFE, split into sections marked by banner comments (search for a section's name
+   to jump to it). Pure logic lives in other files:
+     js/migrations.js  schema version and migrations (additive only)
+     js/units.js       unit conversion and number formatting
+     js/calc.js        streak, sleep and estimated-1RM calculators
+     js/features.js    feature on/off rules (Lifting, Running & cardio, Habits)
+     js/standards.js   reference tables and nutrition maths
+     js/icons.js       ITEM_ICONS data
+     js/catalog.js, js/backup.js, js/charts.js
 
-     SCHEMA VERSION & MIGRATIONS  – the data shape, and the safe way to
-                                     change it later without losing anyone's
-                                     history. Read this before editing
-                                     anything that touches saved data.
-     Defaults                     – what a brand-new install starts with
-                                     (the seeded exercises and their goals).
-     Store                        – load()/save(): the only two functions
-                                     that touch localStorage directly. See
-                                     showRecoveryScreen() (near Init) for
-                                     what happens when load() can't make
-                                     sense of an existing save file.
-     Unit helpers                 – lb<->kg and mi<->km conversions, plus
-                                     every number-formatting function
-                                     (fmtWeight, fmtDistance, fmtPace, ...).
-     Derived data                 – reading state.exercises/state.entries to
-                                     answer questions like "what's the best
-                                     set ever logged for this exercise?"
-     Progressive-overload
-       suggestion engine          – the "Next session" recommendation logic.
-     Body & wellness trackers     – generic "log a number against an
-                                     optional goal" trackers (weight, sleep,
-                                     and anything a user adds) — the
-                                     scalable metric-tracking building
-                                     block. Sleep is the one composite
-                                     tracker (hours + a quality rating per
-                                     entry, `kind: 'sleep'`). Height lives
-                                     in Settings' Profile instead — it isn't
-                                     something that trends over time, so
-                                     it's a one-time fact, not a tracker.
-                                     Progress is measured against a captured
-                                     `baseline`, not a plain current/goal
-                                     ratio — see trackerProgressPct(). Each
-                                     tracker also has a showOnDashboard flag
-                                     so the dashboard doesn't have to show
-                                     every tracker that exists — Body Fat %
-                                     isn't pre-seeded (most people can't
-                                     measure it without equipment); it's
-                                     only ever added manually now.
-     Insights & standards         – optional, off-by-default calculators
-                                     (BMI, body-weight trend, strength-vs-
-                                     bodyweight level, running-pace level)
-                                     built on researched reference tables,
-                                     plus computeStandardGoal()/
-                                     standardGoalPreviewRows() — the shared
-                                     bodyweight-standard-goal math used by
-                                     both the setup wizard and Manage ->
-                                     Exercises' goal-style toggle. Read the
-                                     comment at the top of this section for
-                                     sourcing and caveats before changing
-                                     any threshold.
-     Water                        – daily water intake: cups, totals,
-                                     progress toward the daily goal.
-     Food / nutrition             – a fourth, independent top-level data
-                                     area (`state.food`): optional calories/
-                                     protein/carbs/fat per entry, daily
-                                     totals, and a per-macro Manage -> Food
-                                     toggle for which fields the Log form
-                                     asks for. Deliberately separate from
-                                     exercises/trackers/water — see the
-                                     comment at the top of this section.
-     Theme                        – light/dark/system, and applying it to
-                                     the page.
-     Toast                        – the small "Entry saved" popup.
-     Modal                        – the generic bottom-sheet popup shell
-                                     that every other modal builds on top of
-                                     (focus trap, Escape-to-close, and
-                                     restoring focus on close all live here,
-                                     once, rather than per-modal).
-     Chip picker                  – a row of tap targets (sleep quality's
-                                     1-5 rating) for a small set of discrete
-                                     choices, in place of a number input.
-     Dynamic set fields           – the weight/reps/cardio input rows shared
-                                     by the Log tab and the edit-entry modal.
-                                     Includes the per-set ★ "working set"
-                                     toggle topSetOf() prefers when present.
-     Rendering: Dashboard         – the home screen, split into "Today"
-                                     (needs-attention tracker prompts, then
-                                     whatever's been logged today, then
-                                     Water/Food) and "Progress" (everything
-                                     else — untouched-today goal cards, Body
-                                     & wellness tracker cards). See the
-                                     comment above renderDashboard().
-     Rendering: Log tab           – quick-add for a workout set, a tracker
-                                     measurement, or a cup of water.
-     Rendering: History           – a month calendar with per-day colored
-                                     dots (workout/water-goal-hit/body
-                                     measurement) that opens a day-detail
-                                     view, above the full, filterable entry
-                                     list split by workout/measurement/
-                                     water category.
-     Entry modal                  – editing or deleting one logged entry.
-     Exercise detail modal        – tapping a goal card: chart, PRs, the
-                                     suggestion card, all of that exercise's
-                                     entries.
-     Add / edit exercise modal    – creating a new exercise or changing an
-                                     existing one's name/section/goal/etc.
-     Tracker detail modal         – tapping a Body & wellness card: chart
-                                     and history of that tracker's entries.
-     Add / edit tracker modal     – creating a new tracker or changing an
-                                     existing one's name/unit/goal/etc.
-     Water: cup management        – adding, editing, and deleting cup sizes.
-     Manage                       – the Manage tab: exercise, tracker, and
-                                     water-cup lists (add/edit/archive/
-                                     delete), grouped by category.
-     Settings                     – units and theme, a Profile card (height/
-                                     sex — fixed facts, not trackers) and
-                                     the Insights toggles, reached via the
-                                     header gear icon; export/import backup.
-     First-run setup wizard       – shown once, only when there's no saved
-                                     data at all, instead of silently
-                                     seeding the same fixed goals for
-                                     everyone; builds the real starting
-                                     data from what's answered.
-     Tabs / global wiring         – wires up every click handler once, and
-                                     switchTab()/renderAll(), which redraw
-                                     the current screen after any change.
-     Data recovery screen         – shown instead of the app when saved data
-                                     exists but load() couldn't read it;
-                                     never overwrites it without an explicit,
-                                     confirmed choice.
-     Init                         – what runs the moment the page loads.
+   Sections here, in order: Defaults, Store, Unit helpers, Derived data, Progressive-overload
+   suggestion engine, Body & wellness trackers, Insights & standards, Water, Food / nutrition,
+   Theme, Toast, Modal, Chip picker, Dynamic set fields, Rendering: Dashboard, Returning-user
+   setup review, Home sections, Rendering: Log tab, Organization, Catalog & equipment
+   variants, Item icons, Saved Foods, Rendering: History, Entry modal, Exercise detail
+   modal, Add / edit exercise modal, Tracker detail modal, Add / edit tracker modal, Water:
+   cup management, Manage, Settings, Backup validation, First-run setup wizard, Tabs /
+   global wiring, Data recovery screen, Init.
 
-   The overall flow, on every user action (saving an entry, flipping a
-   settings toggle, and so on): an event handler updates the in-memory
-   `state` object, calls save(), then calls whichever render*() function(s)
-   redraw what's now stale. There is no framework mediating this — it is the
-   same plain pattern repeated for every screen.
-
-   See README.md in the project root for a walkthrough of the codebase and a
-   cookbook of common changes: recoloring the app, changing default goals,
-   and extending the data schema.
+   Data flow: an event handler updates `state`, calls save(), then calls the render*()
+   functions for whatever changed. See README.md for a walkthrough and common changes.
    ============================================================================ */
 (() => {
   'use strict';
 
-  // Internal storage key, fixed permanently as the app's original codename —
-  // unaffected by user-facing renames such as Lift Log -> Fit Log. It is
-  // never displayed anywhere; it is simply the address the saved data is
-  // filed under. Changing it would point the app at an empty store and
-  // orphan every previously logged entry, so this value does not change.
+  // Internal storage key, kept from the app's original codename. Never change
+  // it: a different key opens an empty store and orphans all saved data.
   const STORAGE_KEY = 'liftlog.v1';
 
-  /* ==========================================================================
-     SCHEMA VERSION & MIGRATIONS — the contract for changing the data shape.
-
-     All application data — every exercise and every logged set — is one JSON
-     object saved under STORAGE_KEY. SCHEMA_VERSION is a plain number that
-     records what that object's shape currently is.
-
-     When a future feature needs the data to carry something new (say, a
-     bodyweight field, or a per-exercise note template), the safe recipe is:
-
-       1. Bump SCHEMA_VERSION by exactly 1.
-       2. Add a new function to MIGRATIONS, keyed by the OLD version number
-          it upgrades from (key `2` means "how a v2 save file becomes v3").
-       3. The default, and by far the common case: ONLY ADD new fields with
-          safe defaults. Never delete, rename, or repurpose a field an
-          older version wrote for no reason — that is how someone's real
-          history gets silently wiped on an update. If a field truly isn't
-          needed anymore, the simplest safe move is to just stop reading it
-          elsewhere in the app and leave it sitting harmlessly in the saved
-          data, rather than removing it here.
-          Removing or restructuring old data in a migration (rather than
-          just adding to it) is a deliberate exception, not the default —
-          only do it when there's an explicit conversion that preserves the
-          information (e.g. the v4->v5 migration below moves a Height
-          tracker's latest value into profile.heightCm before deleting the
-          tracker; v5->v6 merges two sleep trackers into one before
-          deleting the originals), and it has a test with a saved fixture
-          proving nothing is lost. "Never delete a field" is the rule for
-          the common case of adding something new; it was never a promise
-          that a schema can't evolve its shape when there's a real reason.
-
-     load() (below) walks any saved file forward through every migration it
-     hasn't been through yet, oldest first, until it reaches SCHEMA_VERSION.
-     A brand-new install has no saved file at all, so it starts directly at
-     the latest shape via defaultData() and skips this process entirely.
-     This is also why exporting a backup (Settings -> Export) and importing
-     it later always works even after the app has changed in between: the
-     import path runs the exact same migrations.
-     ========================================================================== */
-
-  const SCHEMA_VERSION = 14;
-
-  // Known "daily" exercise ids from before the Goal/Daily/Other split
-  // existed (schema v1). Used only by the v1->v2 migration below.
-  const LEGACY_DAILY_IDS = new Set(['ex_pushups', 'ex_bwsquats', 'ex_pullups']);
-  const LOWER_BODY_KEYWORDS = ['squat', 'deadlift', 'leg press', 'lunge', 'calf', 'hip thrust', 'glute', 'rdl', 'romanian'];
-
-  // Best-effort guess for a new lift's move pattern, used (a) as the
-  // starting selection when adding a weight exercise, and (b) to backfill
-  // `bodyRegion` for lifts saved before that field existed. It only sizes
-  // the suggested weight jump in the progressive-overload card — getting
-  // it wrong isn't destructive, so a simple keyword match is good enough.
-  function guessBodyRegion(name) {
-    const n = (name || '').toLowerCase();
-    return LOWER_BODY_KEYWORDS.some((k) => n.includes(k)) ? 'lower' : 'upper';
-  }
-
-  const MIGRATIONS = {
-    // v1 -> v2: introduced `section` ('goal' | 'daily' | 'accessory') on
-    // every exercise, and `bodyRegion` ('upper' | 'lower') on weighted
-    // lifts. Both are purely additive — nothing from v1 is touched.
-    1: (data) => {
-      data.exercises.forEach((ex) => {
-        if (!ex.section) ex.section = LEGACY_DAILY_IDS.has(ex.id) ? 'daily' : 'goal';
-        if (ex.kind === 'weight' && !ex.bodyRegion) ex.bodyRegion = guessBodyRegion(ex.name);
-      });
-      return data;
-    },
-    // v2 -> v3: cardio exercises moved from a single goal ('goalMetric' +
-    // 'goal') to two independent, optional goals ('distanceGoal' and
-    // 'paceGoal') so one logged run can count toward both at once. The old
-    // fields are left in place, untouched, rather than deleted — nothing
-    // reads them for cardio anymore, but per the rule above an older field
-    // is never removed on upgrade.
-    2: (data) => {
-      data.exercises.forEach((ex) => {
-        if (ex.kind !== 'cardio') return;
-        if (ex.distanceGoal === undefined) ex.distanceGoal = (ex.goalMetric !== 'pace' && ex.goal) ? ex.goal : null;
-        if (ex.paceGoal === undefined) ex.paceGoal = (ex.goalMetric === 'pace' && ex.goal) ? ex.goal : null;
-      });
-      return data;
-    },
-    // v3 -> v4: introduced body/wellness trackers (`trackers` +
-    // `measurements`) and water tracking (`water` + `waterEntries`) as
-    // brand-new top-level fields, alongside two new unit settings. All
-    // purely additive — nothing about exercises or workout entries changes.
-    // A pre-existing save gets the same starter trackers/cups a fresh
-    // install seeds (see defaultTrackers()/defaultWater()), rather than
-    // empty lists, so upgrading actually surfaces the new features.
-    3: (data) => {
-      if (!Array.isArray(data.trackers)) data.trackers = defaultTrackers();
-      if (!Array.isArray(data.measurements)) data.measurements = [];
-      if (!data.water) data.water = defaultWater();
-      if (!Array.isArray(data.waterEntries)) data.waterEntries = [];
-      if (!data.settings.lengthUnit) data.settings.lengthUnit = 'in';
-      if (!data.settings.volumeUnit) data.settings.volumeUnit = 'flOz';
-      return data;
-    },
-    // v4 -> v5: added a `profile` (height + sex — fixed facts about you,
-    // not something with a trend worth charting) and settings for the
-    // dashboard chart's default range and the optional insight calculators
-    // (body-weight trend/BMI, strength-vs-bodyweight, pace level).
-    //
-    // Height specifically moves OUT of the trackers list here: it doesn't
-    // change often enough to need a logged history, so any existing Height
-    // tracker's most recent value is carried over into profile.heightCm —
-    // nothing is lost, it just becomes a single current fact instead of a
-    // trend — and the tracker (and its now-redundant measurement history)
-    // is removed. Every other tracker, and everything about exercises,
-    // entries, and water, is untouched.
-    4: (data) => {
-      if (!data.profile) data.profile = { heightCm: null, sex: null };
-      const heightTracker = (data.trackers || []).find((t) => t.id === 'trk_height');
-      if (heightTracker) {
-        const heightEntries = (data.measurements || [])
-          .filter((m) => m.trackerId === heightTracker.id)
-          .sort((a, b) => (a.date + a.id).localeCompare(b.date + b.id));
-        if (heightEntries.length && data.profile.heightCm == null) {
-          data.profile.heightCm = heightEntries[heightEntries.length - 1].value;
-        }
-        data.trackers = data.trackers.filter((t) => t.id !== heightTracker.id);
-        data.measurements = (data.measurements || []).filter((m) => m.trackerId !== heightTracker.id);
-      }
-      if (data.settings.chartScale === undefined) data.settings.chartScale = 'last10';
-      if (data.settings.insightsWindowDays === undefined) data.settings.insightsWindowDays = 90;
-      if (data.settings.showWeightInsights === undefined) data.settings.showWeightInsights = false;
-      if (data.settings.showStrengthLevel === undefined) data.settings.showStrengthLevel = false;
-      if (data.settings.showPaceLevel === undefined) data.settings.showPaceLevel = false;
-      data.exercises.forEach((ex) => { if (ex.kind === 'weight' && ex.liftType === undefined) ex.liftType = null; });
-      return data;
-    },
-    // v5 -> v6: Sleep Hours and Sleep Feeling were two separate trackers,
-    // meaning one night's sleep took two log entries. They're merged here
-    // into one `kind: 'sleep'` tracker (id `trk_sleep`) whose measurements
-    // carry both an hours `value` and a 1-5 `quality` on the same entry —
-    // see the "Body & wellness trackers" section for how `kind` branches.
-    //
-    // Merging is best-effort and date-based (the normal case is one sleep
-    // log per night): for each date either tracker has an entry on, take
-    // the LATEST entry per tracker per date (highest id) and pair them —
-    // an hours-only or quality-only date still gets a merged entry with
-    // the other field left null, so nothing is dropped either way.
-    5: (data) => {
-      const hoursTracker = (data.trackers || []).find((t) => t.id === 'trk_sleephours');
-      const feelTracker = (data.trackers || []).find((t) => t.id === 'trk_sleepfeel');
-      if (hoursTracker || feelTracker) {
-        const lastPerDate = (trackerId) => {
-          const map = new Map();
-          (data.measurements || [])
-            .filter((m) => m.trackerId === trackerId)
-            .sort((a, b) => (a.date + a.id).localeCompare(b.date + b.id))
-            .forEach((m) => map.set(m.date, m));
-          return map;
-        };
-        const hoursByDate = hoursTracker ? lastPerDate(hoursTracker.id) : new Map();
-        const feelByDate = feelTracker ? lastPerDate(feelTracker.id) : new Map();
-        const dates = new Set([...hoursByDate.keys(), ...feelByDate.keys()]);
-        dates.forEach((date) => {
-          const h = hoursByDate.get(date);
-          const f = feelByDate.get(date);
-          data.measurements.push({
-            id: genId('meas'), trackerId: 'trk_sleep', date,
-            value: h ? h.value : null, quality: f ? f.value : null,
-            note: (h && h.note) || (f && f.note) || null,
-          });
-        });
-        data.trackers = (data.trackers || []).filter((t) => t.id !== 'trk_sleephours' && t.id !== 'trk_sleepfeel');
-        data.measurements = data.measurements.filter((m) => m.trackerId !== 'trk_sleephours' && m.trackerId !== 'trk_sleepfeel');
-        if (!data.trackers.some((t) => t.id === 'trk_sleep')) {
-          data.trackers.push({ id: 'trk_sleep', name: 'Sleep', kind: 'sleep', unitKind: 'hours', goal: (hoursTracker && hoursTracker.goal) || null, direction: (hoursTracker && hoursTracker.direction) || null, archived: (hoursTracker && hoursTracker.archived) || false, createdAt: new Date().toISOString() });
-        }
-      }
-      return data;
-    },
-    // v6 -> v7: tracker goal progress used to be a plain current/goal ratio,
-    // which reads as nonsense for a body metric moving toward a target from
-    // some starting point (200lb -> 180lb goal at 195lb is 25% there, not
-    // the 92% that ratio gives) — see trackerProgressPct() below, which now
-    // measures against a `baseline` instead. Existing trackers with a goal
-    // already set have no recorded "starting point," so the best available
-    // proxy — the earliest logged value — is used; a tracker with no
-    // measurements yet, or no goal, gets `baseline: null` and simply falls
-    // back to the old ratio until one is established (see
-    // trackerProgressPct()'s own fallback).
-    6: (data) => {
-      (data.trackers || []).forEach((t) => {
-        if (t.baseline !== undefined) return;
-        if (t.goal == null) { t.baseline = null; return; }
-        const earliest = (data.measurements || [])
-          .filter((m) => m.trackerId === t.id)
-          .sort((a, b) => (a.date + a.id).localeCompare(b.date + b.id))[0];
-        t.baseline = earliest ? earliest.value : null;
-      });
-      return data;
-    },
-    // v7 -> v8: two purely additive changes. (1) A weight exercise's goal
-    // gains `goalMode` ('fixed' | 'standard') + `goalTier` so a bodyweight-
-    // standard goal (see LIFT_STANDARDS/computeStandardGoal below) stays
-    // adjustable from Manage -> Exercises after the fact instead of
-    // collapsing into an indistinguishable flat number the moment it's
-    // computed. Every existing weight exercise — including ones the setup
-    // wizard originally computed from a standard — is backfilled as
-    // 'fixed': there's no way to recover which ones were formula-derived
-    // after the fact, and 'fixed' exactly matches how the number has
-    // actually behaved until now (a static value, not recomputed as
-    // bodyweight changes), so nothing about existing goals changes; the
-    // user can switch any of them to 'standard' going forward.
-    // (2) A brand-new, independent Food/nutrition area (`food` +
-    // `settings.trackedMacros`) — see the "Food / nutrition" section below.
-    // It touches nothing about exercises, entries, trackers, measurements,
-    // water, or waterEntries.
-    7: (data) => {
-      data.exercises.forEach((ex) => {
-        if (ex.kind !== 'weight') return;
-        if (ex.goalMode === undefined) ex.goalMode = 'fixed';
-        if (ex.goalTier === undefined) ex.goalTier = null;
-      });
-      if (!data.food || !Array.isArray(data.food.entries)) data.food = { entries: (data.food && data.food.entries) || [] };
-      if (!data.settings.trackedMacros) data.settings.trackedMacros = { calories: true, protein: true, carbs: false, fat: false };
-      // Body Fat % used to be pre-seeded on every install (see
-      // defaultTrackers()) even though most people have no way to measure
-      // it without calipers or a smart scale — it's no longer seeded for
-      // new installs, and an existing one that was never actually logged
-      // (a sign it was just clutter, not something the user chose to use)
-      // gets quietly hidden from the dashboard the same reversible way
-      // Manage's own "hide from dashboard" toggle works. The tracker and
-      // any real history it does have are left completely alone either
-      // way — this only ever flips a display flag, never deletes anything.
-      const bodyfat = (data.trackers || []).find((t) => t.id === 'trk_bodyfat');
-      if (bodyfat && bodyfat.showOnDashboard === undefined) {
-        const hasData = (data.measurements || []).some((m) => m.trackerId === 'trk_bodyfat');
-        if (!hasData) bodyfat.showOnDashboard = false;
-      }
-      return data;
-    },
-    // v8 -> v9: two fixes.
-    // (1) `liftType` backfill for the three seeded lifts (Bench/Squat/
-    // Deadlift). The v4->v5 migration (long before Lift Type existed as a
-    // field anyone could deliberately choose) set `liftType: null`
-    // unconditionally on every pre-existing weight exercise as a safe
-    // default — which means an install that predates that migration has
-    // had `liftType: null` on these three ever since, with no way for the
-    // Strength Level insight to ever work for them even after turning the
-    // Settings toggle on, since it requires a matching liftType. Since
-    // "null" here overwhelmingly means "never touched," not "deliberately
-    // set to None," these three specific ids are backfilled to their
-    // obvious lift type. This is reversible in seconds from Manage ->
-    // Exercises (set Lift Type back to None) for the rare case where
-    // someone genuinely had opted out.
-    // (2) Food's per-macro settings move from `trackedMacros` (an on/off
-    // switch for whether the Log form even asked for that macro) to
-    // `macroGoals` (all four macros are now always loggable; this instead
-    // tracks whether a DAILY GOAL is set for a given macro, and what it
-    // is) — seeded fully off, matching how a water/tracker goal starts
-    // unset until deliberately given one. `trackedMacros` is left in place
-    // per the migration policy above rather than deleted; nothing reads it
-    // anymore.
-    8: (data) => {
-      const KNOWN_LIFT_IDS = { ex_bench: 'bench', ex_squat: 'squat', ex_deadlift: 'deadlift' };
-      data.exercises.forEach((ex) => {
-        if (ex.kind === 'weight' && ex.liftType == null && KNOWN_LIFT_IDS[ex.id]) ex.liftType = KNOWN_LIFT_IDS[ex.id];
-      });
-      if (!data.settings.macroGoals) {
-        data.settings.macroGoals = {
-          calories: { enabled: false, goal: null }, protein: { enabled: false, goal: null },
-          carbs: { enabled: false, goal: null }, fat: { enabled: false, goal: null },
-        };
-      }
-      return data;
-    },
-    // v9 -> v10: purely additive — three new optional food fields (sugar,
-    // sodium, caffeine) alongside the original four macros, added the same
-    // way the four macros work rather than as a separate feature (see the
-    // "Food / nutrition" section for the reasoning). Every existing food
-    // entry already omits fields it has no value for (they're only ever
-    // set when logged), so no entry needs touching — a food entry from
-    // before this migration simply has no sugar/sodium/caffeine value yet,
-    // same as it would if those fields just hadn't been logged. The only
-    // real backfill needed is `settings.macroGoals`, which — like every
-    // other settings object here — only had keys for the fields that
-    // existed when it was created.
-    9: (data) => {
-      ['sugar', 'sodium', 'caffeine'].forEach((k) => {
-        if (!data.settings.macroGoals[k]) data.settings.macroGoals[k] = { enabled: false, goal: null };
-      });
-      return data;
-    },
-    // v10 -> v11: three purely additive changes for this round's new
-    // features. (1) `showSleepInsights` — off by default, same as every
-    // other optional insight toggle — gates the trailing-nights sleep
-    // average/category shown on the Sleep tracker card and in its detail
-    // modal (see sleepInsights()). (2) `profile.age` — a new one-time fact
-    // alongside height/sex, needed only by the nutrition calculator's
-    // Mifflin-St Jeor calorie estimate (see computeNutritionTargets()); null
-    // until set, same treatment as height/sex before this. (3)
-    // `settings.nutritionCalc` — the activity-level/goal picker for that
-    // same calculator, off by default; turning it on computes and applies
-    // calorie/protein numbers into the *existing* `macroGoals.calories`/
-    // `.protein` fields rather than introducing a parallel goal-storage
-    // shape, the same way a lift's "Bodyweight standard" goal mode still
-    // writes into the exercise's ordinary `goal` field.
-    10: (data) => {
-      // A save file that started migrating from before v4 (see MIGRATIONS[4]
-      // above, which is the step that normally creates `profile`) but whose
-      // *starting* version was already >= 4 never runs that step at all —
-      // runMigrations() only calls MIGRATIONS[N] for N >= the save's own
-      // starting version. A hand-built old-schema test fixture (or a very
-      // old real save last touched between v4 and v9) can therefore still
-      // reach this step with no `profile` object yet, so this can't assume
-      // it already exists the way every migration after v4 normally could.
-      if (!data.profile) data.profile = { heightCm: null, sex: null };
-      if (data.settings.showSleepInsights === undefined) data.settings.showSleepInsights = false;
-      if (data.profile.age === undefined) data.profile.age = null;
-      if (!data.settings.nutritionCalc) {
-        data.settings.nutritionCalc = { enabled: false, activityLevel: 'moderate', goal: 'maintain' };
-      }
-      return data;
-    },
-    // v11 -> v12: three changes, all for the nutrition/onboarding rework.
-    // (1) Each macro's `enabled` flag (see macroGoalInfo) is repurposed
-    // from "has a daily goal" to "tracked at all" for every macro EXCEPT
-    // Calories, which is always tracked regardless (see macroTracked) —
-    // its `enabled` still only ever means "has a goal," so migrating it
-    // needs no change. Protein/Carbs/Fat are forced on so nobody who never
-    // bothered to set a goal for them suddenly loses a field they were
-    // already using; Sugar/Sodium/Caffeine are forced on only where an
-    // existing entry actually has a value for them, so a field genuinely
-    // never used stays off (the declutter this was for) while one that IS
-    // used stays visible. (2) `food.savedFoods` — the new Saved Foods list,
-    // starts empty. (3) `settings.trackFood`/`showMacroGuidance` — new
-    // toggles, both additive with safe defaults (Food stays on for
-    // existing installs; guidance starts off like every other insight).
-    11: (data) => {
-      const usedExtraKeys = new Set();
-      (data.food.entries || []).forEach((e) => {
-        ['sugar', 'sodium', 'caffeine'].forEach((k) => { if (e[k] != null) usedExtraKeys.add(k); });
-      });
-      ['protein', 'carbs', 'fat'].forEach((k) => { data.settings.macroGoals[k].enabled = true; });
-      usedExtraKeys.forEach((k) => { data.settings.macroGoals[k].enabled = true; });
-      if (!Array.isArray(data.food.savedFoods)) data.food.savedFoods = [];
-      if (data.settings.trackFood === undefined) data.settings.trackFood = true;
-      if (data.settings.showMacroGuidance === undefined) data.settings.showMacroGuidance = false;
-      return data;
-    },
-    // v12 -> v13: the Manage-consistency rework. Water and Food were nested
-    // one level inside a "Nutrition" domain tab; that nesting is gone now
-    // (see availableDomainCategories/DOMAIN_LABELS) — Workout, Body
-    // (measurements), Water, and Food are four flat, identically-styled
-    // domains. Each of the four now also gets the same explicit "Track
-    // this" master toggle Food already had (`trackFood`) — added here for
-    // the other three (`trackWorkout`, `trackMeasurements`, `trackWater`),
-    // all defaulting to true so nothing that was visible before silently
-    // disappears on upgrade. This is purely a navigation/visibility change;
-    // it doesn't touch exercises, trackers, water entries, or food entries.
-    12: (data) => {
-      if (data.settings.trackWorkout === undefined) data.settings.trackWorkout = true;
-      if (data.settings.trackMeasurements === undefined) data.settings.trackMeasurements = true;
-      if (data.settings.trackWater === undefined) data.settings.trackWater = true;
-      return data;
-    },
-    // v13 -> v14: the first step of the redesign, and strictly additive.
-    // (1) `settings.trackHabits` — habits and daily-rep targets used to
-    // switch on and off with Workout; they now have their own "Track this"
-    // switch. Defaults to true so everything visible before stays visible.
-    // (2) `settings.catalogPacksSeen` — ids of starter packs from the
-    // built-in catalog (js/catalog.js) that were already offered, added or
-    // skipped, so a pack is never suggested twice. Nothing in the catalog
-    // is ever added unasked. No exercise, set, entry, tracker, cup or food
-    // is read or changed here. (Optional per-exercise fields the catalog
-    // uses — `catalogId`, `equipment` — are written only when that
-    // feature is used; a missing value means "not linked".)
-    13: (data) => {
-      if (!data.settings) data.settings = {};
-      if (data.settings.trackHabits === undefined) data.settings.trackHabits = true;
-      if (!Array.isArray(data.settings.catalogPacksSeen)) data.settings.catalogPacksSeen = [];
-      return data;
-    },
-    // Next migration goes here, keyed `14: (data) => { ...; return data; }`.
-  };
-
-  /** Walks `data` forward through MIGRATIONS until it matches SCHEMA_VERSION. */
-  function runMigrations(data) {
-    let version = data.version || 1;
-    while (version < SCHEMA_VERSION && MIGRATIONS[version]) {
-      data = MIGRATIONS[version](data);
-      version += 1;
-    }
-    data.version = version;
-    return data;
-  }
+  const { SCHEMA_VERSION, HOME_SECTION_DEFAULTS, guessBodyRegion } = window.FitMigrations;
+  const runMigrations = (data) => window.FitMigrations.runMigrations(data, { defaultTrackers, defaultWater });
 
   /* ============================== Defaults ============================== */
 
-  // Starter body/wellness trackers — just Weight and Sleep. Both are things
-  // a regular person can and does check with no special equipment, so
-  // they're pre-seeded and shown on the dashboard unasked. Body Fat % is
-  // deliberately NOT seeded here: it needs calipers, a smart scale, or a
-  // DEXA scan to measure meaningfully, so silently putting it on everyone's
-  // Goals page — never having asked whether they can even track it — did
-  // more to clutter the dashboard than to help. It's still fully supported;
-  // anyone who does want it adds it themselves from Manage -> Body -> Add
-  // tracker (name it anything, `unitKind: 'percent'`), same as any other
-  // custom metric.
-  // Weight is the plain "log a number, optionally against a goal" shape
-  // (`kind: 'metric'`). Sleep is the one composite tracker: one entry per
-  // night carries both hours (`value`, this tracker's normal unitKind) and
-  // a 1-5 quality rating (`quality`) — `kind: 'sleep'` is what tells the
-  // shared rendering/logging code to show and read that second field; see
-  // the "Body & wellness trackers" section below for where `kind` branches.
-  // A future kind beyond these two (e.g. a yes/no daily habit checklist) is
-  // a new `kind` value and a new branch, not a data-shape change for
-  // existing trackers.
+  // Starter trackers: Weight and Sleep only. `kind: 'metric'` is a number with an
+  // optional goal; `kind: 'sleep'` also stores a 1-5 `quality` per entry. Others
+  // (e.g. Body Fat %) are added by the user in Manage.
   function defaultTrackers() {
     const now = new Date().toISOString();
     return [
@@ -575,21 +49,13 @@
     ];
   }
 
-  // A fixed fact about you rather than something with a history worth
-  // charting — height doesn't change often enough to be a tracker (see the
-  // v4->v5 migration above for how an existing Height tracker becomes
-  // this). All three fields are optional and used only by the insight
-  // calculators below (BMI, strength-vs-bodyweight, pace level) and the
-  // nutrition calculator (age, alongside height/sex, feeds its Mifflin-St
-  // Jeor calorie estimate) — the app works fully without any of them set.
+  // Personal facts rather than a tracker. All optional; used by the insight and
+  // nutrition calculators.
   function defaultProfile() {
     return { heightCm: null, sex: null, age: null };
   }
 
-  // Water's starter cup sizes and daily goal, canonically in milliliters
-  // (see the Unit helpers section for why a canonical/display split exists
-  // at all) — editable and replaceable from Manage, never read for anything
-  // but seeding a fresh install or an upgrade that never had water data.
+  // Starter cups and daily goal in ml. Used only when there is no water data.
   function defaultWater() {
     return {
       goalMl: 2000,
@@ -602,93 +68,52 @@
 
   const DEFAULT_SETTINGS = {
     theme: 'system', weightUnit: 'lb', distanceUnit: 'mi', lengthUnit: 'in', volumeUnit: 'flOz',
-    // Dashboard/detail chart default range, and the optional insight
-    // calculators (see the "Insights & standards" section) — on by default.
-    // These used to default off on the theory that they were extras layered
-    // on top of the core tracking, not something to spring on an existing
-    // install unasked — but that same reasoning was quietly hiding real
-    // information from every new install too, not just protecting old ones,
-    // and each of these already degrades gracefully to a "log X to see
-    // this" hint when its prerequisite data isn't there yet (see e.g.
-    // computeNutritionTargets's `missing` list) rather than cluttering the
-    // screen. Turning any of these back off stays one tap away in Settings
-    // -> Insights. (An *existing* install that already saved `false` here
-    // keeps it — this only changes what a fresh install starts with; see
-    // maybeOfferSetupReview() below for how an existing lightly-used
-    // install gets a chance to reconsider these explicitly instead.)
+    // Chart range and the optional insights (see "Insights & standards"). Each
+    // insight is on by default and shows a hint until its data exists. Saved values win.
     chartScale: 'last10', insightsWindowDays: 90,
     showWeightInsights: true, showStrengthLevel: true, showPaceLevel: true,
-    // Sleep is logged per-night rather than persisting like weight, so its
-    // dashboard card always resets to "not logged" for a fresh day (see
-    // trackerCardHtml()) regardless of this toggle — this only gates the
-    // separate, optional trailing-nights average/category insight
-    // (sleepInsights()), same on-by-default treatment as every other one.
+    // Gates only the trailing-nights sleep average; the sleep card itself always shows today.
     showSleepInsights: true,
-    // Daily-value guidance card (Fat/Sugar/Sodium/etc. vs. published FDA
-    // reference values) in the Food detail modal — on by default, same
-    // on-by-default treatment as every other insight above.
+    // Daily-value guidance in the Food detail modal.
     showMacroGuidance: true,
-    // Each of the four Manage domains (Workout, Body/measurements, Water,
-    // Food) has the identical "Track this" master toggle — the setup
-    // wizard's interest tiles write these; each one's own Manage panel
-    // (which always shows regardless of this flag, same as Food already
-    // worked) is where it gets turned back on. Gates whether that domain's
-    // tab even appears in Log/History, and its dashboard section. All four
-    // default to true so nothing that was visible before this existed
-    // silently disappears on upgrade (see the v12->v13 migration for
-    // trackWorkout/trackMeasurements/trackWater specifically — trackFood is
-    // older and already carried this same default).
+    // Master "Track this" switches. trackWorkout is the Lifting switch; the Workout
+    // area stays on while Lifting, Running & cardio or Habits is on (js/features.js).
+    // An off area is hidden from Log, History and Home. Manage always shows it so it
+    // can be turned back on.
     trackWorkout: true,
+    homeSections: Object.assign({}, HOME_SECTION_DEFAULTS),
     trackMeasurements: true,
     trackWater: true,
     trackFood: true,
-    // Habits and daily-rep targets (Home's Checklist). Its own switch,
-    // separate from Workout, so lifting-only people can hide the checklist
-    // and habit-only people can hide the lifting tools.
+    // Habits and daily-rep targets (Home checklist), independent of Lifting.
     trackHabits: true,
+    // Running and cardio exercises, separate from lifting (trackWorkout).
+    trackCardio: true,
     // Starter packs from js/catalog.js already offered/added/skipped.
     catalogPacksSeen: [],
-    // Each macro's `enabled` flag now does double duty: whether the field
-    // is tracked at all (shown in the log form / today's totals), and
-    // whether it additionally has a daily GOAL set. Calories has no
-    // visibility toggle (always tracked, see renderFoodManagePanel) so its
-    // `enabled` here only ever means "has a goal," same as before.
-    // Protein/Carbs/Fat start tracked (the four macros this app has always
-    // shown); Sugar/Sodium/Caffeine start off — opt in from Manage ->
-    // Nutrition -> Food. Managed from Manage -> Food.
+    // `enabled` means the macro is tracked (log form, totals) and may also carry a
+    // daily goal. Calories is always tracked, so its `enabled` only means "has a
+    // goal". Protein, Carbs and Fat start tracked; Sugar, Sodium and Caffeine start off.
     macroGoals: {
       calories: { enabled: false, goal: null }, protein: { enabled: true, goal: null },
       carbs: { enabled: true, goal: null }, fat: { enabled: true, goal: null },
       sugar: { enabled: false, goal: null }, sodium: { enabled: false, goal: null }, caffeine: { enabled: false, goal: null },
     },
-    // The nutrition calculator (Manage -> Nutrition -> Food): off by
-    // default. Turning it on computes calories/protein from activityLevel +
-    // goal (Mifflin-St Jeor + an activity multiplier + a goal adjustment —
-    // see computeNutritionTargets()) and writes the result into
-    // macroGoals.calories/.protein above, rather than storing its own
-    // separate goal numbers — so those two fields work exactly like every
-    // other macro goal (same dashboard display, same manual override if the
-    // calculator is turned back off) once applied.
+    // Nutrition calculator, off by default. Applying it writes calories and protein
+    // into macroGoals above (see computeNutritionTargets()).
     nutritionCalc: { enabled: false, activityLevel: 'moderate', goal: 'maintain' },
-    // Whether the "Review your tracking" dashboard nudge (see
-    // shouldOfferSetupReview() below) has already been shown and acted on
-    // (or explicitly dismissed) once — false only ever means "never
-    // resolved yet," never "should show again." A brand-new install starts
-    // false but won't actually be offered the prompt for a few days (see
-    // SETUP_REVIEW_MIN_INSTALL_DAYS) — this flag only stops it from
-    // reappearing once it HAS been shown, it isn't what decides whether to
-    // show it in the first place.
+    // Set once the "Review your tracking" prompt has been answered or dismissed (see
+    // shouldOfferSetupReview()). It only stops repeats; it does not decide when to show it.
     setupReviewPromptSeen: false,
   };
 
-  // A brand-new install's starting Food state — always empty; there's no
-  // meaningful "starter" food entry the way there are starter exercises.
+  // A new install's starting Food state is empty; there are no starter foods.
   function defaultFood() {
     return { entries: [], savedFoods: [] };
   }
 
-  // The starting data for a brand-new install — already in the current
-  // schema shape, so it never has to pass through the migrations above.
+  // Starting data for a new install, already in the current schema shape, so it
+  // skips the migrations.
   function defaultData() {
     const now = new Date().toISOString();
     return {
@@ -714,19 +139,13 @@
   }
 
   /* ============================== Store ==============================
-     load()/save() are the ONLY two functions that touch localStorage
-     directly. Everything else in the app reads and writes the in-memory
-     `state` object and calls save() when it's done — that keeps "how data
-     gets to disk" in one place. */
+     load() and save() are the only code that touches localStorage. */
 
   let state = null;
-  // True only for a genuinely first-ever run (see load() below) — init()
-  // checks this to show the setup wizard instead of the normal dashboard.
+  // True only on a first-ever run (see load()); init() then shows the setup wizard.
   let needsSetup = false;
-  // True when saved data exists but couldn't be read (see load()'s catch
-  // below) — init() shows a recovery screen instead of guessing at
-  // defaults. `rawCorrupt` keeps the original, untouched bytes so the
-  // recovery screen can hand them back rather than losing them.
+  // True when saved data exists but could not be read; init() then shows the
+  // recovery screen. `rawCorrupt` keeps the original text so it can be handed back.
   let needsRecovery = false;
   let rawCorrupt = null;
 
@@ -735,11 +154,8 @@
     try {
       raw = localStorage.getItem(STORAGE_KEY);
       if (!raw) {
-        // Truly first run. `state` gets an inert skeleton so the rest of
-        // the app has something safe to read, but it's deliberately NOT
-        // saved yet — finishSetup() (see "First-run setup wizard" below)
-        // builds and saves the real starting data once answered, so
-        // closing mid-wizard leaves nothing partial behind to reopen into.
+        // First run: `state` is an unsaved skeleton. finishSetup() saves the real
+        // starting data, so quitting mid-wizard leaves nothing behind.
         state = defaultData();
         needsSetup = true;
         return;
@@ -750,37 +166,23 @@
       state = runMigrations(parsed);
       save(); // persist the migrated shape once, so this doesn't re-run every load
     } catch (e) {
-      // A real saved payload exists but couldn't be parsed or migrated —
-      // this is NOT the same as "no data," and must not be treated like
-      // it. There is no server-side copy of this data, so overwriting
-      // localStorage here on what might be a bug in this code (rather
-      // than a genuinely unrecoverable file) could destroy real history.
-      // Leave localStorage exactly as it was and let the recovery screen
-      // (see showRecoveryScreen()) offer an explicit, informed choice.
+      // Saved data exists but could not be parsed or migrated. Do not overwrite it
+      // (there is no other copy); leave localStorage alone and let the recovery
+      // screen offer a choice.
       console.warn('Could not read saved data — leaving it untouched.', e);
       rawCorrupt = raw || null;
       needsRecovery = true;
     }
   }
 
-  // Returns true on success, false on failure — every caller that follows a
-  // save with its own "X saved"/"X deleted"-style success toast (or closes
-  // a form modal as if the save is now durable) MUST check this and skip
-  // that success feedback on false, since save() already shows a failure
-  // toast itself here. Without that check, a failed write (quota exceeded,
-  // private-mode storage disabled, etc.) would still show "Entry saved" —
-  // the in-memory `state` mutation happened either way, but nothing durable
-  // actually happened, and telling the user otherwise is actively
-  // misleading (see the callers of this function for the `if (!save())
-  // return;` guard).
+  // Returns false on failure (it shows its own failure toast). Callers must
+  // check it and skip any success toast or modal close: `if (!save()) return;`.
   function save() {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
       return true;
     } catch (e) {
-      // Most likely the browser's storage quota is full. This is rare for a
-      // text-only app like this one, but fail loudly rather than silently
-      // losing the entry the user thinks they just saved.
+      // Most likely the storage quota is full. Say so rather than lose the entry silently.
       console.error('Could not save to localStorage', e);
       toast('Could not save — your browser storage may be full. Try exporting a backup and freeing up space.');
       return false;
@@ -793,157 +195,34 @@
 
   /* ============================== Unit helpers ============================== */
 
-  const LB_PER_KG = 0.45359237;
-  const KM_PER_MI = 1.609344;
-  const CM_PER_IN = 2.54;
-  const ML_PER_FLOZ = 29.5735295625;
-
-  // Sanity bounds for profile fields — generous enough to cover every real
-  // human (and then some) while still catching fat-fingered or garbage
-  // input like "999" years old or "40 ft" tall. Used by both the setup
-  // wizard's About step and Settings' Profile card so the two can't drift.
-  const MIN_AGE = 1;
-  const MAX_AGE = 120;
-  const MIN_HEIGHT_CM = 50;   // ~1'8"
-  const MAX_HEIGHT_CM = 272;  // ~8'11"
-
-  // Data is saved in one fixed ("canonical") unit — pounds for weight, miles
-  // for distance/pace — regardless of the current Settings toggle. `Units`
-  // is the only place that converts canonical to whichever unit is currently
-  // selected for *display*. This split means the lb/kg or mi/km toggle can
-  // only ever change presentation, never the logged history itself, and
-  // entries stay comparable even if the unit is switched partway through.
-  const Units = {
-    lbToDisplay: (lb) => (state.settings.weightUnit === 'kg' ? lb * LB_PER_KG : lb),
-    displayToLb: (v) => (state.settings.weightUnit === 'kg' ? v / LB_PER_KG : v),
-    weightUnitLabel: () => state.settings.weightUnit,
-
-    miToDisplay: (mi) => (state.settings.distanceUnit === 'km' ? mi * KM_PER_MI : mi),
-    displayToMi: (v) => (state.settings.distanceUnit === 'km' ? v / KM_PER_MI : v),
-    distanceUnitLabel: () => state.settings.distanceUnit,
-
-    // pace stored canonically as seconds per mile
-    secPerMiToDisplaySecPerUnit: (s) => (state.settings.distanceUnit === 'km' ? s / KM_PER_MI : s),
-    displaySecPerUnitToSecPerMi: (s) => (state.settings.distanceUnit === 'km' ? s * KM_PER_MI : s),
-
-    // Body-measurement lengths (height, waist, bicep, ...) canonically in
-    // centimeters — a separate unit from running distance (miles/km above)
-    // since inches/cm and miles/km are different scales for different things.
-    cmToDisplay: (cm) => (state.settings.lengthUnit === 'cm' ? cm : cm / CM_PER_IN),
-    displayToCm: (v) => (state.settings.lengthUnit === 'cm' ? v : v * CM_PER_IN),
-    lengthUnitLabel: () => state.settings.lengthUnit,
-
-    // Water volume canonically in milliliters.
-    mlToDisplay: (ml) => (state.settings.volumeUnit === 'mL' ? ml : ml / ML_PER_FLOZ),
-    displayToMl: (v) => (state.settings.volumeUnit === 'mL' ? v : v * ML_PER_FLOZ),
-    volumeUnitLabel: () => (state.settings.volumeUnit === 'mL' ? 'mL' : 'fl oz'),
-  };
-
-  function round(v, dp) {
-    const f = Math.pow(10, dp);
-    return Math.round(v * f) / f;
-  }
-
-  // Splits a canonical height in cm into whole feet + inches for display —
-  // nobody knows their height as a single number of inches, so Profile's
-  // imperial height field is feet-and-inches (see the Settings section
-  // below), never the plain "in" a length tracker like Waist uses.
-  function cmToFtIn(cm) {
-    const totalIn = cm / CM_PER_IN;
-    const ft = Math.floor(totalIn / 12);
-    return { ft, inch: round(totalIn - ft * 12, 1) };
-  }
-
-  function fmtWeight(lb) {
-    if (lb == null || Number.isNaN(lb)) return '—';
-    const v = Units.lbToDisplay(lb);
-    return `${round(v, v < 10 ? 1 : 0)} ${Units.weightUnitLabel()}`;
-  }
-  function fmtReps(n) {
-    if (n == null || Number.isNaN(n)) return '—';
-    return `${Math.round(n)} rep${Math.round(n) === 1 ? '' : 's'}`;
-  }
-  function fmtDistance(mi) {
-    if (mi == null || Number.isNaN(mi)) return '—';
-    const v = Units.miToDisplay(mi);
-    return `${round(v, 2)} ${Units.distanceUnitLabel()}`;
-  }
-  function fmtSecShort(totalSec) {
-    if (totalSec == null || Number.isNaN(totalSec)) return '—';
-    const s = Math.round(totalSec);
-    const m = Math.floor(s / 60);
-    const r = s % 60;
-    return `${m}:${String(r).padStart(2, '0')}`;
-  }
-  function fmtPace(secPerMi) {
-    if (secPerMi == null || Number.isNaN(secPerMi) || !Number.isFinite(secPerMi)) return '—';
-    const s = Units.secPerMiToDisplaySecPerUnit(secPerMi);
-    return `${fmtSecShort(s)} /${Units.distanceUnitLabel()}`;
-  }
-  function fmtLength(cm) {
-    if (cm == null || Number.isNaN(cm)) return '—';
-    const v = Units.cmToDisplay(cm);
-    return `${round(v, 1)} ${Units.lengthUnitLabel()}`;
-  }
-  function fmtVolume(ml) {
-    if (ml == null || Number.isNaN(ml)) return '—';
-    const v = Units.mlToDisplay(ml);
-    return `${round(v, v < 10 ? 1 : 0)} ${Units.volumeUnitLabel()}`;
-  }
-  function fmtDuration(totalSec) {
-    if (totalSec == null || Number.isNaN(totalSec)) return '—';
-    const s = Math.round(totalSec);
-    const h = Math.floor(s / 3600);
-    const m = Math.floor((s % 3600) / 60);
-    const r = s % 60;
-    return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${String(r).padStart(2, '0')}` : `${m}:${String(r).padStart(2, '0')}`;
-  }
-
-  // A calendar day is a YYYY-MM-DD label, not a timestamp — reading it back
-  // off a Date's local getters (never .toISOString(), which reports UTC and
-  // silently shifts the date by a day in any timezone ahead of UTC) is what
-  // keeps "today," streaks, and trend windows agreeing with the calendar on
-  // the wall rather than the calendar in Greenwich.
-  function localDateISO(d) {
-    const y = d.getFullYear();
-    const m = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    return `${y}-${m}-${day}`;
-  }
-  function todayISO() {
-    return localDateISO(new Date());
-  }
-  function fmtDateShort(iso) {
-    const d = new Date(iso + 'T00:00:00');
-    return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
-  }
+  const {
+    LB_PER_KG, KM_PER_MI, CM_PER_IN, ML_PER_FLOZ, MIN_AGE, MAX_AGE, MIN_HEIGHT_CM, MAX_HEIGHT_CM,
+    Units, round, cmToFtIn, fmtWeight, fmtReps, isTimed, fmtHold, fmtCount, fmtDistance, fmtSecShort,
+    fmtPace, fmtLength, fmtVolume, fmtDuration, localDateISO, todayISO, fmtDateShort,
+  } = window.FitUnits.create(() => state.settings);
 
   /* ============================== Derived data ============================== */
 
-  // Habits and daily-rep targets have their own "Track this" switch
-  // (settings.trackHabits); everything else follows Workout. Either switch
-  // off simply hides what it owns — nothing logged is touched.
-  function habitsTracked() { return state.settings.trackHabits !== false; }
-  function isHabitLike(ex) { return ex.kind === 'habit' || (ex.section || 'goal') === 'daily'; }
-  function activeExercises() {
-    const lifts = state.settings.trackWorkout !== false;
-    const habits = habitsTracked();
-    return state.exercises.filter((e) => !e.archived && (isHabitLike(e) ? habits : lifts));
-  }
+  // Habits and daily-rep targets follow the Habits switch, cardio follows
+  // Running & cardio, everything else follows Lifting (js/features.js). Turning
+  // one off only hides its items.
+  const F = window.FitFeatures;
+  const habitsTracked = () => F.habitsTracked(state.settings);
+  const cardioTracked = () => F.cardioTracked(state.settings);
+  const isHabitLike = F.isHabitLike;
+  function activeExercises() { return state.exercises.filter((e) => F.exerciseTracked(state.settings, e)); }
   function exerciseById(id) { return state.exercises.find((e) => e.id === id); }
   function entriesFor(exId) { return state.entries.filter((e) => e.exerciseId === exId); }
   function sectionOf(ex) { return ex.section || 'goal'; }
   const SECTION_LABELS = { goal: 'Goals', daily: 'Daily targets', accessory: 'Other exercises' };
 
-  // A habit is a daily target with no weight or reps: something done N times
-  // a day (`goal` = N), logged with one tap. `repeat` says how often its day
-  // comes around.
+  // A habit has no weight or reps: it is done `goal` times a day and logged with
+  // one tap. `repeat` sets how often it falls due.
   const HABIT_REPEATS = [['daily', 'Every day', 1], ['every-other', 'Every other day', 2], ['weekly', 'Weekly', 7]];
   function habitRepeatDays(ex) { return (HABIT_REPEATS.find((r) => r[0] === ex.repeat) || HABIT_REPEATS[0])[2]; }
   function dayGap(fromISO, toISO) { return Math.round((new Date(toISO + 'T00:00:00') - new Date(fromISO + 'T00:00:00')) / 86400000); }
-  // Whether a habit belongs on today's Home: always for a daily one; for the
-  // others, once enough days have passed since it was last done (or while
-  // it's already been started today).
+  // Due today: always if daily; otherwise once enough days have passed since it
+  // was last done, or if it is already started today.
   function habitDueToday(ex) {
     const gap = habitRepeatDays(ex);
     if (gap === 1) return true;
@@ -970,17 +249,14 @@
       </div>`;
   }
 
-  // The single best/most-recent set of an entry, used both for trend values
-  // and for the progressive-overload suggestion (which needs reps/RPE too,
-  // not just the scalar entryValue()).
+  // The best (or starred) set of an entry. Unlike entryValue() it keeps reps and
+  // RPE, which the suggestions need.
   function topSetOf(exercise, entry) {
     if (exercise.kind === 'weight') {
       const valid = (entry.sets || []).filter((s) => s.reps > 0 && s.weight != null);
       if (!valid.length) return null;
-      // A set starred as the working set (see the log form's ★ toggle) is
-      // the intended basis for a suggestion even if a heavier warm-up or
-      // test single was also logged in the same entry; fall back to
-      // "heaviest logged" only when nothing was starred.
+      // A starred working set wins over a heavier warm-up or single; otherwise take
+      // the heaviest set.
       const starred = valid.find((s) => s.primary);
       if (starred) return { weight: starred.weight, reps: starred.reps, rpe: starred.rpe };
       let top = valid[0];
@@ -998,16 +274,10 @@
     return { distance: entry.distance, duration: entry.duration, pace, rpe: entry.rpe };
   }
 
-  // A cardio exercise carries two independent, optional goals — distance
-  // and pace — computed from the same logged entries, so a single run
-  // updates both at once instead of requiring separate entries per goal.
-  // These three helpers are the one place that reads distanceGoal/paceGoal;
-  // everything downstream (progress, formatting, suggestions, rendering)
-  // goes through them rather than touching those fields directly.
+  // A cardio exercise has optional distance and pace goals, both computed from
+  // the same entries. Read them through these helpers, not distanceGoal/paceGoal.
 
-  // Which goal metrics this cardio exercise currently tracks, in display
-  // order. Empty for a cardio exercise with no goal set yet; length 1 for
-  // the common case; length 2 once both a distance and a pace goal exist.
+  // Goal metrics this cardio exercise tracks, in display order (0, 1 or 2).
   function cardioMetricsOf(exercise) {
     if (exercise.kind !== 'cardio') return [];
     const metrics = [];
@@ -1018,18 +288,13 @@
   function cardioGoalFor(exercise, metric) {
     return metric === 'pace' ? exercise.paceGoal : exercise.distanceGoal;
   }
-  // Falls back to whichever goal is actually set when no metric is given,
-  // so single-goal cardio exercises (the common case) don't need callers to
-  // know or care which metric that is.
+  // With no metric given, uses whichever goal is set.
   function defaultCardioMetric(exercise) {
     return exercise.distanceGoal != null ? 'distance' : (exercise.paceGoal != null ? 'pace' : 'distance');
   }
 
-  // Boils one logged entry down to a single number for trend charts and PRs —
-  // "heaviest weight lifted for a real rep" for a lift, "most reps in one
-  // set" for bodyweight work, distance or pace (per `metric`) for cardio.
-  // See topSetOf() just above for the version that keeps reps/RPE too, used
-  // by the progressive-overload suggestions.
+  // One number per entry for charts and PRs: heaviest weight for a lift, most
+  // reps in a set for bodyweight, distance or pace (per `metric`) for cardio.
   function entryValue(exercise, entry, metric) {
     if (exercise.kind === 'weight') {
       const weights = (entry.sets || []).filter((s) => s.reps > 0).map((s) => s.weight);
@@ -1053,34 +318,21 @@
     return (metric || defaultCardioMetric(exercise)) === 'pace';
   }
 
-  // The all-time best entryValue() for this exercise/metric — what a
-  // dashboard card's big number and meter are measured against. "Best"
-  // means lowest for a pace goal (a faster time is better) and highest
-  // otherwise. `metric` is ignored for non-cardio kinds.
+  // All-time best entryValue(): lowest for pace, highest otherwise. `metric` is
+  // ignored for non-cardio.
   function best(exercise, metric) {
     const vals = entriesFor(exercise.id).map((e) => entryValue(exercise, e, metric)).filter((v) => v != null);
     if (!vals.length) return null;
     return isLowerBetter(exercise, metric) ? Math.min(...vals) : Math.max(...vals);
   }
 
-  // How close `best(exercise, metric)` is to its goal, as a percentage (can
-  // exceed 100 once the goal's been beaten) plus whether it's been reached
-  // at all. `metric` selects which of a cardio exercise's two goals to
-  // measure against; ignored for non-cardio kinds, which have one goal.
+  // Progress to goal as a percent (over 100 once beaten) and whether it is
+  // reached. `metric` picks the cardio goal and is ignored otherwise.
   function progressPct(exercise, metric) {
     const goal = exercise.kind === 'cardio' ? cardioGoalFor(exercise, metric || defaultCardioMetric(exercise)) : exercise.goal;
-    // A bodyweight-standard goal (goalMode 'standard' — see
-    // computeStandardGoal) is a tier off LIFT_STANDARDS, and those tables
-    // are calibrated against an estimated 1RM (see strengthLevelInfo,
-    // which classifies a lift's tier the same way) — not the raw heaviest
-    // single set ever logged, which is what best() returns. Measuring
-    // progress toward that goal against the raw heaviest set instead of
-    // the 1RM estimate mixed two different numbers: a 185lb x 10 set is a
-    // far bigger lift than a 185lb single, but only the 1RM estimate
-    // reflects that, so the meter used to read as further from the goal
-    // than Strength level said the same lift actually was. A 'fixed' goal
-    // (a plain "hit N lb") isn't calibrated to 1RM at all, so it keeps
-    // using the raw heaviest set, same as ever.
+    // A bodyweight-standard goal is a tier calibrated to estimated 1RM (as in
+    // strengthLevelInfo), so measure it against that. A fixed goal uses the
+    // heaviest set.
     const useOneRM = exercise.kind === 'weight' && exercise.goalMode === 'standard';
     const b = useOneRM ? (bestEstimatedOneRM(exercise) || {}).oneRM ?? null : best(exercise, metric);
     if (b == null || !goal) return { pct: 0, achieved: false, best: b };
@@ -1096,14 +348,14 @@
   function formatValueForExercise(exercise, v, metric) {
     if (v == null) return '—';
     if (exercise.kind === 'weight') return fmtWeight(v);
-    if (exercise.kind === 'reps') return fmtReps(v);
+    if (exercise.kind === 'reps') return fmtCount(exercise, v);
     if (exercise.kind === 'cardio') return (metric || defaultCardioMetric(exercise)) === 'pace' ? fmtPace(v) : fmtDistance(v);
     return String(v);
   }
 
   function goalLabelForExercise(exercise, metric) {
     if (exercise.kind === 'weight') return `Goal ${fmtWeight(exercise.goal)}`;
-    if (exercise.kind === 'reps') return `Goal ${fmtReps(exercise.goal)}`;
+    if (exercise.kind === 'reps') return `Goal ${fmtCount(exercise, exercise.goal)}`;
     if (exercise.kind === 'cardio') {
       const m = metric || defaultCardioMetric(exercise);
       const goal = cardioGoalFor(exercise, m);
@@ -1112,10 +364,7 @@
     return '';
   }
 
-  // A short " · Goal ..." suffix for the Settings exercise-management list —
-  // one clause per configured goal for cardio (so both a distance and a
-  // pace goal are listed), one clause for everything else, or a plain "no
-  // goal set" when nothing is configured yet.
+  // Suffix for the Manage exercise list: one clause per goal, or "no goal set".
   function exerciseGoalSummary(exercise) {
     if (exercise.kind === 'habit') {
       const repeat = HABIT_REPEATS.find((r) => r[0] === exercise.repeat);
@@ -1130,21 +379,8 @@
   }
 
   /* ============================== Progressive-overload suggestion engine ==============================
-     Two evidence-based heuristics, chosen by what data is available:
-       1) RPE/RIR-based autoregulation (when the last top set has an RPE logged) —
-          a well-supported approach in strength-training research for deciding
-          session-to-session load. Bands follow common RPE/RIR coaching scales.
-       2) A simple two-session trend fallback when no RPE is logged: matching
-          or beating the prior rep count at the same weight across two
-          sessions in a row signals it's time to add load. This is NOT the
-          NSCA's "2-for-2 rule" (which tracks exceeding a target rep RANGE
-          by ~2 reps across two sessions — this app doesn't model rep-range
-          targets) — it's labeled plainly below rather than claiming that
-          more specific rule's name.
-     Increment sizes follow NSCA general guidance: smaller jumps for upper-body /
-     single-joint lifts, larger jumps for lower-body / multi-joint lifts.
-     This is a general heuristic, not personalized coaching — it's surfaced with
-     that caveat in the UI rather than as a confident prescription. */
+     RPE bands when the last top set has an RPE; otherwise a two-session trend
+     (not the NSCA "2-for-2 rule"). A general guideline, not coaching; the UI says so. */
 
   const WEIGHT_INCREMENTS = { upper: { lb: 5, kg: 2.5 }, lower: { lb: 10, kg: 5 } };
 
@@ -1168,15 +404,10 @@
     trend: 'Based on your last two sessions.',
   };
 
-  // Returns an ARRAY of suggestions: always one element for a weight/reps
-  // exercise, but one element PER configured goal metric for cardio — a
-  // cardio exercise with both a distance and a pace goal gets two
-  // suggestions, each tagged with `metric`, computed from the same pair of
-  // logged entries (one run informs both).
+  // Returns an array: one suggestion for weight/reps, one per goal metric for
+  // cardio (each tagged with `metric`).
   function suggestNextTarget(exercise) {
-    // Daily-section exercises (push-ups, crunches, etc.) are open-ended "stay
-    // active" targets, not a progressive-overload lift or a cardio goal —
-    // there's no "next session" to size, so no suggestion card at all.
+    // Daily targets are open-ended, so they get no suggestion.
     if (sectionOf(exercise) === 'daily') return [];
     const entries = entriesFor(exercise.id).slice().sort((a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id));
     if (!entries.length) return [{ headline: 'Log a session to get a suggestion.', method: null }];
@@ -1227,6 +458,10 @@
       if (!lastTop || lastTop.reps == null) return { headline: 'Log a set to get a suggestion.', method: null };
       const band = rpeBand(lastTop.rpe);
       const r = Math.round(lastTop.reps);
+      if (isTimed(exercise)) {
+        if (band === 'max') return { headline: `Hold ${fmtHold(r)} next time`, detail: `RPE ${lastTop.rpe} was close to failure. Repeat before adding time.`, method: 'rpe' };
+        return { headline: `Try ${fmtHold(r + 5)} next time`, detail: 'Add a few seconds each session while your form holds.', method: band ? 'rpe' : null };
+      }
       if (band === 'easy') return { headline: `Try ${r + 3} reps next time`, detail: `RPE ${lastTop.rpe} had reps to spare — or add a little weight if you're already at a high rep count.`, method: 'rpe' };
       if (band === 'moderate') return { headline: `Try ${r + 1}–${r + 2} reps next time`, detail: `RPE ${lastTop.rpe} — a small push is reasonable.`, method: 'rpe' };
       if (band === 'ontarget') return { headline: `Repeat ${r} reps, focus on form`, detail: `RPE ${lastTop.rpe} is a solid working effort.`, method: 'rpe' };
@@ -1240,10 +475,7 @@
     return { headline: 'Log a session to get a suggestion.', method: null };
   }
 
-  // The cardio counterpart of suggestWeightOrReps(), computed for one goal
-  // metric at a time — called once per configured goal (see
-  // suggestNextTarget above), so a run logged toward both a distance and a
-  // pace goal gets an independent, correctly-worded suggestion for each.
+  // Cardio suggestion for one goal metric; called once per configured goal.
   function suggestCardioMetric(exercise, metric, last, prev) {
     const lastTop = topSetOf(exercise, last);
     const prevTop = prev ? topSetOf(exercise, prev) : null;
@@ -1284,31 +516,20 @@
   }
 
   /* ============================== Body & wellness trackers ==============================
-     A tracker is a user-defined "log a number, optionally against a goal"
-     metric — the same generic shape covers body weight, body-fat %, a
-     circumference, sleep hours, a mood rating, or anything else added later
-     (calories, a supplement dose, ...) with zero new code, just a new
-     tracker instance. One canonical value per unitKind keeps the lb/kg-style
-     display-vs-storage split (see Unit helpers) working the same way it
-     does for exercises. */
+     A tracker logs a number against an optional goal (weight, sleep, custom).
+     Values are stored in one canonical unit per unitKind (see Unit helpers). */
 
   function activeTrackers() { return state.trackers.filter((t) => !t.archived); }
   function trackerById(id) { return state.trackers.find((t) => t.id === id); }
   function measurementsFor(trackerId) { return state.measurements.filter((m) => m.trackerId === trackerId); }
 
-  // The most recently logged value. A tracker reflects current state
-  // (today's weight, last night's sleep) rather than a lifetime best like an
-  // exercise PR, so "latest" — not "highest/lowest ever" — is the right
-  // notion of "current" here.
+  // The latest value: a tracker's "current" is its newest reading, not a lifetime best.
   function latestMeasurement(trackerId) {
     const list = measurementsFor(trackerId).slice().sort((a, b) => (a.date + a.id).localeCompare(b.date + b.id));
     return list.length ? list[list.length - 1] : null;
   }
 
-  // tracker.unitLabel is free-text the user (or an imported backup) typed
-  // in — this return value is interpolated straight into innerHTML in
-  // several places (dashboard/tracker cards, chart tooltips), so it's
-  // escaped right here rather than trusting every call site to remember to.
+  // unitLabel is free text and the result goes into innerHTML, so escape it here.
   function fmtTrackerValue(tracker, v) {
     if (v == null || Number.isNaN(v)) return '—';
     switch (tracker.unitKind) {
@@ -1325,32 +546,17 @@
     return tracker.goal != null ? `Goal ${fmtTrackerValue(tracker, tracker.goal)}` : '';
   }
 
-  // The Sleep tracker's second field (see `kind: 'sleep'` above) — a plain
-  // 1-5 rating, optional, clamped and rounded rather than trusting raw
-  // input straight from a number field.
+  // Sleep quality: an optional 1-5 rating, rounded and clamped.
   function clampQuality(raw) {
     const n = parseFloat(raw);
     return Number.isNaN(n) ? null : Math.max(1, Math.min(5, Math.round(n)));
   }
   function fmtQuality(q) { return q == null ? null : `${q}/5`; }
 
-  // Percent of the way from `tracker.baseline` (the value when this goal
-  // was set — see the v6->v7 migration and the baseline-capture points in
-  // openTrackerForm()/handleLogMeasurementSubmit()/finishSetup()) to
-  // `tracker.goal`. This is deliberately NOT a plain current/goal ratio:
-  // for a body metric moving toward a target from somewhere else — weight
-  // 200 -> goal 180, currently 195 — current/goal math reports 92% (180/195)
-  // when only 25% of the actual 20lb has been lost. Measuring against where
-  // you started instead of against zero is what makes the percentage mean
-  // "progress" rather than "proximity."
-  // Falls back to the old direct ratio when there's no usable baseline yet
-  // (a brand-new tracker with a goal but no logged history) so a goal still
-  // shows *something* meaningful before any progress exists to measure.
-  // A baseline is only a usable starting point when it sits on the far side
-  // of the goal from where the tracker is headed — below it for "up", above
-  // it for "down". A stale one (say 166 lb left over from before a goal of
-  // 165 lb "up") would make the ratio below blow up to hundreds of percent,
-  // so it is ignored and the plain current/goal ratio is used instead.
+  // Progress is measured from `tracker.baseline` (the value when the goal was
+  // set), not from zero: weight 200 -> goal 180 at 195 is 25%, not 92%. A
+  // baseline is usable only if it is on the far side of the goal from the
+  // direction of travel; otherwise trackerProgressPct() uses current/goal.
   function trackerBaselineUsable(tracker) {
     const b = tracker.baseline, g = tracker.goal;
     if (b == null || g == null || b === g) return false;
@@ -1372,11 +578,8 @@
     return { pct: Math.max(0, pct), achieved };
   }
 
-  // A plain-language alternative to the percentage above for a tracker with
-  // a known baseline — "12 lb down · 8 lb remaining" reads unambiguously
-  // where "80%" can still be misread as "80% of my original weight" for a
-  // body metric. Returns null when there's no baseline to measure a delta
-  // from yet, or nothing left to describe (goal already reached).
+  // Plain-language progress, e.g. "12 lb down, 8 lb remaining". Null without a
+  // usable baseline or once the goal is reached.
   function trackerProgressDeltaText(tracker, value) {
     if (value == null || tracker.goal == null || !trackerBaselineUsable(tracker)) return null;
     const moved = Math.abs(tracker.baseline - value);
@@ -1386,11 +589,8 @@
     return `${fmtTrackerValue(tracker, moved)} ${dir} · ${fmtTrackerValue(tracker, remaining)} remaining`;
   }
 
-  // Converts a tracker's canonical value (weight in lb, length in cm, ...)
-  // to/from the number an <input> should show, per its unitKind — the one
-  // place logging/edit forms need to know which unit a tracker's raw value
-  // is stored in. Every other unitKind is stored and displayed as the same
-  // plain number (percent, hours, a rating, a free-unit count).
+  // Convert a stored value (lb, cm, ...) to and from the number shown in an
+  // input. Other unit kinds are stored as shown.
   function trackerDisplayFromCanonical(tracker, v) {
     if (v == null) return '';
     if (tracker.unitKind === 'weight') return round(Units.lbToDisplay(v), 1);
@@ -1402,8 +602,7 @@
     if (tracker.unitKind === 'length') return Units.displayToCm(v);
     return v;
   }
-  // Same escaping rationale as fmtTrackerValue() above — this also lands in
-  // innerHTML (the log/edit measurement forms' field labels).
+  // Escaped like fmtTrackerValue(): the label lands in innerHTML.
   function trackerUnitLabel(tracker) {
     switch (tracker.unitKind) {
       case 'weight': return Units.weightUnitLabel();
@@ -1416,70 +615,35 @@
   }
 
   /* ============================== Insights & standards ==============================
-     Optional, off-by-default calculators layered on top of the core
-     tracking — turned on in Settings ("Insights"), one toggle per kind.
-     Each one needs a fact from `state.profile` (height and/or sex) that
-     the app never requires elsewhere; if it's missing, the calculator
-     says so instead of guessing.
+     Optional calculators (BMI, weight trend, strength and pace level), on by
+     default and switched in Settings -> Insights. Each says what is missing
+     instead of guessing. Tables and sources: js/standards.js. General guidance only. */
 
-     The benchmark numbers below are general published reference points,
-     not a personalized or medical assessment — presented with that
-     caveat in the UI, the same way the progressive-overload suggestion
-     engine caveats its own heuristics.
-       - BMI categories: CDC adult BMI guidance.
-       - Bodyweight-ratio strength standards (bench/squat/deadlift, by
-         sex): commonly published community strength-standard tables
-         (e.g. the kind of chart on Strength Level / Denstar Fitness).
-       - Pace levels: a general recreational-runner pace heuristic
-         built from typical age-graded training-pace ranges — looser
-         and less authoritative than the lift standards, since there is
-         no single widely-agreed pace-tier chart the way there is for
-         barbell lifts. */
-
-  const INSIGHT_TIER_LABELS = ['Untrained', 'Beginner', 'Novice', 'Intermediate', 'Advanced', 'Elite'];
-
-  // Bodyweight-multiplier thresholds for [Beginner, Novice, Intermediate,
-  // Advanced, Elite] — a lift meeting a threshold is classified at that
-  // tier or higher, and below the "Beginner" threshold is "Untrained".
-  const LIFT_STANDARDS = {
-    bench: { label: 'Bench Press', male: [0.5, 0.75, 1.2, 1.6, 2.0], female: [0.3, 0.5, 0.85, 1.15, 1.5] },
-    squat: { label: 'Squat', male: [0.75, 1.0, 1.65, 2.2, 2.75], female: [0.5, 0.75, 1.25, 1.75, 2.25] },
-    deadlift: { label: 'Deadlift', male: [1.0, 1.25, 2.0, 2.5, 3.0], female: [0.65, 0.95, 1.5, 2.0, 2.5] },
-  };
+  // Thresholds, formulas and sources live in js/standards.js (FitStandards).
+  const S = window.FitStandards;
+  const INSIGHT_TIER_LABELS = S.TIER_LABELS;
+  const LIFT_STANDARDS = S.LIFT_STANDARDS;
   const LIFT_TYPE_LABELS = { bench: 'Bench Press', squat: 'Squat', deadlift: 'Deadlift' };
 
-  // Fixed "plates" goals — a barbell loaded to 2/3/4 plates a side (plus the
-  // 45lb bar) for bench/squat/deadlift respectively — offered in the setup
-  // wizard as the plain alternative to a bodyweight-standard goal below, and
-  // also what a brand-new install's defaultData() seeds (see below).
+  // Fixed "plates" goals: 2/3/4 plates a side plus a 45 lb bar. Used by the
+  // setup wizard and defaultData().
   const PLATE_GOALS = { bench: 225, squat: 315, deadlift: 405 };
-  // Which LIFT_STANDARDS threshold index a wizard tier name maps to —
-  // [Beginner, Novice, Intermediate, Advanced, Elite] — Beginner/Novice are
-  // omitted from the wizard itself since they're a trivially low bar for
-  // something being set as a goal, not just a classification.
+  // Wizard tier name -> LIFT_STANDARDS column. Beginner and Novice are left out
+  // as too low to be goals.
   const TIER_TO_INDEX = { intermediate: 2, advanced: 3, elite: 4 };
-  // Every LIFT_STANDARDS threshold, in table order — used to build the
-  // full Beginner..Elite preview shown alongside tier selection (in both
-  // the setup wizard and Manage -> Exercises), separately from
-  // TIER_TO_INDEX above, which is only the subset actually selectable as a
-  // goal.
+  // All tiers in LIFT_STANDARDS order, for the Beginner..Elite preview.
   const ALL_TIER_KEYS = ['beginner', 'novice', 'intermediate', 'advanced', 'elite'];
 
-  // The actual lb goal a bodyweight-standard tier works out to, rounded to
-  // the nearest 5lb (a sane barbell increment) — the single source of
-  // truth for that math, shared by the setup wizard (finishSetup) and the
-  // general Manage -> Exercises goal-mode toggle (openExerciseForm) so a
-  // lift's goal can be recomputed identically wherever bodyweight changes.
+  // Goal in lb for a bodyweight-standard tier, rounded to 5 lb. Shared by the
+  // setup wizard and the exercise form.
   function computeStandardGoal(liftType, tier, bodyweightLb, sex) {
     if (!bodyweightLb || !sex || !LIFT_STANDARDS[liftType] || TIER_TO_INDEX[tier] === undefined) return null;
     const mult = LIFT_STANDARDS[liftType][sex][TIER_TO_INDEX[tier]];
     return Math.round((bodyweightLb * mult) / 5) * 5;
   }
 
-  // Every tier's computed goal for a given lift/bodyweight/sex — the "what
-  // would each tier actually ask of me" preview requested alongside tier
-  // selection. Returns null if there isn't enough info yet (no bodyweight
-  // logged, or sex not set in Profile).
+  // Every tier's goal for this lift, bodyweight and sex. Null until bodyweight
+  // and sex are known.
   function standardGoalPreviewRows(liftType, bodyweightLb, sex) {
     if (!bodyweightLb || !sex || !LIFT_STANDARDS[liftType]) return null;
     const table = LIFT_STANDARDS[liftType][sex];
@@ -1490,41 +654,24 @@
     }));
   }
 
-  // Recomputes every weight exercise currently set to a bodyweight-standard
-  // goal (goalMode 'standard') from the CURRENT bodyweight + sex, so a
-  // formula-based goal actually tracks you as you log new bodyweight
-  // entries or fill in your sex — rather than freezing at whatever it
-  // computed to the moment it was set. A goal with goalMode 'fixed' is
-  // never touched here. Call this anywhere bodyweight or sex can change:
-  // logging/editing a body-weight measurement, and the Profile sex picker.
+  // Recompute each bodyweight-standard goal (goalMode 'standard') from the
+  // current bodyweight and sex; 'fixed' goals are untouched. Call wherever
+  // bodyweight or sex can change.
   function recomputeStandardGoals() {
     const bw = currentBodyWeightLb();
     const sex = state.profile.sex;
     state.exercises.forEach((ex) => {
       if (ex.kind !== 'weight' || ex.goalMode !== 'standard' || !ex.liftType || !ex.goalTier) return;
-      // computeStandardGoal() returns null once bodyweight or sex is
-      // missing (its own guard) — that null used to be silently ignored
-      // here (`if (g != null) ex.goal = g`), leaving ex.goal frozen at
-      // whatever it last computed to instead of reflecting that the goal
-      // can no longer actually be computed. Deleting your last bodyweight
-      // entry, or clearing your sex in Profile, left a stale absolute-lb
-      // goal behind that kept showing (and being progressed against) as
-      // if it were still current. Assigning the (possibly null) result
-      // directly keeps ex.goal honest either way.
+      // A null result (bodyweight or sex missing) is assigned on purpose so the goal
+      // does not keep a stale value.
       ex.goal = computeStandardGoal(ex.liftType, ex.goalTier, bw, sex);
     });
   }
 
-  // Pace tiers as seconds-per-mile ceilings for [Elite, Advanced, Good,
-  // Recreational] — faster (lower) than the ceiling qualifies for that
-  // tier; anything slower than the last one is "Building base". Order is
-  // fastest-first here (opposite of the lift table) since a lower pace is
-  // the "better" direction.
-  const PACE_TIER_LABELS = ['Elite', 'Advanced', 'Good', 'Recreational', 'Building base'];
-  const PACE_TIERS = {
-    male: [390, 480, 570, 660], // 6:30, 8:00, 9:30, 11:00 per mile
-    female: [450, 540, 630, 720], // 7:30, 9:00, 10:30, 12:00 per mile
-  };
+  // Pace tiers as sec/mile ceilings, fastest first (lower is better). Slower
+  // than the last is "Building base".
+  const PACE_TIER_LABELS = S.PACE_TIER_LABELS;
+  const PACE_TIERS = S.PACE_TIERS;
 
   function classifyAscending(value, thresholds, labels) {
     let idx = 0;
@@ -1536,25 +683,13 @@
     return labels[labels.length - 1];
   }
 
-  const BMI_CATEGORIES = [
-    { max: 18.5, label: 'Underweight' },
-    { max: 25, label: 'Healthy weight' },
-    { max: 30, label: 'Overweight' },
-    { max: Infinity, label: 'Obese' },
-  ];
-  function bmiCategory(bmi) {
-    return BMI_CATEGORIES.find((c) => bmi < c.max).label;
-  }
-  // The CSS class (see .category-dot in styles.css) matching a BMI category
-  // label — kept as an explicit map rather than derived from the label text
-  // so the two can drift in wording independently (e.g. the label says
-  // "Healthy weight" but the class is the more conventional "normal",
-  // matching how every published BMI chart names that zone).
+  const BMI_CATEGORIES = S.BMI_CATEGORIES;
+  const bmiCategory = S.bmiCategory;
+  // CSS class (see .category-dot in styles.css) per BMI category. A map, so
+  // label wording can differ from the class name.
   const BMI_CATEGORY_CLASS = { 'Underweight': 'is-underweight', 'Healthy weight': 'is-normal', 'Overweight': 'is-overweight', 'Obese': 'is-obese' };
 
-  // A short, humanized elapsed-time phrase ("12 days", "3 months", "1.4
-  // years") for the weight-trend delta below — plain days under two weeks,
-  // weeks under two months, months under ~13 months, years beyond that.
+  // Short elapsed-time text for the weight trend: days, weeks, months, then years.
   function humanizeDays(days) {
     if (days < 14) return `${days} day${days === 1 ? '' : 's'}`;
     if (days < 60) { const w = Math.round(days / 7); return `${w} week${w === 1 ? '' : 's'}`; }
@@ -1562,19 +697,15 @@
     return `${round(days / 365, 1)} years`;
   }
 
-  // The body-weight tracker is the one fixed anchor the other calculators
-  // (BMI, strength ratio) read from — always this seeded id if it exists.
-  // If the user deletes it, those calculators simply have nothing to
-  // compare against and say so rather than guessing at a substitute.
+  // The seeded Weight tracker is the body-weight source for BMI and strength
+  // ratio. If it is deleted, those calculators report missing data.
   const BODY_WEIGHT_TRACKER_ID = 'trk_weight';
   function currentBodyWeightLb() {
     const latest = latestMeasurement(BODY_WEIGHT_TRACKER_ID);
     return latest ? latest.value : null;
   }
 
-  // Current weight, how much it's moved over the settings-chosen window,
-  // and BMI (once height is set in Profile) — the "Body weight insights"
-  // toggle's payload for the Weight tracker's dashboard card.
+  // Current weight, change over the insights window, and BMI once height is set.
   function weightInsights() {
     const list = measurementsFor(BODY_WEIGHT_TRACKER_ID).slice().sort((a, b) => (a.date + a.id).localeCompare(b.date + b.id));
     if (!list.length) return null;
@@ -1600,64 +731,22 @@
     return { current: latest.value, trend, bmi };
   }
 
-  // Sleep doesn't have one persistent "current" reading worth trending the
-  // way weight does (see the date-scoping comment on trackerCardHtml()) — so
-  // rather than a single-value trend, this looks at the last N *logged*
-  // nights (skipping gaps rather than requiring N calendar days in a row,
-  // since missing a night or two shouldn't blank out the whole insight) and
-  // summarizes how sleep has actually been: average hours, a plain-language
-  // duration category against general sleep-duration guidance, and an
-  // average quality rating across whichever of those nights had one logged.
+  // Sleep is a per-night reading, so it is summarised over recent nights
+  // (sleepInsights()) rather than trended like weight.
   const SLEEP_TRACKER_ID = 'trk_sleep';
-  const SLEEP_NIGHTS_WINDOW = 7;
-  // General adult sleep-duration guidance (e.g. CDC/NSF: ~7-9 hours) used
-  // only to label an average as short/adequate/long — not a personalized or
-  // medical assessment, same disclaimer convention as BMI/strength/pace.
-  const SLEEP_HOURS_CATEGORIES = [
-    { max: 6, label: 'Short' },
-    { max: 9, label: 'Adequate' },
-    { max: Infinity, label: 'Long' },
-  ];
-  function sleepHoursCategory(hours) {
-    return SLEEP_HOURS_CATEGORIES.find((c) => hours < c.max).label;
-  }
+  const sleepHoursCategory = (hours) => S.sleepCategory(hours).label;
+
+  // `window`: last 7 calendar nights, labelled once 3+ are logged. `recent`:
+  // last 7 logged nights. The maths is in js/calc.js.
   function sleepInsights() {
-    const list = measurementsFor(SLEEP_TRACKER_ID).slice().sort((a, b) => (a.date + a.id).localeCompare(b.date + b.id));
-    if (!list.length) return null;
-    const recent = list.slice(-SLEEP_NIGHTS_WINDOW);
-    const hoursLogged = recent.filter((m) => m.value != null);
-    if (!hoursLogged.length) return null;
-    const avgHours = hoursLogged.reduce((sum, m) => sum + m.value, 0) / hoursLogged.length;
-    const qualityLogged = recent.filter((m) => m.quality != null);
-    const avgQuality = qualityLogged.length ? qualityLogged.reduce((sum, m) => sum + m.quality, 0) / qualityLogged.length : null;
-    return { avgHours, nights: hoursLogged.length, category: sleepHoursCategory(avgHours), avgQuality };
+    return window.FitCalc.sleepInsights(measurementsFor(SLEEP_TRACKER_ID), todayISO(), S);
   }
 
-  // How a weight-based exercise's best lift compares to current
-  // bodyweight, against the researched standards above — needs the lift
-  // mapped to a known type (see the exercise form's "Lift type" field) and
-  // both a bodyweight entry and a sex set in Profile.
-  // Epley formula: a set's estimated 1-rep max from any (weight, reps) pair.
-  // Standards tables like LIFT_STANDARDS below are published as 1RM ratios,
-  // so this — not the raw heaviest weight ever lifted — is the correct
-  // like-for-like comparison; a 185lb x 10 set is a much bigger lift than a
-  // 185lb single, and only the estimate reflects that.
-  function epleyOneRM(weight, reps) {
-    return reps <= 1 ? weight : weight * (1 + reps / 30);
-  }
-
-  // The single best estimated 1RM across every logged set for this
-  // exercise, plus which actual (weight, reps) set produced it.
+  // Best estimated 1RM for one exercise (Epley, sets of 10 reps or fewer; see
+  // js/calc.js). Used by strengthLevelInfo(), which also needs a lift type, a
+  // bodyweight entry and a sex in Profile.
   function bestEstimatedOneRM(ex) {
-    let best = null;
-    entriesFor(ex.id).forEach((entry) => {
-      (entry.sets || []).forEach((s) => {
-        if (!(s.reps > 0) || s.weight == null) return;
-        const oneRM = epleyOneRM(s.weight, s.reps);
-        if (!best || oneRM > best.oneRM) best = { oneRM, weight: s.weight, reps: s.reps };
-      });
-    });
-    return best;
+    return window.FitCalc.bestEstimatedOneRM(entriesFor(ex.id), S);
   }
 
   function strengthLevelInfo(ex) {
@@ -1667,18 +756,17 @@
     if (!state.profile.sex) return { needsSex: true };
     const heaviestLoad = best(ex);
     const oneRepMax = bestEstimatedOneRM(ex);
-    if (heaviestLoad == null || !oneRepMax) return null;
+    if (heaviestLoad == null) return null;
+    if (!oneRepMax) return { needsShorterSet: true, heaviestLoad };
     const ratio = oneRepMax.oneRM / bw;
     const table = LIFT_STANDARDS[ex.liftType][state.profile.sex];
     return {
       ratio, tier: classifyAscending(ratio, table, INSIGHT_TIER_LABELS), liftLabel: LIFT_STANDARDS[ex.liftType].label,
-      oneRepMax: oneRepMax.oneRM, heaviestLoad,
+      oneRepMax: oneRepMax.oneRM, oneRepMaxSet: oneRepMax, heaviestLoad,
     };
   }
 
-  // How a cardio exercise's best pace compares to the general recreational
-  // pace tiers above — needs at least one logged pace and a sex set in
-  // Profile (the tiers are only published split by sex).
+  // Best pace against the recreational tiers; needs a logged pace and a sex in Profile.
   function paceLevelInfo(ex) {
     if (ex.kind !== 'cardio') return null;
     const paceBest = best(ex, 'pace');
@@ -1689,10 +777,8 @@
   }
 
   /* ============================== Water ==============================
-     Water is a small, dedicated feature rather than another tracker kind —
-     tap-a-cup logging is a different interaction from typing a number, so
-     it earns its own simple data shape (see defaultWater()) instead of
-     being forced into the generic tracker model above. */
+     Water has its own data shape (see defaultWater()), not a tracker kind, since
+     tap-a-cup logging differs from typing a number. */
 
   function cupById(id) { return state.water.cups.find((c) => c.id === id); }
   function waterEntriesForDate(date) { return state.waterEntries.filter((e) => e.date === date); }
@@ -1706,72 +792,26 @@
   }
 
   /* ============================== Food / nutrition ==============================
-     A fourth, deliberately separate top-level data area (`state.food`) —
-     same rationale as Water above: this is additive, and specifically
-     built to never touch `exercises`/`entries`, `trackers`/`measurements`,
-     or `water`/`waterEntries`. One entry is one thing eaten OR drunk, with
-     Calories plus up to six other optional numbers (any of the six may be
-     left blank, since not everyone knows every value for everything they
-     consume) plus an optional note, on a date.
-
-     Calories is always tracked and always required to log an entry — see
-     handleLogFoodSubmit. Every other field in MACRO_KEYS is gated by
-     `state.settings.macroGoals[key].enabled` (managed from Manage ->
-     Nutrition -> Food): Off means the field is fully gone — not in the log
-     form, not in today's totals, not in history — not just "no goal set."
-     On does double duty, the same one toggle also revealing an optional
-     daily-goal amount for that field, mirroring how a water/tracker goal is
-     opt-in: tracked-with-no-goal just totals for the day with no progress
-     comparison; tracked-with-a-goal shows "1850 / 2600 kcal" style progress
-     the same way Water shows progress toward its daily goal. Turning a
-     field back on doesn't lose anything logged while it was off — old
-     values for it stay in storage untouched, they just don't surface in the
-     UI until it's tracked again.
-
-     Sodium, sugar, and caffeine were added the same way as the original
-     four macros — new keys in this same list, nothing structurally new —
-     rather than as a separate "Drinks" feature. A drink is just a food
-     entry with different numbers filled in (a latte has both calories AND
-     caffeine; a black coffee has caffeine but no calories), so splitting
-     "food" and "drinks" into two features would force every drink with
-     calories into an awkward choice between the two, for no real benefit:
-     every mainstream nutrition tracker treats caffeine as one more optional
-     number on the same entry, not a separate log. */
+     `state.food` is separate from exercises, trackers and water. An entry is one thing eaten or
+     drunk with an optional number per MACRO_KEYS field (at least one required, see anyMacro()).
+     Calories is always tracked; other fields only while `settings.macroGoals[key].enabled` is on,
+     and saved values are kept. */
 
   const MACRO_KEYS = ['calories', 'protein', 'carbs', 'fat', 'sugar', 'sodium', 'caffeine'];
   const MACRO_LABELS = { calories: 'Calories', protein: 'Protein', carbs: 'Carbs', fat: 'Fat', sugar: 'Sugar', sodium: 'Sodium', caffeine: 'Caffeine' };
-  // The unit each field is logged/displayed in — '' for calories (a bare
-  // count, no suffix), grams for the macros and sugar, milligrams for
-  // sodium and caffeine. Single source of truth for every place that needs
-  // to print or label a value (fmtMacroValue, the Log form, Manage's goal
-  // inputs).
+  // Display unit per field: none for calories, g for macros and sugar, mg for
+  // sodium and caffeine.
   const MACRO_UNITS = { calories: '', protein: 'g', carbs: 'g', fat: 'g', sugar: 'g', sodium: 'mg', caffeine: 'mg' };
   // Realistic example values shown as input placeholders, roughly what a
   // single typical serving/meal looks like for that field.
   const MACRO_PLACEHOLDERS = { calories: '520', protein: '30', carbs: '30', fat: '15', sugar: '10', sodium: '400', caffeine: '95' };
 
-  // FDA Nutrition Facts Daily Values for a 2,000-calorie diet — the same
-  // reference figures printed on every packaged-food label in the US, used
-  // by the optional "Daily value guidance" card (Settings ->
-  // showMacroGuidance). Caffeine has no formal %DV; 400mg is the FDA's own
-  // general consumer guidance for "how much is usually not associated with
-  // dangerous effects," shown the same way but labeled as general guidance
-  // rather than a DV. The published Sugar DV (50g) is specifically for
-  // ADDED sugar; Fit Log logs one total-sugar number, so that comparison is
-  // an upper bound, not exact — flagged wherever it's shown. Calories has
-  // no fixed DV (the app's own nutrition calculator is the personalized
-  // equivalent) and Carbs/Protein/Fat are the plain macronutrient DVs, not
-  // per-meal targets.
-  const MACRO_DV = { protein: 50, carbs: 275, fat: 78, sugar: 50, sodium: 2300, caffeine: 400 };
-  // Macros where going over 100% DV is a "watch this" signal worth
-  // flagging red — the public-health framing for these three is "less is
-  // better," unlike Protein/Carbs/Fat, where a published DV is just a
-  // reference point, not a ceiling. Only these three ever get the red
-  // over-DV treatment on the dashboard card or in the guidance table.
-  const MACRO_DV_OVER_FLAGS = new Set(['sugar', 'sodium', 'caffeine']);
-  // Rounded %DV for one macro's value, or null if there's no DV for that
-  // key or nothing logged yet — shared by the dashboard card's red
-  // highlighting and the food detail modal's guidance table.
+  // FDA Daily Values live in js/standards.js. Total sugar has no Daily Value
+  // (the 50 g figure is for ADDED sugar), so it gets no %DV here.
+  const MACRO_DV = S.DAILY_VALUES;
+  // Sodium and caffeine over 100% get the red "watch this" treatment.
+  const MACRO_DV_OVER_FLAGS = new Set(S.DV_OVER_FLAGS);
+  // Rounded %DV, or null with no DV for the key or no value.
   function macroDvPct(key, value) {
     const dv = MACRO_DV[key];
     if (dv == null || value == null) return null;
@@ -1784,13 +824,10 @@
 
   function macroGoalInfo(key) { return state.settings.macroGoals[key]; }
 
-  // Whether a macro is tracked at all right now — shown in the log form,
-  // totaled on the dashboard, offered in Manage. Calories is exempt from
-  // the toggle entirely (see the section comment above) and always tracked.
+  // Whether a macro is tracked now (log form, totals, Manage). Calories always is.
   function macroTracked(key) { return key === 'calories' || macroGoalInfo(key).enabled; }
 
-  // Every currently-tracked macro, in MACRO_KEYS order — what the log form
-  // and today's totals actually render.
+  // Every tracked macro in MACRO_KEYS order: what the log form and totals render.
   function trackedMacroKeys() { return MACRO_KEYS.filter(macroTracked); }
 
   // Fields that currently have a daily goal turned on, in MACRO_KEYS order.
@@ -1798,41 +835,16 @@
     return MACRO_KEYS.filter((k) => macroGoalInfo(k).enabled && macroGoalInfo(k).goal != null);
   }
 
-  // ---- Nutrition calculator (Manage -> Nutrition -> Food) ----
-  // Estimates a daily calorie and protein target from Profile facts (height,
-  // age, sex) plus a logged body weight, an activity level, and a goal —
-  // the Food feature's counterpart to a lift's bodyweight-standard goal
-  // mode. Lives here rather than under Settings -> Insights because, like
-  // that goal mode, it's an ACTIVE configuration choice that writes into a
-  // goal field (macroGoals.calories/.protein) once applied, not a passive
-  // read-only display.
-  const ACTIVITY_LEVELS = {
-    sedentary:  { label: 'Sedentary',        hint: 'little or no exercise',        multiplier: 1.2 },
-    light:      { label: 'Light activity',   hint: 'exercise 1-3 days/week',       multiplier: 1.375 },
-    moderate:   { label: 'Moderate activity', hint: 'exercise 3-5 days/week',      multiplier: 1.55 },
-    active:     { label: 'Active',           hint: 'exercise 6-7 days/week',       multiplier: 1.725 },
-    veryActive: { label: 'Very active',      hint: 'physical job or 2x/day training', multiplier: 1.9 },
-  };
-  // Calorie adjustment from estimated maintenance (TDEE), and a protein
-  // target per pound of bodyweight, both by goal — a moderate, commonly
-  // published range (roughly a 1 lb/week pace for a cut or lean gain), with
-  // protein set higher while cutting specifically to help protect muscle
-  // mass in a deficit — a moderate, commonly published range.
-  const NUTRITION_GOAL_ADJUST = {
-    lose:     { calorieDelta: -500, proteinPerLb: 1.0 },
-    maintain: { calorieDelta: 0,    proteinPerLb: 0.8 },
-    gain:     { calorieDelta: 300,  proteinPerLb: 0.9 },
-  };
-  // Matches the button labels in #nutritionGoalSegmented (index.html) —
-  // kept as its own map (rather than derived) so the Food detail modal can
-  // name the active goal in a sentence without reaching into the DOM.
+  // ---- Nutrition calculator (Manage -> Food) ----
+  // Estimates daily calories and protein from Profile, body weight, activity
+  // level and goal. Applying it writes into macroGoals, so it sits with Food
+  // rather than Settings -> Insights.
+  const ACTIVITY_LEVELS = S.ACTIVITY_LEVELS;
+  // Labels for #nutritionGoalSegmented (index.html), so the Food detail modal can
+  // name the goal in a sentence.
   const NUTRITION_GOAL_LABELS = { lose: 'losing weight', maintain: 'maintaining', gain: 'gaining weight' };
-  // Mifflin-St Jeor equation for basal metabolic rate, times an
-  // activity-level multiplier for estimated maintenance calories (TDEE),
-  // then the goal-based adjustment above. Needs height, age, and sex
-  // (Profile) plus a logged body weight — same prerequisites BMI and
-  // Strength level already need — so this returns which fact(s) are still
-  // missing rather than guessing at a substitute for any of them.
+  // Mifflin-St Jeor BMR x activity level, then the goal adjustment (maths in
+  // js/standards.js). Returns `{ missing }` naming absent facts instead of guessing.
   function computeNutritionTargets(activityLevel, goal) {
     const bw = currentBodyWeightLb();
     const { heightCm, age, sex } = state.profile;
@@ -1847,23 +859,10 @@
   // The same maths from plain numbers, so the setup wizard can preview a
   // target before anything has been saved.
   function nutritionTargetsFor(bw, heightCm, age, sex, activityLevel, goal) {
-    const kg = bw * LB_PER_KG;
-    const bmr = sex === 'male'
-      ? 10 * kg + 6.25 * heightCm - 5 * age + 5
-      : 10 * kg + 6.25 * heightCm - 5 * age - 161;
-    const tdee = bmr * ACTIVITY_LEVELS[activityLevel].multiplier;
-    const adjust = NUTRITION_GOAL_ADJUST[goal];
-    // Calories are floored well below any deficit that would be unsafe to
-    // sustain, regardless of how the math above works out for someone
-    // small/low-activity — 1200 is a commonly published general floor.
-    const calories = Math.max(1200, Math.round(tdee + adjust.calorieDelta));
-    const protein = Math.round(bw * adjust.proteinPerLb);
-    return { calories, protein, tdee: Math.round(tdee) };
+    return S.nutritionTargets(bw, heightCm, age, sex, activityLevel, goal);
   }
 
-  // How the calorie target is set — one choice instead of two separate
-  // switches. It is only a clearer face for the two settings that already
-  // exist, so no data changes: Calculator = nutritionCalc.enabled,
+  // One choice for how calories are set: Calculator = nutritionCalc.enabled,
   // Manual = a calories goal with the calculator off, No Target = neither.
   function calorieMode() {
     if (state.settings.nutritionCalc.enabled) return 'calc';
@@ -1877,14 +876,9 @@
     if (mode === 'none') macroGoalInfo('calories').enabled = false;
   }
 
-  // The explicit "Apply to daily goals" action (see the Nutrition
-  // calculator's card in renderFoodManagePanel()) — writes the computed
-  // numbers into the same macroGoals.calories/.protein fields a manual goal
-  // uses, turning both on in the process. Deliberately only ever called
-  // from that one button tap, never automatically from a settings change —
-  // see the comment on saveProfileBtn's handler for why an auto-recompute
-  // binding would be the wrong call here (it would silently clobber a value
-  // the user set some other way since the calculator was last applied).
+  // The "Apply to daily goals" action: writes the computed calories and protein
+  // into macroGoals and turns them on. Call it only from that button; an
+  // automatic recompute would overwrite goals set another way.
   function applyNutritionCalcTargets(activityLevel, goal) {
     const result = computeNutritionTargets(activityLevel, goal);
     if (result.missing) return false;
@@ -1897,9 +891,8 @@
 
   function foodEntriesForDate(date) { return state.food.entries.filter((e) => e.date === date); }
 
-  // One day's totals, per field — null (not 0) for one nothing was logged
-  // for that day, so the dashboard/history can show "—" instead of a
-  // misleading zero.
+  // Per-field totals for a day; null (not 0) where nothing was logged, so the UI
+  // shows a dash.
   function foodTotalsForDate(date) {
     const dayEntries = foodEntriesForDate(date);
     const totals = {};
@@ -1915,11 +908,8 @@
     return `${Math.round(v)}${MACRO_UNITS[key] || ''}`;
   }
 
-  // A short "520 cal, 40g protein" style summary for one entry or one
-  // day's totals — used by both the entry row and the history date header.
-  // Only currently-tracked macros are included, same as the log form and
-  // today's totals — a macro turned off is fully gone from history too,
-  // not just new logging (see the "Food / nutrition" section).
+  // Short summary such as "520 cal, 40g protein" for an entry or day total.
+  // Tracked macros only.
   function macroSummaryText(values) {
     const parts = trackedMacroKeys()
       .filter((k) => values[k] != null)
@@ -1942,33 +932,15 @@
     syncThemeColorMeta();
   }
 
-  // Keep these two in sync with --page's light/dark values in
-  // css/styles.css, and with the two <meta name="theme-color" media="...">
-  // tags in index.html below.
+  // Keep in sync with --page in css/styles.css and the two theme-color meta
+  // tags in index.html.
   const PAGE_COLOR_LIGHT = '#f9f9f7';
   const PAGE_COLOR_DARK = '#0d0d0d';
 
-  // The OS status bar / nav bar tint comes from <meta name="theme-color">,
-  // read by the browser/OS chrome rather than CSS, so it can't reference a
-  // CSS custom property directly — and, on Android especially, mutating a
-  // single such tag's `content` in place is not reliably repainted live by
-  // the system-UI compositor (this is what caused "switching light/dark on
-  // my phone doesn't update the top and bottom [bars]" — a device that
-  // happened to launch already in the OS's current theme never needed a
-  // live repaint, so it looked fine there). index.html instead ships TWO
-  // theme-color tags, each gated by its own `media="(prefers-color-scheme:
-  // ...)"`, so the OS/browser can pick the right one itself from a live
-  // media-query match with no JS involved — the standard, more reliable
-  // fix for this exact class of bug.
-  //
-  // Those two tags are only left alone here while Settings -> Appearance is
-  // "System" — the whole point of the dual-tag approach is to let the OS
-  // drive it without JS in that case. When Appearance explicitly overrides
-  // the system default (Light or Dark), only ONE tag can be "correct" and
-  // we can't know for certain which one this device's browser is actually
-  // honoring, so both are forced to the same resolved color; switching back
-  // to "System" restores each tag's own natural color so the declarative
-  // behavior resumes.
+  // theme-color is read by the OS, not CSS. index.html ships two tags gated by
+  // prefers-color-scheme so the OS picks one itself (editing one tag in place is not
+  // reliably repainted on Android). Under "System" each tag keeps its own color; for an
+  // explicit Light or Dark both are forced to the resolved color.
   function syncThemeColorMeta() {
     const lightMeta = document.querySelector('meta[name="theme-color"][media*="light"]');
     const darkMeta = document.querySelector('meta[name="theme-color"][media*="dark"]');
@@ -1985,12 +957,19 @@
   /* ============================== Toast ============================== */
 
   let toastTimer = null;
-  function toast(msg) {
+  // `action` ({label, run}) adds one button, e.g. Undo, and keeps the toast up longer.
+  function toast(msg, action) {
     const el = document.getElementById('toast');
     el.textContent = msg;
+    if (action) {
+      const btn = document.createElement('button');
+      btn.type = 'button'; btn.className = 'toast-action'; btn.textContent = action.label;
+      btn.addEventListener('click', () => { el.hidden = true; clearTimeout(toastTimer); action.run(); });
+      el.appendChild(btn);
+    }
     el.hidden = false;
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => { el.hidden = true; }, 2200);
+    toastTimer = setTimeout(() => { el.hidden = true; }, action ? 7000 : 2200);
   }
 
   /* ============================== Modal ============================== */
@@ -2004,35 +983,10 @@
   }
 
   /* ===== Back-button / swipe-back step navigation =========================
-   * Fit Log is a plain single-page app with no router and — until now — no
-   * History API entries of its own. With nothing pushed, Android's back
-   * gesture/button has no "previous page" *within* the app to step back
-   * through, so it falls straight through to the browser/PWA chrome and
-   * exits; the broken/black frame some phones show right before that is the
-   * transition animation reaching for a "previous page" that was never
-   * there. Pushing one history entry per level below Dashboard turns Back
-   * into a step-wise "go up one level" action instead, the way a native
-   * app's back stack behaves: close the topmost modal, then return to
-   * Dashboard from any other tab or Settings, then ask for one more press
-   * before actually letting the app (and this history entry) go.
-   *
-   * navPushModal()/navPopModal() and the tab-level push/pop in switchTab()
-   * below are the only places that touch history.pushState/back — every
-   * other call site (the ~30 openModal()/closeModal() call sites, tab-bar
-   * clicks, the Settings gear icon) is untouched and just keeps calling
-   * those functions exactly as before.
-   *
-   * Two re-entrancy guards keep the browser's real history and the app's
-   * own DOM state from fighting each other:
-   *   - suppressNextPopHandling: set right before *we* call history.back()
-   *     ourselves (from navPopModal() or the Dashboard tab tap), so the
-   *     popstate that call triggers doesn't get treated as a fresh user
-   *     back-press.
-   *   - handlingPopState: set for the duration of the popstate handler, so
-   *     the closeModal()/switchTab()/closeSettings() calls it makes to
-   *     unwind one level don't ALSO try to push/pop history — the browser
-   *     already did that natively.
-   */
+   * One history entry per level below Dashboard makes Back close the modal, then return to
+   * Dashboard, then ask for a second press to exit. Only navPushModal()/navPopModal() and
+   * switchTab() touch history. suppressNextPopHandling skips the popstate from our own
+   * history.back(); handlingPopState stops its handlers from pushing or popping again. */
   const NAV_MODAL = 'modal';
   const NAV_TAB = 'tab';
   let suppressNextPopHandling = false;
@@ -2052,9 +1006,8 @@
     if (handlingPopState) return;
     if ((history.state || {}).nav === NAV_MODAL) navPop();
   }
-  // Only the bottom tabs + Settings participate — the first-run setup
-  // wizard and the corrupt-data recovery screen are blocking, pre-app
-  // states with no "Dashboard" to fall back to, so they're left alone.
+  // Only the bottom tabs and Settings take part. The setup wizard and recovery
+  // screen have no Dashboard to fall back to.
   const NAV_TRACKED_TABS = new Set(['dashboard', 'progress', 'log', 'history', 'manage', 'settings']);
   function navOnSwitchTab(tab) {
     if (handlingPopState || !NAV_TRACKED_TABS.has(tab)) return;
@@ -2073,9 +1026,8 @@
       if (!document.getElementById('view-settings').hidden) { closeSettings(); return; }
       const activeTab = document.querySelector('.tab[aria-current="page"]');
       if (activeTab && activeTab.dataset.tab !== 'dashboard') { switchTab('dashboard'); return; }
-      // Already at Dashboard with nothing open — this back-press would
-      // otherwise exit the app. Warn once and re-arm the trap; a second
-      // press within the window is let through instead of re-trapped.
+      // At Dashboard with nothing open: warn once and re-arm the guard. A second press
+      // within 2 seconds exits.
       if (exitWarningArmed) return;
       exitWarningArmed = true;
       toast('Press back again to exit');
@@ -2087,9 +1039,7 @@
     }
   });
 
-  // Escape closes; Tab/Shift+Tab cycle within the sheet instead of escaping
-  // to the (hidden-behind-the-backdrop, but still technically tabbable)
-  // page underneath.
+  // Escape closes; Tab and Shift+Tab stay inside the sheet.
   function handleModalKeydown(ev) {
     if (ev.key === 'Escape') { ev.preventDefault(); closeModal(); return; }
     if (ev.key !== 'Tab') return;
@@ -2101,17 +1051,10 @@
     else if (!ev.shiftKey && document.activeElement === last) { ev.preventDefault(); first.focus(); }
   }
 
-  // `tall: true` is for the handful of modals that are really full detail
-  // screens (exercise/tracker/food detail) rather than a quick action or
-  // form — see the `.is-detail-sheet` comment in styles.css for why a
-  // fixed height instead of the usual shrink-to-content matters there.
+  // `tall` is for full detail screens (exercise, tracker, food); see
+  // `.is-detail-sheet` in styles.css.
   function openModal(html, { tall = false, split = false } = {}) {
-    // A handful of call sites open a new modal while one is already showing
-    // (e.g. a food entry's "Save as a saved food" button opens the saved-
-    // food form right over it) — there's no real stacking here, just this
-    // one sheet's content getting replaced, so that case is still only ONE
-    // level as far as Back is concerned; only a genuinely fresh open (see
-    // navPushModal() below) counts as entering a new level.
+    // Opening a modal over an open one replaces its content, so Back still sees one level.
     const wasOpen = !modalRoot().hidden;
     const sheet = modalSheet();
     sheet.style.transform = '';
@@ -2119,9 +1062,7 @@
     sheet.classList.toggle('is-detail-sheet', tall);
     sheet.classList.toggle('is-split-sheet', split);
     sheet.innerHTML = `<div class="modal-handle"></div>${html}`;
-    // A dialog needs an accessible name; every modal here starts with an
-    // <h2> title, so point at it rather than requiring each call site to
-    // wire this up itself.
+    // Name the dialog by its <h2> title.
     const heading = sheet.querySelector('h2');
     if (heading) { heading.id = 'modalTitle'; sheet.setAttribute('aria-labelledby', 'modalTitle'); }
     else sheet.removeAttribute('aria-labelledby');
@@ -2129,18 +1070,8 @@
     modalRoot().hidden = false;
     wireModalSwipeToClose(sheet);
     document.addEventListener('keydown', handleModalKeydown);
-    // Land focus on the first real control past the ✕ (so a form's first
-    // field is ready to type into), falling back to the ✕ itself, or the
-    // sheet, if that's all there is. This runs before any call-site wiring
-    // (e.g. wireOpenable on a suggestion card) has added tabindex to
-    // anything, so on a read-heavy detail modal (exercise/tracker detail)
-    // "first control" in practice often isn't visually first at all — it's
-    // whatever plain <button> happens to appear earliest in the raw HTML,
-    // which on those modals is the chart's Last-10/All-time toggle, well
-    // below the title/progress/insight cards a person actually opened the
-    // modal to see. Focusing an off-screen element auto-scrolls it into
-    // view, so without the explicit reset below, the modal would silently
-    // open scrolled past its own top content on every single open.
+    // Focus the first control after the close button, else the button, else the
+    // sheet. Focusing an off-screen control scrolls the sheet, hence the reset below.
     const focusables = focusableEls(sheet);
     const target = focusables.find((el) => el.dataset.action !== 'close-modal') || focusables[0];
     if (target) target.focus();
@@ -2157,12 +1088,8 @@
     navPopModal();
   }
 
-  // Makes the little bar at the top of every modal sheet (`.modal-handle`)
-  // an actual swipe-down-to-close gesture, dragging the sheet with the
-  // pointer and either snapping it back or dismissing it, rather than
-  // leaving it as a purely decorative hint that does nothing when dragged.
-  // Pointer Events cover touch and mouse input identically, so this one
-  // listener set works on both a phone and a desktop browser.
+  // Make `.modal-handle` a swipe-down-to-close gesture (pointer events, so touch
+  // and mouse both work).
   function wireModalSwipeToClose(sheet) {
     const handle = sheet.querySelector('.modal-handle');
     if (!handle) return;
@@ -2212,12 +1139,9 @@
   }
 
   /* ============================== Chip picker ==============================
-     A small discrete-choice input (sleep quality's 1-5 rating, currently) —
-     a row of tap targets reads faster and is easier to hit on a phone than
-     a number field for a value that only ever takes a few known options.
-     The container's data-value is the single source of truth (empty string
-     = nothing picked, since a rating is optional); tapping the already-
-     selected chip clears it rather than requiring a separate "clear" UI. */
+     A row of tap targets for a few discrete choices (sleep quality 1-5). The
+     container's data-value is the source of truth ('' = none); tapping the
+     selected chip clears it. */
   function qualityChipsHtml(id, selected) {
     const opts = [1, 2, 3, 4, 5];
     return `<div class="chip-picker" id="${id}" data-value="${selected != null ? selected : ''}" role="radiogroup" aria-label="Sleep quality">
@@ -2238,9 +1162,7 @@
       });
     });
   }
-  // Makes a clickable card/row div behave like a real control for keyboard
-  // and assistive-tech users — a div click handler alone gives it neither
-  // focusability nor Enter/Space activation.
+  // Make a clickable div operable by keyboard and screen reader (focusable, Enter/Space).
   function wireOpenable(el, onOpen) {
     el.setAttribute('role', 'button');
     el.setAttribute('tabindex', '0');
@@ -2261,20 +1183,13 @@
 
   /* ============================== Dynamic set fields (shared by Log tab + edit modal) ============================== */
 
-  // Column labels (Weight/Reps/RPE, or Reps/Added wt/RPE) only ever render
-  // visibly above the FIRST set row in the list — repeating "Weight (lb)" /
-  // "Reps" / "RPE" above every single set in a multi-set entry added nothing
-  // (the columns never change row to row) and pushed the actual inputs
-  // further down the longer the list got. Every row still carries the same
-  // markup regardless of its position (see the CSS rule for
-  // `.set-row:not(:first-child) .field-label`, which visually hides it via
-  // the standard clip-based sr-only technique rather than a JS-computed
-  // per-row class) so a screen reader still hears "Weight, Reps, RPE" for
-  // each row, and removing/reordering rows never leaves a stale hidden
-  // label behind the way baking the decision into a fixed index at creation
-  // time would have.
+  // Column labels show only above the first set row. Later rows keep them in the
+  // markup, hidden by CSS (`.set-row:not(:first-child) .field-label`), so screen
+  // readers still announce them.
+  const setRowKind = (ex) => (isTimed(ex) ? 'timed' : ex.kind);
   function setRowHtml(kind, idx, set) {
     set = set || {};
+    const timed = kind === 'timed';
     if (kind === 'weight') {
       const w = set.weight != null ? round(Units.lbToDisplay(set.weight), 2) : '';
       return `
@@ -2289,11 +1204,11 @@
           <button type="button" class="set-row-remove" data-action="remove-set" aria-label="Remove set">${CLOSE_ICON_SVG}</button>
         </div>`;
     }
-    // reps kind (bodyweight)
+    // reps kind (bodyweight), or a timed hold
     const aw = set.addedWeight ? round(Units.lbToDisplay(set.addedWeight), 2) : '';
     return `
       <div class="set-row set-row-3" data-set-idx="${idx}">
-        <label class="field"><span class="field-label">Reps</span>
+        <label class="field"><span class="field-label">${timed ? 'Time (sec)' : 'Reps'}</span>
           <input type="number" step="1" min="1" inputmode="numeric" class="set-reps" value="${set.reps ?? ''}" placeholder="0" /></label>
         <label class="field"><span class="field-label">Added wt (${Units.weightUnitLabel()})</span>
           <input type="number" step="any" inputmode="decimal" class="set-addedweight" value="${aw}" placeholder="opt." /></label>
@@ -2340,10 +1255,10 @@
       return;
     }
     const sets = (existingEntry && existingEntry.sets && existingEntry.sets.length) ? existingEntry.sets : [{}];
-    // "Last time" — the previous session on this exact exercise, with a
-    // one-tap way to start from the same sets.
+    // "Last time": the previous session on this exact exercise, with a one-tap way
+    // to start from the same sets.
     const lastEntry = existingEntry ? null : entriesFor(exercise.id).filter((en) => en.sets && en.sets.length).sort((a, b) => (b.date + b.id).localeCompare(a.date + a.id))[0];
-    const setText = (st) => exercise.kind === 'weight' ? `${round(Units.lbToDisplay(st.weight), 2)} × ${st.reps}` : `${st.reps}${st.addedWeight ? ` +${round(Units.lbToDisplay(st.addedWeight), 2)}` : ''}`;
+    const setText = (st) => exercise.kind === 'weight' ? `${round(Units.lbToDisplay(st.weight), 2)} × ${st.reps}` : `${isTimed(exercise) ? fmtHold(st.reps) : st.reps}${st.addedWeight ? ` +${round(Units.lbToDisplay(st.addedWeight), 2)}` : ''}`;
     const lastHtml = lastEntry ? `
       <div class="last-time">
         <div class="last-time-head"><span class="lbl">Last time · ${escapeHtml(fmtDateShort(lastEntry.date))}</span><button type="button" class="link-btn" data-action="copy-last">Copy sets</button></div>
@@ -2353,7 +1268,7 @@
       ${lastHtml}
       <div class="sets-wrap" data-kind="${exercise.kind}">
         <div class="sets-label"><span class="field-label">Sets</span><button type="button" class="btn-ghost" data-action="add-set">+ Add set</button></div>
-        <div class="sets-container">${sets.map((s, i) => setRowHtml(exercise.kind, i, s)).join('')}</div>
+        <div class="sets-container">${sets.map((s, i) => setRowHtml(setRowKind(exercise), i, s)).join('')}</div>
         ${exercise.kind === 'weight' ? '<div class="best-note" aria-live="polite"></div>' : ''}
       </div>`;
     if (exercise.kind === 'weight') {
@@ -2364,14 +1279,14 @@
     }
     const copyBtn = container.querySelector('[data-action="copy-last"]');
     if (copyBtn) copyBtn.addEventListener('click', () => {
-      container.querySelector('.sets-container').innerHTML = lastEntry.sets.map((st, i) => setRowHtml(exercise.kind, i, { weight: st.weight, reps: st.reps, addedWeight: st.addedWeight })).join('');
+      container.querySelector('.sets-container').innerHTML = lastEntry.sets.map((st, i) => setRowHtml(setRowKind(exercise), i, { weight: st.weight, reps: st.reps, addedWeight: st.addedWeight })).join('');
       wireSetRemoveButtons(container); wireSetPrimaryButtons(container);
       if (exercise.kind === 'weight') updateBestNote(container, exercise, existingEntry);
     });
     container.querySelector('[data-action="add-set"]').addEventListener('click', () => {
       const wrap = container.querySelector('.sets-container');
       const idx = wrap.children.length;
-      wrap.insertAdjacentHTML('beforeend', setRowHtml(exercise.kind, idx, {}));
+      wrap.insertAdjacentHTML('beforeend', setRowHtml(setRowKind(exercise), idx, {}));
       wireSetRemoveButtons(container);
       wireSetPrimaryButtons(container);
     });
@@ -2379,10 +1294,9 @@
     wireSetPrimaryButtons(container);
   }
 
-  // "Best" means the heaviest weight logged on this exact exercise (so each
-  // equipment variant has its own). A set that beats it is a New best; one
-  // that matches it is Ties best, shown once per weight. Before the first
-  // logged set there is nothing to beat, so nothing is tagged.
+  // "Best" is the heaviest weight logged on this exact exercise (each equipment
+  // variant has its own). A set that beats it is tagged New best, one that matches
+  // it Ties best (once per weight). Nothing is tagged before the first logged set.
   function priorBestWeight(exercise, excludeEntryId) {
     let best = null;
     entriesFor(exercise.id).forEach((en) => {
@@ -2418,8 +1332,8 @@
     });
   }
 
-  // Only one set per entry can be "the" working set — starring one clears
-  // the others in the same form, since topSetOf() needs a single answer.
+  // Only one set per entry can be the working set; starring one clears the others,
+  // since topSetOf() needs a single answer.
   function wireSetPrimaryButtons(container) {
     container.querySelectorAll('[data-action="toggle-primary"]').forEach((btn) => {
       btn.onclick = () => {
@@ -2435,9 +1349,7 @@
     });
   }
 
-  // RPE (rate of perceived exertion) is conventionally a 1-10 scale —
-  // shared here so the cardio and weight/bodyweight branches below (and
-  // their error text) can't drift apart.
+  // RPE is a 1-10 scale; shared so the cardio and weight branches below agree.
   const RPE_MIN = 1;
   const RPE_MAX = 10;
   function invalidRpe(rpe) { return !Number.isNaN(rpe) && (rpe < RPE_MIN || rpe > RPE_MAX); }
@@ -2473,15 +1385,12 @@
         const rpe = parseFloat(row.querySelector('.set-rpe').value);
         const hasW = !Number.isNaN(w);
         const hasR = !Number.isNaN(r);
-        if (!hasW && !hasR) continue; // fully blank row — not a set, just ignore it
-        // A set is weight AND reps together or it isn't a set at all — filling
-        // in the missing side with 0 would silently write a fake 0lb or 0-rep
-        // set into history, so a half-filled row is rejected instead.
+        if (!hasW && !hasR) continue; // fully blank row: not a set, ignore it
+        // A set needs weight and reps together. Filling the missing side with 0 would
+        // write a fake set, so a half-filled row is rejected.
         if (!hasW || !hasR) return { error: 'Each set needs both a weight and reps — fill in the missing value, or clear the row.' };
-        // Beyond "both present," each also has to be a sane value — a zero
-        // or negative weight, a fractional or non-positive rep count, or an
-        // RPE outside 1-10 isn't a half-filled row anymore, so it gets its
-        // own specific error rather than silently being written as-is.
+        // Also reject values that make no sense: zero or negative weight, a fractional
+        // or non-positive rep count, or an RPE outside 1-10.
         if (w <= 0) return { error: 'Weight must be greater than zero.' };
         if (r <= 0 || !Number.isInteger(r)) return { error: 'Reps must be a whole number greater than zero.' };
         if (invalidRpe(rpe)) return { error: `RPE must be between ${RPE_MIN} and ${RPE_MAX}.` };
@@ -2502,24 +1411,19 @@
 
   /* ============================== Rendering: Dashboard ============================== */
 
-  function computeStreak() {
-    const days = new Set(state.entries.map((e) => e.date));
-    let streak = 0;
-    let cursor = new Date(todayISO() + 'T00:00:00');
-    // allow today to be "not yet logged" without breaking the streak
-    if (!days.has(todayISO())) cursor.setDate(cursor.getDate() - 1);
-    while (days.has(localDateISO(cursor))) {
-      streak++;
-      cursor.setDate(cursor.getDate() - 1);
-    }
-    return streak;
-  }
+  // Every date with something logged in a section you track (see
+  // FitStandards.STREAK_RULE): workouts/habits, food, water, body entries.
+  const trackedAreas = () => ({
+    workout: domainTracked('workout'), measurements: domainTracked('measurements'),
+    water: domainTracked('water'), food: domainTracked('food'),
+  });
+  function activityDays() { return window.FitCalc.activityDays(state, trackedAreas()); }
+  function computeStreak() { return window.FitCalc.computeStreak(activityDays(), todayISO()); }
 
-  // The streak card at the top of Home: the current streak (lit while it's
-  // alive, gray at zero) over a dot for each of the last 7 days. The whole
-  // card is a button that opens History.
+  // The streak card at the top of Home: the current streak over a dot for each of
+  // the last 7 days. The whole card is a button that opens History.
   function renderSummary() {
-    const days = new Set(state.entries.map((e) => e.date));
+    const days = activityDays();
     const today = new Date(todayISO() + 'T00:00:00');
     const week = [];
     for (let i = 6; i >= 0; i--) {
@@ -2541,10 +1445,8 @@
     document.getElementById('todayDate').textContent = today.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
   }
 
-  // One goal's worth of current-value/goal-label/meter, shared by the
-  // dashboard card and the exercise detail modal. A cardio exercise with
-  // two configured goals renders this once per metric (see goalCardHtml and
-  // renderExerciseDetail below); every other case renders it exactly once.
+  // Current value, goal and meter for one goal; shared by the dashboard card and
+  // the exercise detail modal. Cardio with two goals renders it once per metric.
   function progressBlockHtml(ex, metric, opts = {}) {
     const { pct, achieved, best: b } = progressPct(ex, metric);
     const goal = ex.kind === 'cardio' ? cardioGoalFor(ex, metric) : ex.goal;
@@ -2565,44 +1467,32 @@
       </div>`;
   }
 
-  // Slices `items` (already date-sorted ascending) down to the range the
-  // "Dashboard chart range" setting calls for, then maps each to a
-  // {date, value} chart point, dropping any with no value. Shared by every
-  // dashboard card and by the exercise/tracker detail modals' own chart
-  // (via renderExerciseDetail/renderTrackerDetail's own `scale` argument),
-  // so the one setting controls what "the chart" means everywhere.
+  // Trim date-sorted `items` to the "Dashboard chart range" setting and map them
+  // to {date, value} points, dropping empty ones. Shared by dashboard cards and
+  // the detail modals.
   function chartPointsFor(items, valueFn) {
     const scaled = state.settings.chartScale === 'last10' ? items.slice(-10) : items;
     return scaled.map((item) => ({ date: item.date, value: valueFn(item) })).filter((p) => p.value != null);
   }
 
-  // A compact "which tier am I in" bar shared by the Strength level (lift
-  // bodyweight-multiple tiers) and Pace level (running pace tiers) detail
-  // sections below — same visual language, different units. `abbrevLabels`
-  // are short enough (4-5 chars) to fit as their own segment in a 5-6
-  // column row; the full tier names plus their concrete unit thresholds go
-  // in the wrapped caption underneath instead, where there's room for them.
+  // A compact tier bar (used by sleep insights). `abbrevLabels` are the short
+  // segment labels; full names and thresholds go in the caption.
   function tierBarHtml(abbrevLabels, currentAbbrev, captionText) {
     return `
       <div class="tier-bar">${abbrevLabels.map((l) => `<div class="tier-seg ${l === currentAbbrev ? 'is-current' : ''}">${l}</div>`).join('')}</div>
       ${captionText ? `<div class="tier-bar-caption muted-text">${captionText}</div>` : ''}`;
   }
 
-  // The full "Strength level" detail block — moved here from the dashboard
-  // goal card (which now only shows a plain progress meter, no insight
-  // math) into the exercise detail modal instead. Renders as the same
-  // `.standards-preview` table used for BMI and the bodyweight-standard
-  // goal picker (Manage -> Exercises) rather than a bespoke tier bar, so
-  // "which tier am I in" reads the same way everywhere in the app — each
-  // row spelling out both the multiplier and the weight it works out to
-  // at the current bodyweight (e.g. "0.75x BW - 135 lb+"), current tier
-  // highlighted via `.is-selected`.
+  // Strength level card for the exercise detail modal: a `.standards-preview`
+  // table showing each tier's multiplier and the weight it means at the current
+  // bodyweight. The current tier gets `.is-selected`.
   function strengthStandardsDetailHtml(ex) {
     const info = strengthLevelInfo(ex);
     if (!info) return '';
     const head = '<div class="section-head"><div class="setting-row-label"><span class="setting-icon">'+STATIC_ICONS.trophy+'</span><h2>Strength level</h2></div></div>';
     if (info.needsBodyWeight) return `<div class="card">${head}<p class="muted-text">Log your body weight to see your strength level.</p></div>`;
     if (info.needsSex) return `<div class="card">${head}<p class="muted-text">Set your sex in Settings → Profile to see your strength level.</p></div>`;
+    if (info.needsShorterSet) return `<div class="card">${head}<p class="muted-text">Log a set of ${S.ONE_RM_MAX_REPS} reps or fewer to see your strength level. The estimate is not reliable on longer sets.</p></div>`;
     const bw = currentBodyWeightLb();
     const table = LIFT_STANDARDS[ex.liftType][state.profile.sex];
     const thresholds = table.map((mult) => Math.round((bw * mult) / 5) * 5);
@@ -2615,17 +1505,17 @@
     return `
       <div class="card">
         ${head}
-        <div class="insight-line">Est. 1RM ${fmtWeight(info.oneRepMax)} &middot; ${round(info.ratio, 2)}&times; bodyweight &middot; <strong>${info.tier}</strong></div>
-        <div class="insight-line muted-text">Heaviest logged: ${fmtWeight(info.heaviestLoad)}</div>
+        <div class="insight-line">${info.oneRepMaxSet.method === 'actual' ? '1RM (logged single)' : 'Estimated 1RM'} ${fmtWeight(info.oneRepMax)} &middot; ${round(info.ratio, 2)}&times; bodyweight &middot; <strong>${info.tier}</strong></div>
+        <div class="insight-line muted-text">${info.oneRepMaxSet.method === 'actual' ? 'A real lift you logged.' : `Calculated from ${fmtWeight(info.oneRepMaxSet.weight)} &times; ${info.oneRepMaxSet.reps}.`} Heaviest set logged: ${fmtWeight(info.heaviestLoad)}.</div>
         <div class="standards-preview">
           ${rows.map((r) => `<div class="standards-preview-row${r.isCurrent ? ' is-selected' : ''}"><span>${r.label}</span><span>${r.rightText}</span></div>`).join('')}
         </div>
-        <p class="muted-text field-hint">Est. 1RM via the Epley formula, classified against published bodyweight-multiple strength standards for your sex.</p>
+        <p class="muted-text field-hint">Estimates use the Epley formula on sets of ${S.ONE_RM_MAX_REPS} reps or fewer, compared with community bodyweight-multiple tables for your sex. See About the numbers in Settings.</p>
       </div>`;
   }
 
-  // The "Pace level" counterpart — same `.standards-preview` table pattern,
-  // one row per published tier showing its pace-per-mile ceiling.
+  // The "Pace level" counterpart: a `.standards-preview` table with each tier's
+  // pace ceiling per mile.
   function paceStandardsDetailHtml(ex) {
     const info = paceLevelInfo(ex);
     if (!info) return '';
@@ -2647,15 +1537,8 @@
       </div>`;
   }
 
-  // BMI's detail-on-demand card — the Weight tracker's counterpart to
-  // strengthStandardsDetailHtml()/paceStandardsDetailHtml() above, opened by
-  // tapping into the tracker detail modal rather than shown on the dashboard
-  // card (see the comment in trackerCardHtml()). Same `.standards-preview`
-  // table component the bodyweight-standard goal picker uses (Manage ->
-  // Exercises), one row per category with a colored dot and its range,
-  // current one highlighted via `.is-selected` — rather than a bespoke
-  // gauge, so this reads as the same visual language as the rest of the
-  // app's "which tier/category am I in" displays instead of a one-off.
+  // BMI card for the Weight tracker detail modal: a `.standards-preview` table
+  // with a colored dot and range per category. The current one gets `.is-selected`.
   function bmiDetailHtml() {
     if (!state.profile.heightCm) {
       return `<div class="card"><div class="section-head"><h2>BMI</h2></div><p class="muted-text">Set your height in Settings → Profile to see your BMI.</p></div>`;
@@ -2678,32 +1561,32 @@
         <div class="standards-preview">
           ${rows.map((r) => `<div class="standards-preview-row${r.isCurrent ? ' is-selected' : ''}"><span><span class="category-dot ${r.className}"></span>${r.label}</span><span>${r.range}</span></div>`).join('')}
         </div>
-        <p class="muted-text field-hint">From your logged weight and height. Doesn't account for muscle mass or body composition.</p>
+        <p class="muted-text field-hint">From your logged weight and height, using CDC adult categories (age 20+). Doesn't account for muscle mass or body composition, so it can read high if you lift.${state.profile.age && state.profile.age < 20 ? ' These categories are not valid under 20.' : ''}</p>
       </div>`;
   }
 
-  // Sleep's detail-on-demand card — the trailing-window average/category
-  // this segment's dashboard badge summarizes in one line, spelled out with
-  // the same tier-bar visual language as Strength/Pace level (against the
-  // general short/adequate/long guidance in SLEEP_HOURS_CATEGORIES) plus an
-  // average-quality line when any of those nights had a quality logged.
-  const SLEEP_HOURS_ABBREV = ['Short', 'OK', 'Good'];
+  // Sleep card for the tracker detail modal: average and category over recent
+  // nights, a tier bar, and average quality when logged.
   function sleepInsightDetailHtml() {
     const insights = sleepInsights();
     if (!insights) {
       return `<div class="card"><div class="section-head"><h2>Sleep insights</h2></div><p class="muted-text">Log a night's sleep to see your trend.</p></div>`;
     }
-    const currentAbbrev = SLEEP_HOURS_ABBREV[SLEEP_HOURS_CATEGORIES.findIndex((c) => c.label === insights.category)];
-    const caption = SLEEP_HOURS_CATEGORIES
-      .map((c, i) => c.max === Infinity ? `${c.label} &ge; 9h` : `${c.label} ${i === 0 ? '&lt;' : `${SLEEP_HOURS_CATEGORIES[i - 1].max}–`}${c.max}h`)
-      .join(' &middot; ');
+    const w = insights.window; const r = insights.recent;
+    const cats = S.SLEEP.categories;
+    const abbrev = cats.map((c) => c.short);
+    const current = w.category ? cats.find((c) => c.label === w.category).short : null;
+    const caption = '&lt;6h Short &middot; 6&ndash;7h Slightly short &middot; 7&ndash;9h Adequate &middot; &gt;9h Long';
+    const first = new Date(r.since + 'T00:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
     return `
       <div class="card">
         <div class="section-head"><h2>Sleep insights</h2></div>
-        <div class="insight-line">Avg ${round(insights.avgHours, 1)}h over last ${insights.nights} logged night${insights.nights === 1 ? '' : 's'} &middot; <strong>${insights.category}</strong></div>
-        ${insights.avgQuality != null ? `<div class="insight-line muted-text">Avg quality ${fmtQuality(round(insights.avgQuality, 1))}</div>` : ''}
-        ${tierBarHtml(SLEEP_HOURS_ABBREV, currentAbbrev, caption)}
-        <p class="muted-text field-hint">Against general adult sleep guidance (~7-9 hours).</p>
+        ${w.nights ? `<div class="insight-line">Last ${w.days} nights: avg ${round(w.avgHours, 1)}h &middot; ${w.nights} of ${w.days} logged${w.category ? ` &middot; <strong>${w.category}</strong>` : ''}</div>` : `<div class="insight-line muted-text">No nights logged in the last ${w.days} days.</div>`}
+        ${w.nights && !w.category ? `<div class="insight-line muted-text">Log ${S.SLEEP.minNightsForLabel} or more nights in a week for a label.</div>` : ''}
+        <div class="insight-line muted-text">Last ${r.nights} logged night${r.nights === 1 ? '' : 's'} (since ${first}): avg ${round(r.avgHours, 1)}h &middot; ${r.category}</div>
+        ${(w.avgQuality ?? r.avgQuality) != null ? `<div class="insight-line muted-text">Avg quality ${fmtQuality(round(w.avgQuality ?? r.avgQuality, 1))}</div>` : ''}
+        ${current ? tierBarHtml(abbrev, current, caption) : ''}
+        <p class="muted-text field-hint">Against the 7&ndash;9 hour adult range (NSF). Not a medical assessment.</p>
       </div>`;
   }
 
@@ -2718,12 +1601,7 @@
       : progressBlockHtml(ex);
     const chartPoints = chartPointsFor(entries, (e) => entryValue(ex, e, trendMetric));
     const chartGoal = cardioMetrics ? (trendMetric ? cardioGoalFor(ex, trendMetric) : null) : ex.goal;
-    // Strength/Pace level — the estimated-1RM/tier math and the "which
-    // published tier am I in" breakdown — used to render right here on the
-    // dashboard card. It's now detail-on-demand instead: tap into the card
-    // (openExerciseDetail) for strengthStandardsDetailHtml()/
-    // paceStandardsDetailHtml(), keeping this card to a plain progress
-    // meter + chart regardless of whether either Insights toggle is on.
+    // Strength and Pace level are detail-on-demand (see openExerciseDetail), not shown here.
     return `
       <div class="card ex-card" data-exercise-id="${ex.id}">
         <div class="ex-card-top">
@@ -2736,8 +1614,7 @@
   }
 
   /* ---- Home rows ----
-     Every Home section is a card of `.glance-row`s: icon, name, value, a thin
-     meter and an optional action. */
+     Every Home section is a card of `.glance-row`s: icon, name, value, meter, optional action. */
 
   // Today's progress toward one daily target, as display text plus a 0-100+
   // percentage (null when the exercise has no goal to measure against).
@@ -2761,7 +1638,7 @@
       return { curText: cur == null ? '0' : fmtWeight(cur), goalText: ex.goal ? `/ ${fmtWeight(ex.goal)}` : '', pct: ex.goal ? ((cur || 0) / ex.goal) * 100 : null };
     }
     const cur = today.reduce((sum, e) => sum + (e.sets || []).reduce((m, st) => m + (st.reps || 0), 0), 0);
-    return { curText: String(cur), goalText: ex.goal ? `/ ${Math.round(ex.goal)} reps` : 'reps', pct: ex.goal ? (cur / ex.goal) * 100 : null };
+    return { curText: String(cur), goalText: isTimed(ex) ? (ex.goal ? `/ ${fmtHold(ex.goal)}` : '') : (ex.goal ? `/ ${Math.round(ex.goal)} reps` : 'reps'), pct: ex.goal ? (cur / ex.goal) * 100 : null };
   }
 
   function glanceMeterHtml(ex, pct) {
@@ -2774,9 +1651,8 @@
     return `<div class="meter meter-sm"><div class="meter-fill ${pct >= 100 ? 'is-complete' : ''}" style="--fill:${Math.min(100, pct)}%"></div></div>`;
   }
 
-  // One row of Home's "Daily targets": a habit is logged in one tap
-  // ("Done", then "+1" once its count is met); everything else opens Log.
-  // The button stays after the target is met so more can still be added.
+  // A Daily targets row. A habit logs in one tap ("Done", then "+1" once its count
+  // is met); others open Log. The button stays after the target is met.
   function dailyTargetRowHtml(ex) {
     const prog = todayProgressOf(ex);
     const complete = prog.pct != null && prog.pct >= 100;
@@ -2797,36 +1673,19 @@
       </div>`;
   }
 
-  // Whether a trend delta is "good news" for this tracker, per its own
-  // direction setting (the same field that already drives its goal-progress
-  // math) — a shrinking number is good when direction is 'down' (e.g. a
-  // weight-loss goal), growing is good otherwise. With no direction set,
-  // there's no way to know intent, so the delta badge stays neutral.
+  // Whether a trend delta is good news for this tracker, by its `direction`
+  // (down: shrinking is good; otherwise growing). With no direction it stays neutral.
   function deltaSentiment(tracker, delta) {
     if (!tracker.direction || delta === 0) return 'neutral';
     return (tracker.direction === 'down' ? delta < 0 : delta > 0) ? 'good' : 'bad';
   }
 
-  // A body/wellness tracker's dashboard card — deliberately the same visual
-  // shape as an exercise's goalCardHtml (current value, goal, meter, chart)
-  // so the dashboard reads as one consistent language rather than
-  // "workouts styled one way, everything else styled another." The body
-  // weight tracker additionally carries the optional "Body weight
-  // insights" toggle's payload: a trend-delta badge and a BMI line.
+  // A tracker's dashboard card, shaped like goalCardHtml. The Weight tracker also
+  // gets a trend badge when "Body weight insights" is on.
   function trackerCardHtml(tracker) {
     const isSleep = tracker.kind === 'sleep';
-    // Weight (and any other plain metric tracker) reflects a persistent
-    // current state — showing the most recently logged value as "current"
-    // until it's replaced is exactly right, the same way a bathroom scale
-    // app assumes yesterday's weigh-in is still roughly your weight today.
-    // Sleep is a per-night reading, not a persistent state, so that same
-    // "keep showing the latest ever logged" behavior reads as broken for it
-    // specifically: log 8 hours last night, and the card would keep saying
-    // "8 hours" indefinitely until the next time sleep is logged, even
-    // several days later. Scoping sleep's headline value to *today's*
-    // entry only (falling back to "—", the same way a never-logged tracker
-    // already renders) fixes that — the trend below (sleepInsights()) still
-    // looks across all recent nights regardless of whether today has one.
+    // Sleep is a per-night reading, so its headline value is today's entry only (a
+    // dash if none). Other trackers show the latest value ever logged.
     const todayEntry = isSleep ? state.measurements.find((m) => m.trackerId === tracker.id && m.date === todayISO()) : null;
     const latest = isSleep ? todayEntry : latestMeasurement(tracker.id);
     const value = latest ? latest.value : null;
@@ -2835,38 +1694,20 @@
     const history = measurementsFor(tracker.id).slice().sort((a, c) => a.date.localeCompare(c.date));
     const chartPoints = chartPointsFor(history, (m) => m.value);
     const insights = (tracker.id === BODY_WEIGHT_TRACKER_ID && state.settings.showWeightInsights) ? weightInsights() : null;
-    // insights.trend.delta is in the canonical storage unit (lb) — see
-    // weightInsights(), which computes it straight from state.measurements
-    // — but the label right after it is Units.weightUnitLabel(), the
-    // user's *display* unit. Displaying the raw lb number next to a "kg"
-    // label was silently wrong by a factor of ~2.2 for anyone on kg; the
-    // conversion is a plain scale factor so it's safe to apply directly to
-    // the difference (same as converting either endpoint separately).
+    // insights.trend.delta is in lb (the storage unit); convert it to the display
+    // unit shown next to the label.
     const deltaDisplay = insights && insights.trend ? Units.lbToDisplay(insights.trend.delta) : null;
     const deltaBadge = insights && insights.trend
       ? `<div class="ex-card-delta is-${deltaSentiment(tracker, insights.trend.delta)}">${deltaDisplay > 0 ? '+' : ''}${round(deltaDisplay, 1)} ${Units.weightUnitLabel()} in ${humanizeDays(insights.trend.days)}</div>`
       : '';
-    // BMI itself moved off this card into the tracker detail modal's own
-    // visual gauge (see bmiDetailHtml()) — same "keep the dashboard plain,
-    // put the deeper breakdown one tap in" move already made for a lift's
-    // Strength level. A concise sleep average (also detail-on-demand for
-    // the fuller breakdown — see sleepInsightDetailHtml()) takes its old
-    // badge slot instead, next to the tracker name like weight's trend.
+    // BMI is not shown here (see bmiDetailHtml()); Sleep gets a short average badge
+    // instead (full breakdown: sleepInsightDetailHtml()).
     const sleep = (isSleep && state.settings.showSleepInsights) ? sleepInsights() : null;
-    const sleepBadge = sleep ? `<div class="ex-card-delta">Avg ${round(sleep.avgHours, 1)}h &middot; ${sleep.nights}n</div>` : '';
+    const sleepBadge = sleep ? `<div class="ex-card-delta">${sleep.window.nights ? `Avg ${round(sleep.window.avgHours, 1)}h &middot; ${sleep.window.nights} of ${sleep.window.days} nights` : `Last ${sleep.recent.nights} logged: avg ${round(sleep.recent.avgHours, 1)}h`}</div>` : '';
     const qualityLine = isSleep && latest && latest.quality != null
       ? `<div class="insight-line">Quality ${fmtQuality(latest.quality)}</div>` : '';
-    // A goal with nothing logged yet to measure it against (value == null —
-    // either a genuinely never-logged tracker, or Sleep specifically on a
-    // day it hasn't been logged, since its value is scoped to today only —
-    // see the comment above) isn't "0% progress," it's "no reading to show
-    // progress for." trackerProgressPct() still returns a defined pct: 0 in
-    // that case (so callers don't have to null-check it), but rendering
-    // that as a filled-in "0%" meter reads as "you measured zero," which is
-    // a different claim than "not logged." Gating the whole meter block on
-    // `value != null` too (not just tracker.goal != null) keeps the card
-    // silent instead of misleadingly precise until there's an actual
-    // reading to show progress against.
+    // With a goal but no reading (never logged, or Sleep not logged today), show no
+    // meter: trackerProgressPct() returns 0, which would read as "measured zero".
     const hasProgress = tracker.goal != null && value != null;
     return `
       <div class="card ex-card" data-tracker-id="${tracker.id}">
@@ -2889,10 +1730,8 @@
   }
 
   function renderBodySection() {
-    // Manage still lists every tracker regardless of this — hiding one from
-    // the dashboard only declutters the daily view, it doesn't archive it.
-    // Body toggled off in Manage (Track this) hides this section entirely,
-    // same as Workout/Water/Food already do for theirs.
+    // Manage lists every tracker; hiding one from the dashboard (showOnDashboard)
+    // does not archive it. Body switched off in Manage hides this whole section.
     const trackers = domainTracked('measurements') ? activeTrackers().filter((t) => t.showOnDashboard !== false) : [];
     document.getElementById('bodySectionHead').hidden = trackers.length === 0;
     const wrap = document.getElementById('bodyCards');
@@ -2911,9 +1750,7 @@
       </button>`).join('');
   }
 
-  // Logging water is a one-tap action (pick a cup, done) rather than a form
-  // submission, so it lives directly on the dashboard as well as in Log —
-  // wherever the user already is when they want to record a drink.
+  // Water is one tap (pick a cup), so it can be logged from the dashboard as well as Log.
   function logWaterAmount(amountMl, cupId) {
     if (!amountMl || amountMl <= 0) { toast('Enter an amount greater than zero.'); return; }
     state.waterEntries.push({ id: genId('wtr'), date: todayISO(), amountMl, cupId: cupId || null });
@@ -2924,11 +1761,8 @@
     renderHistory();
   }
 
-  // The id of exId's most-recently-logged entry for today, or '' if it
-  // hasn't been logged today — genId() prefixes every id with a base36
-  // timestamp (see genId), so plain string comparison of ids sorts
-  // chronologically. Used to order Today's "logged today" list newest
-  // first, across a mix of goal exercises and daily targets.
+  // Id of exId's newest entry today, or ''. genId() ids start with a base36
+  // timestamp, so string comparison sorts by time. Orders the "logged today" list.
   function latestTodayEntryId(exId) {
     return entriesFor(exId)
       .filter((en) => en.date === todayISO())
@@ -2936,37 +1770,19 @@
   }
 
   /* ============================== Returning-user setup review ==============================
-     Every one of the tracking choices below (per-domain "Track this",
-     which macros are tracked, which insight cards show) already had a
-     value saved for an existing install the moment it was first created —
-     either whatever the setup wizard asked at the time, or DEFAULT_SETTINGS'
-     value for anything added later that install never got asked about.
-     Bumping DEFAULT_SETTINGS (see the comment there) only changes what a
-     BRAND-NEW install starts with; it does nothing for someone who already
-     has a saved `false` sitting in their data from before these existed.
+     Offers a lightly used existing install a one-time look at tracking options
+     added since it started (new defaults do not reach saved settings). It is not
+     a re-run of the wizard, which replaces data; it only flips settings booleans. */
 
-     Someone who logged only a couple of things and hasn't been back since
-     is exactly the account most likely running on stale, never-reconsidered
-     defaults — but also the account it's easiest to needlessly annoy, so
-     this only ever offers a look, once, rather than assuming anything
-     should change. It is NOT a re-run of the first-run wizard: finishSetup()
-     wholesale replaces state.exercises/entries/trackers/measurements, which
-     is correct for a truly empty install but would silently erase the very
-     "couple of things" this account already logged. Nothing below touches
-     any of that — it only flips the same plain settings booleans Manage and
-     Settings already expose, the same way those screens themselves do. */
-
-  const SETUP_REVIEW_MAX_ENTRIES = 3; // "lightly used" — a handful of logged items or fewer, total, across every domain
+  const SETUP_REVIEW_MAX_ENTRIES = 3; // "lightly used": this many logged items or fewer, across every domain
   const SETUP_REVIEW_MIN_INSTALL_DAYS = 3; // give a fresh install a few days before treating light use as "gone stale" rather than "just started"
 
   function totalLoggedItemCount() {
     return state.entries.length + state.food.entries.length + state.waterEntries.length + state.measurements.length;
   }
 
-  // Earliest createdAt across exercises/trackers stands in for "when this
-  // install was first set up" — every exercise/tracker gets one the moment
-  // it's created (setup wizard or Manage), and nothing else in this app's
-  // data records an install date directly.
+  // The earliest createdAt on any exercise or tracker stands in for the install
+  // date; nothing else records one.
   function installedAtEstimate() {
     const stamps = [...state.exercises, ...state.trackers].map((x) => x.createdAt).filter(Boolean);
     return stamps.length ? stamps.reduce((a, b) => (a < b ? a : b)) : null;
@@ -2974,7 +1790,7 @@
 
   function shouldOfferSetupReview() {
     if (state.settings.setupReviewPromptSeen) return false;
-    if (totalLoggedItemCount() > SETUP_REVIEW_MAX_ENTRIES) return false; // meaningfully used already — this isn't for an active user
+    if (totalLoggedItemCount() > SETUP_REVIEW_MAX_ENTRIES) return false; // already in real use: the review is not for active users
     const installedAt = installedAtEstimate();
     if (!installedAt) return false;
     const daysSinceInstall = (Date.now() - new Date(installedAt).getTime()) / 86400000;
@@ -2985,22 +1801,16 @@
     document.getElementById('setupReviewBanner').hidden = !shouldOfferSetupReview();
   }
 
-  // "Not now" — resolves the prompt without changing a single tracking
-  // setting, same as just closing it would functionally do, but explicit
-  // and permanent rather than something that would reappear next visit.
+  // "Not now": marks the prompt seen without changing any setting.
   function dismissSetupReviewPrompt() {
     state.settings.setupReviewPromptSeen = true;
     if (!save()) return;
     renderSetupReviewBanner();
   }
 
-  // The review screen itself — a plain checklist over LIVE settings
-  // (state.settings directly, not a separate draft the way the first-run
-  // wizard's setupAnswers is), using the exact same setupBoolRowHtml/
-  // wireSetupBoolRow row widget the wizard uses. Each toggle takes effect
-  // immediately (save() + renderAll()), same as flipping it from Manage or
-  // Settings would — this screen is just a curated shortcut to those same
-  // switches, not a separate settings store of its own.
+  // The review screen: a checklist over live settings (no draft, unlike the
+  // wizard), using the wizard's setupBoolRowHtml/wireSetupBoolRow. Each toggle
+  // saves and re-renders at once.
   function openSetupReviewModal() {
     const s = state.settings;
     const macroRowHtml = (k) => setupBoolRowHtml(`review_macro_${k}`, MACRO_LABELS[k], macroGoalInfo(k).enabled);
@@ -3009,7 +1819,8 @@
       <p class="muted-text">Fit Log has added tracking options and insight cards since you started — here's a chance to double check what's on. Nothing you've already logged changes either way.</p>
       <div class="card form-card">
         <div class="section-head"><h2>What do you track?</h2></div>
-        ${setupBoolRowHtml('review_trackWorkout', 'Workout', s.trackWorkout)}
+        ${setupBoolRowHtml('review_trackWorkout', 'Lifting', s.trackWorkout)}
+        ${setupBoolRowHtml('review_trackCardio', 'Running & cardio', s.trackCardio)}
         ${setupBoolRowHtml('review_trackHabits', 'Habits & daily reps', s.trackHabits)}
         ${setupBoolRowHtml('review_trackMeasurements', 'Body', s.trackMeasurements)}
         ${setupBoolRowHtml('review_trackWater', 'Water', s.trackWater)}
@@ -3034,6 +1845,7 @@
 
     const rerender = () => openSetupReviewModal();
     wireSetupBoolRow('review_trackWorkout', (v) => { s.trackWorkout = v; if (!save()) return; renderAll(); rerender(); });
+    wireSetupBoolRow('review_trackCardio', (v) => { s.trackCardio = v; if (!save()) return; renderAll(); rerender(); });
     wireSetupBoolRow('review_trackHabits', (v) => { s.trackHabits = v; if (!save()) return; renderAll(); rerender(); });
     wireSetupBoolRow('review_trackMeasurements', (v) => { s.trackMeasurements = v; if (!save()) return; renderAll(); rerender(); });
     wireSetupBoolRow('review_trackWater', (v) => { s.trackWater = v; if (!save()) return; renderAll(); rerender(); });
@@ -3057,8 +1869,7 @@
   }
 
   /* ============================== Home sections ==============================
-     Each section belongs to one module and disappears with it. Home only
-     reads data the app already has — nothing here stores anything new. */
+     Each section belongs to one module and disappears with it. Home only reads existing data. */
 
   const dayLabel = (iso) => new Date(iso + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'short' });
   function openLogCategory(cat) { logCategory = cat; switchTab('log'); }
@@ -3070,8 +1881,10 @@
     return activeExercises().filter((e) => e.kind !== 'habit' && sectionOf(e) !== 'daily');
   }
 
+  const homeSectionOn = (key) => F.homeSectionOn(state.settings, key);
+
   function renderChecklist(all) {
-    const daily = all.filter((e) => sectionOf(e) === 'daily' && (e.kind !== 'habit' || habitDueToday(e)));
+    const daily = homeSectionOn('checklist') ? all.filter((e) => sectionOf(e) === 'daily' && (e.kind !== 'habit' || habitDueToday(e))) : [];
     document.getElementById('dailyTargetsHead').hidden = daily.length === 0;
     const done = daily.filter((e) => { const p = todayProgressOf(e); return p.pct != null && p.pct >= 100; }).length;
     document.getElementById('checklistCount').textContent = `${done} of ${daily.length} done`;
@@ -3089,7 +1902,7 @@
   }
 
   function renderTraining() {
-    const show = domainTracked('workout') && state.settings.trackWorkout;
+    const show = homeSectionOn('training') && (state.settings.trackWorkout || cardioTracked());
     document.getElementById('trainingHead').hidden = !show;
     const wrap = document.getElementById('trainingWrap');
     wrap.hidden = !show;
@@ -3156,12 +1969,12 @@
       <circle cx="46" cy="46" r="${r}" fill="none" stroke="var(--surface-2)" stroke-width="10"/>
       ${pct > 0 ? `<circle class="food-ring-arc" cx="46" cy="46" r="${r}" fill="none" stroke-width="10" stroke-linecap="round" stroke-dasharray="${(c * pct).toFixed(1)} ${c.toFixed(1)}" transform="rotate(-90 46 46)"/>` : ''}
       <text x="46" y="45" text-anchor="middle" font-size="19" font-weight="800" fill="var(--text-primary)">${Math.round(eaten).toLocaleString()}</text>
-      <text x="46" y="60" text-anchor="middle" font-size="10.5" fill="var(--muted)">of ${Math.round(goal).toLocaleString()}</text>
+      <text x="46" y="60" text-anchor="middle" font-size="12" fill="var(--muted)">of ${Math.round(goal).toLocaleString()}</text>
     </svg>`;
   }
 
   function renderNutrition() {
-    const show = state.settings.trackFood;
+    const show = homeSectionOn('nutrition') && state.settings.trackFood;
     document.getElementById('nutritionHead').hidden = !show;
     const wrap = document.getElementById('nutritionWrap');
     wrap.hidden = !show;
@@ -3237,8 +2050,9 @@
   }
 
   function renderMiniGrid() {
-    const water = domainTracked('water') && state.water.cups.length > 0;
-    const trackers = domainTracked('measurements') ? activeTrackers().filter((t) => t.showOnDashboard !== false) : [];
+    const on = homeSectionOn('mini');
+    const water = on && domainTracked('water') && state.water.cups.length > 0;
+    const trackers = on && domainTracked('measurements') ? activeTrackers().filter((t) => t.showOnDashboard !== false) : [];
     const wrap = document.getElementById('miniGrid');
     wrap.hidden = !(water || trackers.length);
     wrap.innerHTML = (water ? waterMiniHtml() : '') + trackers.map(trackerMiniHtml).join('');
@@ -3315,7 +2129,7 @@
   function renderGoalsStrip() {
     const all = collectGoals().filter((g) => g.type === 'lift' || g.type === 'cardio' || g.type === 'body');
     const open = all.filter((g) => !g.met).sort((a, b) => b.pct - a.pct);
-    const pick = (open.length ? open : all).slice(0, 3);
+    const pick = homeSectionOn('goals') ? (open.length ? open : all).slice(0, 3) : [];
     document.getElementById('goalsHead').hidden = pick.length === 0;
     const wrap = document.getElementById('goalsWrap');
     wrap.hidden = pick.length === 0;
@@ -3323,12 +2137,8 @@
     wrap.querySelectorAll('[data-goal-idx]').forEach((row) => wireOpenable(row.querySelector('.glance-open'), pick[Number(row.dataset.goalIdx)].open));
   }
 
-  // Home: what needs doing or is happening today, top to bottom — the streak
-  // card, trackers still to log, the daily targets (always shown, so they act
-  // as a standing reminder), goal exercises trained today, then water and
-  // food. Progress keeps the lifetime picture: every goal card and every
-  // tracker's trend. Home and Progress share the same data, so every call
-  // site refreshes both through renderDashboard().
+  // Home (streak, checklist, training, nutrition, goals strip) plus Progress (goal
+  // list and trend cards). Call renderDashboard() to refresh both.
   function renderDashboard() {
     renderHome();
     renderProgress();
@@ -3388,19 +2198,8 @@
     renderBodySection();
   }
 
-  // Food's detail-on-demand modal — the dashboard card's flat totals grid
-  // expanded with per-macro progress toward any enabled goal, the
-  // nutrition calculator's recommendation (if turned on in Manage ->
-  // Nutrition), and quick actions to log food or adjust goals, rather than
-  // leaving the dashboard card as the only place to see today's food and a
-  // separate trip to Manage as the only way to act on it.
-  // Ascending {date, value} pairs — one per day that actually has a logged
-  // value for this macro — feeding the Food detail modal's Trend chart.
-  // Built fresh from state.food.entries rather than kept as running state,
-  // same as foodTotalsForDate(); a day with no food logged at all, or where
-  // this specific macro wasn't filled in on any of that day's entries, is
-  // left out entirely (Charts.lineChart treats a gap as "not logged", not
-  // as zero) rather than plotted as a misleading 0.
+  // Daily {date, value} points for one macro, for the Food detail Trend chart.
+  // Days with no value are left out (a gap, not a zero).
   function foodChartEntriesFor(key) {
     const dates = Array.from(new Set(state.food.entries.map((e) => e.date))).sort();
     return dates
@@ -3408,19 +2207,9 @@
       .filter((p) => p.value != null);
   }
 
-  // "+180 kcal vs last week" style trend footer text — the average of the
-  // most recent up to 7 logged days for this macro vs. the 7 logged days
-  // before that. Returns '' (nothing shown) once there isn't a full
-  // previous week of history yet to compare against, rather than a
-  // misleading comparison against a partial week.
-  //
-  // Deliberately left uncolored (no is-good/is-bad, unlike
-  // .ex-card-delta elsewhere) — whether more or less of a given macro is
-  // "good" depends entirely on the user's own goal (bulking wants calories
-  // up, cutting wants them down; more protein reads as good, more sodium
-  // doesn't), which Fit Log has no notion of here. Same "neutral when
-  // direction isn't known" call as deltaSentiment() makes for open-ended
-  // tracker goals.
+  // Trend footer such as "+180 cal vs last week": the average of the latest 7
+  // logged days against the 7 before. Empty until a full earlier week exists. Left
+  // uncolored on purpose: whether more is good depends on the user's goal.
   function foodTrendDeltaText(key, chartEntries) {
     const last7 = chartEntries.slice(-7);
     const prev7 = chartEntries.slice(-14, -7);
@@ -3436,14 +2225,7 @@
     const calc = state.settings.nutritionCalc;
     const suggestion = calc.enabled ? computeNutritionTargets(calc.activityLevel, calc.goal) : null;
     const trackedKeys = trackedMacroKeys();
-    // Daily-value guidance (Settings -> Insights -> Macro guidance) used to
-    // be a second table repeating this same macro list with just "value +
-    // %DV" — right below a table that already showed that macro's value.
-    // With guidance off that duplication wasn't visible, but with it on the
-    // two tables said almost the same thing twice. Folding the %DV suffix
-    // into this row instead (only when guidance is on) keeps one line per
-    // macro either way: value alone, value/goal·pct when a personal goal is
-    // set, and now optionally ·pct%DV appended to either.
+    // With guidance on, the %DV is appended to each row instead of a second table.
     const guidanceOn = state.settings.showMacroGuidance;
     let anyDvShown = false;
     const rows = trackedKeys.map((k) => {
@@ -3465,11 +2247,9 @@
       }
       return `<div class="standards-preview-row${over ? ' over' : ''}"><span>${MACRO_LABELS[k]}</span><span class="macro-val"><span>${mainText}</span>${subParts.length ? `<span class="pct">${subParts.join(' &middot; ')}</span>` : ''}</span></div>`;
     }).join('');
-    // Same caveats the old separate table carried once below it, now below
-    // this merged one instead — only relevant, so only shown, once guidance
-    // is actually on and at least one tracked macro has a DV to show.
+    // Caveats for the %DV figures; shown only when a DV appears.
     const guidanceNoteHtml = anyDvShown
-      ? `<p class="muted-text field-hint food-dv-note">DV = % of a general adult daily value for a 2,000-calorie diet, not personalized. Sugar's DV is for <i>added</i> sugar specifically — Fit Log logs one total, so treat that comparison as an upper bound. Caffeine has no official DV; 400mg is the FDA's general guidance, shown the same way.</p>`
+      ? `<p class="muted-text field-hint food-dv-note">DV = % of a general adult daily value for a 2,000-calorie diet, not personalized. Sugar shows no %DV: the FDA's 50g limit is for <i>added</i> sugar, and Fit Log logs total sugar. Caffeine has no official DV; 400mg is the FDA's general guidance, shown the same way.</p>`
       : '';
 
     let calcHtml;
@@ -3493,13 +2273,7 @@
         </div>`;
     }
 
-    // Trend — the same "chart with a metric switcher" vocabulary as an
-    // exercise's own Trend section (renderExerciseDetail), extended with a
-    // metric segmented control since food has several trackable numbers
-    // instead of one. Lives in this same modal (right below Today's totals)
-    // rather than on the dashboard or a separate tab, so the numbers and
-    // the trend behind them are never more than the one tap it already
-    // takes to get here.
+    // Trend chart with a metric switcher, since food has several trackable numbers.
     const activeMetric = trackedKeys.includes(chartMetric) ? chartMetric : trackedKeys[0];
     const chartEntries = foodChartEntriesFor(activeMetric);
     const chartGoalInfo = macroGoalInfo(activeMetric);
@@ -3550,9 +2324,7 @@
     switchTab('log');
   }
 
-  // Jumps to Manage -> Food, where the per-macro tracked/goal toggles and
-  // the nutrition calculator (activity level/goal/Apply button) live — the
-  // "adjustability" the flat dashboard card had no way to reach.
+  // Open Manage -> Food (macro tracking and goals, nutrition calculator).
   function openFoodGoalsFromDetail() {
     closeModal();
     manageCategory = 'food';
@@ -3568,13 +2340,9 @@
   }
 
   /* ============================== Organization: groups, favorites, search ==============================
-     Exercises and saved foods both outgrow a single flat list, so both get
-     the same three tools: a favorite star (pins it to the top / the
-     Favorites tab), "recent" (derived from what was actually logged — never
-     stored), and search + filter chips. Exercises also get a muscle group
-     (`ex.group`). Nothing here needs a data migration: a missing `group`
-     is inferred from the name, a missing `favorite` means "a goal lift is a
-     favorite", and a saved food is simply not a favorite until starred. */
+     Exercises and saved foods share a favorite star, "recent" (derived from logged
+     entries, never stored) and search/filter chips; exercises also have a muscle
+     group (`ex.group`). No migration: a missing `group` is inferred from the name. */
 
   const UI_ICON_PATHS = {
     star: '<path d="M11.525 2.295a.53.53 0 0 1 .95 0l2.31 4.679a2.123 2.123 0 0 0 1.595 1.16l5.166.756a.53.53 0 0 1 .294.904l-3.736 3.638a2.123 2.123 0 0 0-.611 1.878l.882 5.14a.53.53 0 0 1-.771.56l-4.618-2.428a2.122 2.122 0 0 0-1.973 0L6.396 21.01a.53.53 0 0 1-.77-.56l.881-5.139a2.122 2.122 0 0 0-.611-1.879L2.16 9.795a.53.53 0 0 1 .294-.906l5.165-.755a2.122 2.122 0 0 0 1.597-1.16z"/>',
@@ -3592,9 +2360,8 @@
   ];
   const EXERCISE_GROUP_LABELS = Object.fromEntries(EXERCISE_GROUPS);
 
-  // Best guess at a muscle group from the exercise's type and name — used
-  // for anything saved before groups existed, and to pre-select the chip on
-  // a new exercise until the user picks one themselves.
+  // Guess a muscle group from the exercise's kind and name, for exercises saved
+  // before groups existed and to preselect the chip on a new one.
   function inferExerciseGroup(ex) {
     if (!ex) return 'other';
     if (ex.kind === 'cardio') return 'cardio';
@@ -3612,8 +2379,8 @@
   }
   function exerciseGroup(ex) { return EXERCISE_GROUP_LABELS[ex.group] ? ex.group : inferExerciseGroup(ex); }
   function exerciseGroupLabel(ex) { return EXERCISE_GROUP_LABELS[exerciseGroup(ex)]; }
-  // Until someone stars/unstars an exercise themselves, the lifts they set a
-  // goal for are the favorites — so Favorites is useful from day one.
+  // Until someone stars or unstars an exercise, the lifts they set a goal for count
+  // as favorites, so Favorites is useful from day one.
   function isFavoriteExercise(ex) {
     if (ex.favorite === undefined) return sectionOf(ex) === 'goal' && ex.kind !== 'habit';
     return !!ex.favorite;
@@ -3642,7 +2409,7 @@
     if (ex.kind === 'habit') return 'done';
     const top = topSetOf(ex, entry);
     if (ex.kind === 'weight' && top) return `${round(Units.lbToDisplay(top.weight), 1)} ${Units.weightUnitLabel()} × ${top.reps}`;
-    if (ex.kind === 'reps' && top) return `${top.reps} reps`;
+    if (ex.kind === 'reps' && top) return isTimed(ex) ? fmtHold(top.reps) : `${top.reps} reps`;
     if (ex.kind === 'cardio') {
       const bits = [];
       if (entry.distance != null) bits.push(fmtDistance(entry.distance));
@@ -3697,18 +2464,9 @@
   }
 
   /* ============================== Catalog & equipment variants ==============================
-     js/catalog.js is a static list of movements (each with the equipment it
-     can be done on), habits and common foods. It is reference data only:
-     nothing from it reaches the user's data until they tick it in "Add from
-     catalog" and confirm, and a copied item is an ordinary exercise / habit
-     / saved food they can edit like any other.
-
-     A movement done on different equipment is a separate exercise record
-     (same `catalogId`, different `equipment`), shown as "Bench Press ·
-     Dumbbell". That keeps goals, records, charts and suggestions per
-     variant with no changes to how they are computed: a barbell number is
-     never averaged with a dumbbell one. Both fields are optional; an exercise
-     without them behaves exactly as it always has. */
+     js/catalog.js is reference data (movements, habits, foods). Nothing reaches the user's data
+     until they tick it in "Add from catalog"; copies are ordinary items. Each equipment variant
+     of a movement is its own exercise (same `catalogId`, different `equipment`). */
 
   const CATALOG = window.FitCatalog || { equipment: [], groupIcons: {}, packs: [], movements: [], habits: [], foods: [] };
   const EQUIPMENT = Object.fromEntries(CATALOG.equipment.map((e) => [e.id, e]));
@@ -3716,8 +2474,8 @@
   const CATALOG_HABITS = Object.fromEntries(CATALOG.habits.map((h) => [h.id, h]));
 
   function equipmentLabel(id) { return EQUIPMENT[id] ? EQUIPMENT[id].label : ''; }
-  // The name to show for an exercise: "Bench Press · Dumbbell" when it is a
-  // variant, otherwise just its own name.
+  // The name to show for an exercise: with its equipment for a catalog variant,
+  // otherwise just its own name.
   function exerciseLabel(ex) {
     if (!ex) return '';
     const mv = ex.catalogId && MOVEMENTS[ex.catalogId];
@@ -3730,10 +2488,9 @@
   function variantRecord(movId, eq) {
     return state.exercises.find((e) => e.catalogId === movId && (e.equipment || null) === (eq || null));
   }
-  // An exercise of yours that is already this movement on this equipment but
-  // was created before the catalog existed — matched by name only (e.g. your
-  // own "Bench Press" is the barbell variant). Used so adding from the
-  // catalog links to it instead of creating a duplicate.
+  // An older exercise of the user's that is already this movement on this
+  // equipment (matched by name), so adding from the catalog links to it
+  // instead of duplicating it.
   function legacyVariantMatch(mv, eq) {
     if ((eq || null) !== (mv.defaultEquipment || null)) return null;
     return state.exercises.find((e) => !e.catalogId && normName(e.name) === normName(mv.name) && e.kind === mv.kind) || null;
@@ -3759,6 +2516,7 @@
       if (eq) ex.equipment = eq;
       if (mv.kind === 'weight') { ex.bodyRegion = guessBodyRegion(mv.name); ex.liftType = (eq || null) === (mv.defaultEquipment || null) && !state.exercises.some((x) => x.liftType && x.liftType === mv.liftType) ? (mv.liftType || null) : null; }
       if (mv.kind === 'cardio') { ex.distanceGoal = null; ex.paceGoal = null; }
+      if (mv.unit) ex.unit = mv.unit;
       if (!ex.icon) delete ex.icon;
       state.exercises.push(ex);
       n += 1;
@@ -3788,12 +2546,9 @@
   }
 
   /* ---------- Tidy up: group older exercises under catalog movements ----------
-     Looks at exercises that predate the catalog ("Cable Bicep Curl") and
-     offers to link each one to its movement + equipment ("Bicep Curl ·
-     Cable"). Logged entries and goals stay on the same exercise record, so
-     nothing moves unless a variant already exists (then the two are merged).
-     Nothing happens until ticked rows are applied, and the last tidy up can
-     be undone from Manage. */
+     Offers to link exercises that predate the catalog (e.g. "Cable Bicep Curl") to a movement
+     plus equipment. Entries and goals stay on the same record unless a variant already exists,
+     in which case the two merge. Nothing changes until ticked rows are applied; Manage can undo. */
 
   const EQUIPMENT_WORDS = [
     ['dumbbell', /\b(dumbbells?|dumbells?|db)\b/], ['barbell', /\b(barbell|bb)\b/], ['cable', /\bcable\b/],
@@ -3855,6 +2610,7 @@
       }
     });
     state.settings.tidyUndo = undo;
+    state.settings.tidyDismissed = true; // reviewed: the card goes away; Undo lives on the toast
     return save();
   }
 
@@ -3872,23 +2628,20 @@
       if (target) Object.assign(target, m.targetGoal);
     });
     state.settings.tidyUndo = null;
+    state.settings.tidyDismissed = false;
     save(); renderAll(); toast('Tidy up undone');
   }
 
   function renderTidyCard() {
     const host = document.getElementById('tidyCard'); if (!host) return;
     const items = state.settings.tidyDismissed ? [] : tidyCandidates();
-    const u = state.settings.tidyUndo;
-    if (!items.length && !u) { host.hidden = true; return; }
+    if (!items.length) { host.hidden = true; host.innerHTML = ''; return; }
     host.hidden = false;
-    host.innerHTML = items.length ? `
+    host.innerHTML = `
       <div class="tidy-text"><b>Tidy up your exercises</b><span class="muted-text">${items.length} can be grouped by equipment, like Bicep Curl · Cable. Nothing changes until you pick.</span></div>
-      <div class="tidy-actions"><button type="button" class="btn btn-primary btn-sm" id="tidyReviewBtn">Review</button>${u ? '<button type="button" class="link-btn" id="tidyUndoBtn">Undo last</button>' : '<button type="button" class="link-btn" id="tidyDismissBtn">Not now</button>'}</div>`
-      : `<div class="tidy-text"><b>Tidied up ${u.exercises.length} exercise${u.exercises.length === 1 ? '' : 's'}</b><span class="muted-text">Entries and goals came along.</span></div>
-      <div class="tidy-actions"><button type="button" class="btn btn-secondary btn-sm" id="tidyUndoBtn">Undo</button></div>`;
+      <div class="tidy-actions"><button type="button" class="btn btn-primary btn-sm" id="tidyReviewBtn">Review</button><button type="button" class="link-btn" id="tidyDismissBtn">Not now</button></div>`;
     const r = document.getElementById('tidyReviewBtn'); if (r) r.addEventListener('click', openTidySheet);
     const d = document.getElementById('tidyDismissBtn'); if (d) d.addEventListener('click', () => { state.settings.tidyDismissed = true; save(); renderTidyCard(); });
-    const un = document.getElementById('tidyUndoBtn'); if (un) un.addEventListener('click', undoTidy);
   }
 
   function openTidySheet() {
@@ -3919,26 +2672,27 @@
     document.getElementById('tidyApplyBtn').addEventListener('click', () => {
       const chosen = items.filter((c, i) => on.has(i));
       if (!applyTidy(chosen)) return;
-      closeModal(); renderAll(); toast(`Tidied up ${chosen.length}`);
+      closeModal(); renderAll(); toast(`Tidied up ${chosen.length}`, { label: 'Undo', run: undoTidy });
     });
   }
 
   /* ---------- the Add-from-catalog sheet ---------- */
 
   // Transient UI state (never saved). `pick` holds what is ticked per tab.
-  const cat = { tab: 'exercises', query: '', group: 'all', pack: 'all', cat: 'all', open: null, pick: { exercises: new Set(), habits: new Set(), foods: new Set() } };
+  const cat = { scope: ['exercises'], tab: 'exercises', query: '', group: 'all', pack: 'all', cat: 'all', open: null, pick: { exercises: new Set(), habits: new Set(), foods: new Set() } };
 
+  // The sheet only offers what belongs to the screen that opened it: Manage >
+  // Workout gets exercises (and habits when those are on), Manage > Food gets foods.
   function openCatalogSheet(tab) {
-    cat.tab = tab || 'exercises'; cat.query = ''; cat.group = 'all'; cat.pack = 'all'; cat.cat = 'all'; cat.open = null;
+    cat.scope = tab === 'foods' ? ['foods'] : ['exercises'].concat(habitsTracked() ? ['habits'] : []);
+    cat.tab = cat.scope.includes(tab) ? tab : cat.scope[0]; cat.query = ''; cat.group = 'all'; cat.pack = 'all'; cat.cat = 'all'; cat.open = null;
     cat.pick = { exercises: new Set(), habits: new Set(), foods: new Set() };
     openModal(`
       <div class="split-shell">
-        <div class="modal-title-row"><h2>Add from catalog</h2><button class="modal-close" data-action="close-modal">${CLOSE_ICON_SVG}</button></div>
-        <div class="segmented segmented-fill" id="catTabs" role="radiogroup" aria-label="Catalog">
-          <button type="button" role="radio" data-cat-tab="exercises">Exercises</button>
-          <button type="button" role="radio" data-cat-tab="habits">Habits</button>
-          <button type="button" role="radio" data-cat-tab="foods">Foods</button>
-        </div>
+        <div class="modal-title-row"><h2>${cat.scope[0] === 'foods' ? 'Add foods' : 'Add from catalog'}</h2><button class="modal-close" data-action="close-modal">${CLOSE_ICON_SVG}</button></div>
+        ${cat.scope.length > 1 ? `<div class="segmented segmented-fill" id="catTabs" role="radiogroup" aria-label="Catalog">
+          ${cat.scope.map((t) => `<button type="button" role="radio" data-cat-tab="${t}">${{ exercises: 'Exercises', habits: 'Habits', foods: 'Foods' }[t]}</button>`).join('')}
+        </div>` : '<div id="catTabs" hidden></div>'}
         <div class="split-controls" id="catControls"></div>
         <div class="split-scroll" id="catScroll"><div id="catList" class="cat-list"></div></div>
         <div class="split-foot"><button type="button" class="btn btn-primary btn-block" id="catAddBtn" disabled>Add</button></div>
@@ -3971,7 +2725,7 @@
       </div></div>
       <div class="f-scroll"><div class="f-chips" id="catPackChips" role="radiogroup" aria-label="Starter pack">
         <span class="chip-lead">Packs</span>${chipHtml('all', 'None', null, cat.pack === 'all')}
-        ${CATALOG.packs.map((p) => chipHtml(p.id, escapeHtml(p.name), null, cat.pack === p.id)).join('')}
+        ${CATALOG.packs.filter((p) => p.id !== 'running' || cardioTracked()).map((p) => chipHtml(p.id, escapeHtml(p.name), null, cat.pack === p.id)).join('')}
       </div></div>
       ${cat.pack !== 'all' ? `<div class="cat-pack-note"><span class="muted-text">${escapeHtml((CATALOG.packs.find((p) => p.id === cat.pack) || {}).description || '')} Nothing is ticked for you.</span>
         <button type="button" class="btn btn-secondary btn-sm" data-cat-selpack="1">Tick the whole pack</button></div>` : ''}`;
@@ -4232,9 +2986,8 @@
     }).join('')}</div>`;
   }
 
-  // One place decides what shows on Log -> Workout: the picker (nothing
-  // chosen, or "Switch exercise" open) or the form (something chosen), plus
-  // the "Switch exercise" row that toggles between them.
+  // Decides what shows on Log -> Workout: the picker (nothing chosen, or "Switch
+  // exercise" open) or the form, plus the "Switch exercise" row.
   function syncLogWorkoutUI() {
     const on = logCategory === 'workout' && availableDomainCategories().length > 0;
     const select = document.getElementById('logExercise');
@@ -4407,9 +3160,8 @@
 
   /* ---------- Saved foods: shared helpers ---------- */
 
-  // savedFoodId -> sortable "date+id" of the last time it was logged. Entries
-  // made from a saved food carry its id; older ones only have its name as
-  // the note, which matches just as well.
+  // savedFoodId -> sortable date+id of its last use. Entries from a saved food
+  // carry its id; older ones match by the note holding its name.
   function savedFoodLastUsedMap() {
     const byName = {};
     state.food.savedFoods.forEach((f) => { byName[f.name] = f.id; });
@@ -4450,74 +3202,36 @@
     select.innerHTML = html;
   }
 
-  // The Log tab is grouped by domain — Workout, Body, Water, Food — switched
-  // by a segmented control at the top rather than separate tabs, since
-  // they're all "add one thing" forms sharing the same "Recent entries"
-  // list below. See availableDomainCategories() below for which of the
-  // four actually show up here (only the ones currently tracked).
+  // The Log tab switches between Workout, Body, Water and Food with a segmented
+  // control; they share the "Recent entries" list. availableDomainCategories()
+  // says which are shown.
   let logCategory = 'workout';
 
-  // Every inline SVG icon in the app — this constant plus the ones below —
-  // is Lucide's actual stroke-icon set (24x24 viewBox, stroke=currentColor,
-  // stroke-width=2, round caps/joins; https://lucide.dev, ISC license),
-  // hand-copied in from the `lucide-static` package rather than pulled from
-  // a CDN or npm dependency, so the app keeps working fully offline with no
-  // new install. Using one real, licensed source everywhere replaces what
-  // used to be a mix of hand-drawn shapes (which already matched this style
-  // closely) and plain text glyphs (✕, ‹, +) standing in for icons — see
-  // CLOSE_ICON_SVG/BACK_CHEVRON_ICON_SVG/PLUS_ICON_SVG below for those.
-  // A small pencil glyph for the "Edit" icon button in a detail modal's
-  // title row (see renderExerciseDetail/renderTrackerDetail).
+  // Inline SVG icons are Lucide (https://lucide.dev, ISC license), copied in so
+  // the app works offline: 24x24 viewBox, stroke currentColor, width 2, round caps.
+  // Edit (pencil) glyph for a detail modal's title row.
   const EDIT_ICON_SVG = '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/></svg>';
 
-  // The generic modal "✕" close button and the small "✕" that removes one
-  // set row from the workout log form — both were a plain text character
-  // before; this is Lucide's `x`.
+  // Modal close button and the set-row remove button (Lucide `x`).
   const CLOSE_ICON_SVG = '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>';
 
-  // The "Next session" modal's back link — used to be the HTML entity
-  // "&lsaquo;" (‹), which didn't match the calendar's own SVG chevrons.
-  // Lucide's `chevron-left` (the calendar's prev/next-month arrows already
-  // are this exact path, so they needed no change).
+  // Back link in the "Next session" modal (Lucide `chevron-left`).
   const BACK_CHEVRON_ICON_SVG = '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>';
 
-  // The "+ Add exercise / tracker / cup" buttons' leading "+" — used to be
-  // a literal "+" character prefixed onto the label text. Lucide's `plus`.
+  // Leading "+" on the Add exercise / tracker / cup buttons (Lucide `plus`).
   const PLUS_ICON_SVG = '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>';
 
-  // The day-streak stat tile's flame (see renderSummary) — Lucide `flame`.
+  // The day-streak flame (see renderSummary); Lucide `flame`.
   const FLAME_ICON_SVG = '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3q1 4 4 6.5t3 5.5a1 1 0 0 1-14 0 5 5 0 0 1 1-3 1 1 0 0 0 5 0c0-2-1.5-3-1.5-5q0-2 2.5-4"/></svg>';
 
-  // The Water domain tab's glyph. Lucide `droplets`.
-  const WATER_DROP_ICON_SVG = '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 16.3c2.2 0 4-1.83 4-4.05 0-1.16-.57-2.26-1.71-3.19S7.29 6.75 7 5.3c-.29 1.45-1.14 2.84-2.29 3.76S3 11.1 3 12.25c0 2.22 1.8 4.05 4 4.05z"/><path d="M12.56 6.6A10.97 10.97 0 0 0 14 3.02c.5 2.5 2 4.9 4 6.5s3 3.5 3 5.5a6.98 6.98 0 0 1-11.91 4.97"/></svg>';
-
-  // The Food domain tab's glyph, and the setup wizard's Food interest tile.
-  // Lucide `apple`.
-  const APPLE_ICON_SVG = '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 6.528V3a1 1 0 0 1 1-1h0"/><path d="M18.237 21A15 15 0 0 0 22 11a6 6 0 0 0-10-4.472A6 6 0 0 0 2 11a15.1 15.1 0 0 0 3.763 10 3 3 0 0 0 3.648.648 5.5 5.5 0 0 1 5.178 0A3 3 0 0 0 18.237 21"/></svg>';
-
-  // The setup wizard's interest tiles (see renderSetupStepInterests) — one
-  // icon per trackable thing the wizard asks about up front. Lifting reuses
-  // DOMAIN_TAB_ICONS.workout (same dumbbell, same meaning); the rest are new.
-  const FOOTPRINTS_ICON_SVG = '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 16v-2.38C4 11.5 2.97 10.5 3 8c.03-2.72 1.49-6 4.5-6C9.37 2 10 3.8 10 5.5c0 3.11-2 5.66-2 8.68V16a2 2 0 1 1-4 0Z"/><path d="M20 20v-2.38c0-2.12 1.03-3.12 1-5.62-.03-2.72-1.49-6-4.5-6C14.63 6 14 7.8 14 9.5c0 3.11 2 5.66 2 8.68V20a2 2 0 1 0 4 0Z"/><path d="M16 17h4"/><path d="M4 13h4"/></svg>';
-  const SCALE_ICON_SVG = '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v18"/><path d="m19 8 3 8a5 5 0 0 1-6 0zV7"/><path d="M3 7h1a17 17 0 0 0 8-2 17 17 0 0 0 8 2h1"/><path d="m5 8 3 8a5 5 0 0 1-6 0zV7"/><path d="M7 21h10"/></svg>';
-  const MOON_ICON_SVG = '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.985 12.486a9 9 0 1 1-9.473-9.472c.405-.022.617.46.402.803a6 6 0 0 0 8.268 8.268c.344-.215.825-.004.803.401"/></svg>';
-
-  // The four domain-tab icons — Workout / Body / Water / Food — shared by
-  // every place a domain tab appears (Log, History, Manage all render these
-  // from the same JS now, rather than three hand-copied static markups that
-  // could drift). (Lucide `dumbbell` / `ruler` / `droplets` / `apple`.)
-  //
-  // Water and Food used to be nested one level down inside a third
-  // "Nutrition" domain tab, with their own smaller sub-tab pill underneath
-  // it — visually a second, different-looking layer of navigation stacked
-  // under the first. They're flat top-level domains now, same size and
-  // style as Workout/Body, so there is exactly one level of navigation
-  // anywhere in Log/History/Manage, never two.
+  // Icons for the four domain tabs (Workout, Body, Water, Food), shared by Log,
+  // History and Manage. They resolve to ITEM_ICONS (js/icons.js); getters because
+  // ITEM_ICONS is declared further down.
   const DOMAIN_TAB_ICONS = {
-    workout: '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.596 12.768a2 2 0 1 0 2.829-2.829l-1.768-1.767a2 2 0 0 0 2.828-2.829l-2.828-2.828a2 2 0 0 0-2.829 2.828l-1.767-1.768a2 2 0 1 0-2.829 2.829z"/><path d="m2.5 21.5 1.4-1.4"/><path d="m20.1 3.9 1.4-1.4"/><path d="M5.343 21.485a2 2 0 1 0 2.829-2.828l1.767 1.768a2 2 0 1 0 2.829-2.829l-6.364-6.364a2 2 0 1 0-2.829 2.829l1.768 1.767a2 2 0 0 0-2.828 2.829z"/><path d="m9.6 14.4 4.8-4.8"/></svg>',
-    measurements: '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.3 15.3a2.4 2.4 0 0 1 0 3.4l-2.6 2.6a2.4 2.4 0 0 1-3.4 0L2.7 8.7a2.41 2.41 0 0 1 0-3.4l2.6-2.6a2.41 2.41 0 0 1 3.4 0Z"/><path d="m14.5 12.5 2-2"/><path d="m11.5 9.5 2-2"/><path d="m8.5 6.5 2-2"/><path d="m17.5 15.5 2-2"/></svg>',
-    water: WATER_DROP_ICON_SVG,
-    food: APPLE_ICON_SVG,
+    get workout() { return itemIconSvg('dumbbell'); },
+    get measurements() { return itemIconSvg('ruler'); },
+    get water() { return itemIconSvg('droplets'); },
+    get food() { return itemIconSvg('apple'); },
   };
 
   // Icons for the static `data-icon="name"` spots in index.html (and the trophy
@@ -4526,9 +3240,15 @@
   const CHEVRON_RIGHT_SVG = lucide('<path d="m9 18 6-6-6-6"/>');
   const CHECK_ICON_SVG = lucide('<path d="M20 6 9 17l-5-5"/>');
   const STATIC_ICONS = {
-    workout: DOMAIN_TAB_ICONS.workout, measurements: DOMAIN_TAB_ICONS.measurements, ruler: DOMAIN_TAB_ICONS.measurements,
-    water: DOMAIN_TAB_ICONS.water, food: DOMAIN_TAB_ICONS.food, apple: APPLE_ICON_SVG,
-    scale: SCALE_ICON_SVG, moon: MOON_ICON_SVG, footprints: FOOTPRINTS_ICON_SVG,
+    get workout() { return DOMAIN_TAB_ICONS.workout; },
+    get measurements() { return DOMAIN_TAB_ICONS.measurements; },
+    get ruler() { return DOMAIN_TAB_ICONS.measurements; },
+    get water() { return DOMAIN_TAB_ICONS.water; },
+    get food() { return DOMAIN_TAB_ICONS.food; },
+    get apple() { return DOMAIN_TAB_ICONS.food; },
+    get scale() { return itemIconSvg('scale'); },
+    get moon() { return itemIconSvg('moon'); },
+    get footprints() { return itemIconSvg('footprints'); },
     trophy: lucide('<path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/>'),
     chart: lucide('<path d="M3 3v16a2 2 0 0 0 2 2h16"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/>'),
     calendar: lucide('<path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/>'),
@@ -4543,151 +3263,10 @@
   }
 
   /* ============================== Item icons ==============================
-     Every exercise, tracker, water cup and saved food shows a small icon.
-     Which one is the user's choice, set in Manage (an optional `icon` key on
-     the item); with none chosen, the item's type picks a default, so
-     nothing saved earlier changes. [label, picker category, Lucide paths] */
-  const ITEM_ICONS = {
-    dumbbell: ['Dumbbell', 'training', '<path d="M14.4 14.4 9.6 9.6"/><path d="M18.657 21.485a2 2 0 1 1-2.829-2.828l-1.767 1.768a2 2 0 1 1-2.829-2.829l6.364-6.364a2 2 0 1 1 2.829 2.829l-1.768 1.767a2 2 0 1 1 2.828 2.829z"/><path d="m21.5 21.5-1.4-1.4"/><path d="M3.9 3.9 2.5 2.5"/><path d="M6.404 12.768a2 2 0 1 1-2.829-2.829l1.768-1.767a2 2 0 1 1-2.828-2.829l2.828-2.828a2 2 0 1 1 2.829 2.828l1.767-1.768a2 2 0 1 1 2.829 2.829z"/>'],
-    weight: ['Kettlebell', 'training', '<circle cx="12" cy="5" r="3"/><path d="M6.5 8a2 2 0 0 0-1.905 1.46L2.1 18.5A2 2 0 0 0 4 21h16a2 2 0 0 0 1.925-2.54L19.4 9.5A2 2 0 0 0 17.48 8Z"/>'],
-    biceps: ['Strength', 'training', '<path d="M12.409 13.017A5 5 0 0 1 22 15c0 3.866-4 7-9 7-4.077 0-8.153-.82-10.371-2.462-.426-.316-.631-.832-.62-1.362C2.118 12.723 2.627 2 10 2a3 3 0 0 1 3 3 2 2 0 0 1-2 2c-1.105 0-1.64-.444-2-1"/><path d="M15 14a5 5 0 0 0-7.584 2"/><path d="M9.964 6.825C8.019 7.977 9.5 13 8 15"/>'],
-    footprints: ['Footprints', 'training', '<path d="M4 16v-2.38C4 11.5 2.97 10.5 3 8c.03-2.72 1.49-6 4.5-6C9.37 2 10 3.8 10 5.5c0 3.11-2 5.66-2 8.68V16a2 2 0 1 1-4 0Z"/><path d="M20 20v-2.38c0-2.12 1.03-3.12 1-5.62-.03-2.72-1.49-6-4.5-6C14.63 6 14 7.8 14 9.5c0 3.11 2 5.66 2 8.68V20a2 2 0 1 0 4 0Z"/><path d="M16 17h4"/><path d="M4 13h4"/>'],
-    bike: ['Bike', 'training', '<circle cx="18.5" cy="17.5" r="3.5"/><circle cx="5.5" cy="17.5" r="3.5"/><circle cx="15" cy="5" r="1"/><path d="M12 17.5V14l-3-3 4-3 2 3h2"/>'],
-    mountain: ['Mountain', 'training', '<path d="m8 3 4 8 5-5 5 15H2L8 3z"/>'],
-    waves: ['Waves', 'training', '<path d="M2 6c.6.5 1.2 1 2.5 1C7 7 7 5 9.5 5c2.6 0 2.4 2 5 2 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1"/><path d="M2 12c.6.5 1.2 1 2.5 1 2.5 0 2.5-2 5-2 2.6 0 2.4 2 5 2 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1"/><path d="M2 18c.6.5 1.2 1 2.5 1 2.5 0 2.5-2 5-2 2.6 0 2.4 2 5 2 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1"/>'],
-    flame: ['Flame', 'training', '<path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/>'],
-    zap: ['Lightning', 'training', '<path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z"/>'],
-    activity: ['Activity', 'training', '<path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"/>'],
-    standing: ['Person standing', 'training', '<circle cx="12" cy="5" r="1"/><path d="m9 20 3-6 3 6"/><path d="m6 8 6 2 6-2"/><path d="M12 10v4"/>'],
-    timer: ['Timer', 'training', '<line x1="10" x2="14" y1="2" y2="2"/><line x1="12" x2="15" y1="14" y2="11"/><circle cx="12" cy="14" r="8"/>'],
-    target: ['Target', 'training', '<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/>'],
-    trophy: ['Trophy', 'training', '<path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/>'],
-    medal: ['Medal', 'training', '<path d="M7.21 15 2.66 7.14a2 2 0 0 1 .13-2.2L4.4 2.8A2 2 0 0 1 6 2h12a2 2 0 0 1 1.6.8l1.6 2.14a2 2 0 0 1 .14 2.2L16.79 15"/><path d="M11 12 5.12 2.2"/><path d="m13 12 5.88-9.8"/><path d="M8 7h8"/><circle cx="12" cy="17" r="5"/><path d="M12 18v-2h-.5"/>'],
-    route: ['Route', 'training', '<circle cx="6" cy="19" r="3"/><path d="M9 19h8.5a3.5 3.5 0 0 0 0-7h-11a3.5 3.5 0 0 1 0-7H15"/><circle cx="18" cy="5" r="3"/>'],
-    gauge: ['Speed', 'training', '<path d="m12 14 4-4"/><path d="M3.34 19a10 10 0 1 1 17.32 0"/>'],
-    flag: ['Flag', 'training', '<path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" x2="4" y1="22" y2="15"/>'],
-    scale: ['Body scale', 'body', '<rect width="18" height="18" x="3" y="3" rx="4"/><path d="M8 9.5a5.5 5.5 0 0 1 8 0"/><path d="m12 10 1.6-2"/>'],
-    ruler: ['Ruler', 'body', '<path d="M21.3 15.3a2.4 2.4 0 0 1 0 3.4l-2.6 2.6a2.4 2.4 0 0 1-3.4 0L2.7 8.7a2.4 2.4 0 0 1 0-3.4l2.6-2.6a2.4 2.4 0 0 1 3.4 0Z"/><path d="m14.5 12.5 2-2"/><path d="m11.5 9.5 2-2"/><path d="m8.5 6.5 2-2"/><path d="m17.5 15.5 2-2"/>'],
-    heart: ['Heart', 'body', '<path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/>'],
-    heartpulse: ['Heart rate', 'body', '<path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/><path d="M3.22 12H9.5l.5-1 2 4.5 2-7 1.5 3.5h5.27"/>'],
-    moon: ['Moon', 'body', '<path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/>'],
-    bed: ['Bed', 'body', '<path d="M2 4v16"/><path d="M2 8h18a2 2 0 0 1 2 2v10"/><path d="M2 17h20"/><path d="M6 8v9"/>'],
-    sun: ['Sun', 'body', '<circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/>'],
-    clock: ['Clock', 'body', '<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>'],
-    brain: ['Brain', 'body', '<path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"/><path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z"/><path d="M15 13a4.5 4.5 0 0 1-3-4 4.5 4.5 0 0 1-3 4"/><path d="M17.599 6.5a3 3 0 0 0 .399-1.375"/><path d="M6.003 5.125A3 3 0 0 0 6.401 6.5"/><path d="M3.477 10.896a4 4 0 0 1 .585-.396"/><path d="M19.938 10.5a4 4 0 0 1 .585.396"/><path d="M6 18a4 4 0 0 1-1.967-.516"/><path d="M19.967 17.484A4 4 0 0 1 18 18"/>'],
-    smile: ['Smile', 'body', '<circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" x2="9.01" y1="9" y2="9"/><line x1="15" x2="15.01" y1="9" y2="9"/>'],
-    thermometer: ['Thermometer', 'body', '<path d="M14 4v10.54a4 4 0 1 1-4 0V4a2 2 0 0 1 4 0Z"/>'],
-    stethoscope: ['Stethoscope', 'body', '<path d="M11 2v2"/><path d="M5 2v2"/><path d="M5 3H4a2 2 0 0 0-2 2v4a6 6 0 0 0 12 0V5a2 2 0 0 0-2-2h-1"/><path d="M8 15a6 6 0 0 0 12 0v-3"/><circle cx="20" cy="10" r="2"/>'],
-    eye: ['Eye', 'body', '<path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"/><circle cx="12" cy="12" r="3"/>'],
-    bone: ['Bone', 'body', '<path d="M17 10c.7-.7 1.69 0 2.5 0a2.5 2.5 0 1 0 0-5 .5.5 0 0 1-.5-.5 2.5 2.5 0 1 0-5 0c0 .81.7 1.8 0 2.5l-7 7c-.7.7-1.69 0-2.5 0a2.5 2.5 0 0 0 0 5c.28 0 .5.22.5.5a2.5 2.5 0 1 0 5 0c0-.81-.7-1.8 0-2.5Z"/>'],
-    pill: ['Pill', 'body', '<path d="m10.5 20.5 10-10a4.95 4.95 0 1 0-7-7l-10 10a4.95 4.95 0 1 0 7 7Z"/><path d="m8.5 8.5 7 7"/>'],
-    hand: ['Hand', 'body', '<path d="M18 11V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2"/><path d="M14 10V4a2 2 0 0 0-2-2a2 2 0 0 0-2 2v2"/><path d="M10 10.5V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2v8"/><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"/>'],
-    ear: ['Ear', 'body', '<path d="M6 8.5a6.5 6.5 0 1 1 13 0c0 6-6 6-6 10a3.5 3.5 0 1 1-7 0"/><path d="M15 8.5a2.5 2.5 0 0 0-5 0v1a2 2 0 1 1 0 4"/>'],
-    accessibility: ['Mobility', 'body', '<circle cx="16" cy="4" r="1"/><path d="m18 19 1-7-6 1"/><path d="m5 8 3-3 5.5 3-2.36 3.5"/><path d="M4.24 14.5a5 5 0 0 0 6.88 6"/><path d="M13.76 17.5a5 5 0 0 0-6.88-6"/>'],
-    droplets: ['Droplets', 'food', '<path d="M7 16.3c2.2 0 4-1.83 4-4.05 0-1.16-.57-2.26-1.71-3.19S7.29 6.75 7 5.3c-.29 1.45-1.14 2.84-2.29 3.76S3 11.1 3 12.25c0 2.22 1.8 4.05 4 4.05z"/><path d="M12.56 6.6A10.97 10.97 0 0 0 14 3.02c.5 2.5 2 4.9 4 6.5s3 3.5 3 5.5a6.98 6.98 0 0 1-11.91 4.97"/>'],
-    glass: ['Glass of water', 'food', '<path d="M15.2 22H8.8a2 2 0 0 1-2-1.79L5 3h14l-1.81 17.21A2 2 0 0 1 15.2 22Z"/><path d="M6 12a5 5 0 0 1 6 0 5 5 0 0 0 6 0"/>'],
-    cupsoda: ['Soda', 'food', '<path d="m6 8 1.75 12.28a2 2 0 0 0 2 1.72h4.54a2 2 0 0 0 2-1.72L18 8"/><path d="M5 8h14"/><path d="M7 15a6.47 6.47 0 0 1 5 0 6.47 6.47 0 0 0 5 0"/><path d="m12 8 1-6h2"/>'],
-    coffee: ['Coffee', 'food', '<path d="M10 2v2"/><path d="M14 2v2"/><path d="M16 8a1 1 0 0 1 1 1v8a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4V9a1 1 0 0 1 1-1h14a4 4 0 1 1 0 8h-1"/><path d="M6 2v2"/>'],
-    apple: ['Apple', 'food', '<path d="M12 20.94c1.5 0 2.75 1.06 4 1.06 3 0 6-8 6-12.22A4.91 4.91 0 0 0 17 5c-2.22 0-4 1.44-5 2-1-.56-2.78-2-5-2a4.9 4.9 0 0 0-5 4.78C2 14 5 22 8 22c1.25 0 2.5-1.06 4-1.06Z"/><path d="M10 2c1 .5 2 2 2 5"/>'],
-    banana: ['Banana', 'food', '<path d="M4 13c3.5-2 8-2 10 2a5.5 5.5 0 0 1 8 5"/><path d="M5.15 17.89c5.52-1.52 8.65-6.89 7-12C11.55 4 11.5 2 13 2c3.22 0 5 5.5 5 8 0 6.5-4.2 12-10.49 12C5.11 22 2 22 2 20c0-1.5 1.14-1.55 3.15-2.11Z"/>'],
-    cherry: ['Cherry', 'food', '<path d="M2 17a5 5 0 0 0 10 0c0-2.76-2.5-5-5-3-2.5-2-5 .24-5 3Z"/><path d="M12 17a5 5 0 0 0 10 0c0-2.76-2.5-5-5-3-2.5-2-5 .24-5 3Z"/><path d="M7 14c3.22-2.91 4.29-8.75 5-12 1.66 2.38 4.94 9 5 12"/><path d="M22 9c-4.29 0-7.14-2.33-10-7 5.71 0 10 4.67 10 7Z"/>'],
-    citrus: ['Citrus', 'food', '<path d="M21.66 17.67a1.08 1.08 0 0 1-.04 1.6A12 12 0 0 1 4.73 2.38a1.1 1.1 0 0 1 1.61-.04z"/><path d="M19.65 15.66A8 8 0 0 1 8.35 4.34"/><path d="m14 10-5.5 5.5"/><path d="M14 17.85V10H6.15"/>'],
-    carrot: ['Carrot', 'food', '<path d="M2.27 21.7s9.87-3.5 12.73-6.36a4.5 4.5 0 0 0-6.36-6.37C5.77 11.84 2.27 21.7 2.27 21.7zM8.64 14l-2.05-2.04M15.34 15l-2.46-2.46"/><path d="M22 9s-1.33-2-3.5-2C16.86 7 15 9 15 9s1.33 2 3.5 2S22 9 22 9z"/><path d="M15 2s-2 1.33-2 3.5S15 9 15 9s2-1.84 2-3.5C17 3.33 15 2 15 2z"/>'],
-    salad: ['Salad', 'food', '<path d="M7 21h10"/><path d="M12 21a9 9 0 0 0 9-9H3a9 9 0 0 0 9 9Z"/><path d="M11.38 12a2.4 2.4 0 0 1-.4-4.77 2.4 2.4 0 0 1 3.2-2.77 2.4 2.4 0 0 1 3.47-.63 2.4 2.4 0 0 1 3.37 3.37 2.4 2.4 0 0 1-1.1 3.7 2.51 2.51 0 0 1 .03 1.1"/><path d="m13 12 4-4"/><path d="M10.9 7.25A3.99 3.99 0 0 0 4 10c0 .73.2 1.41.54 2"/>'],
-    wheat: ['Wheat', 'food', '<path d="M2 22 16 8"/><path d="M3.47 12.53 5 11l1.53 1.53a3.5 3.5 0 0 1 0 4.94L5 19l-1.53-1.53a3.5 3.5 0 0 1 0-4.94Z"/><path d="M7.47 8.53 9 7l1.53 1.53a3.5 3.5 0 0 1 0 4.94L9 15l-1.53-1.53a3.5 3.5 0 0 1 0-4.94Z"/><path d="M11.47 4.53 13 3l1.53 1.53a3.5 3.5 0 0 1 0 4.94L13 11l-1.53-1.53a3.5 3.5 0 0 1 0-4.94Z"/><path d="M20 2h2v2a4 4 0 0 1-4 4h-2V6a4 4 0 0 1 4-4Z"/><path d="M11.47 17.47 13 19l-1.53 1.53a3.5 3.5 0 0 1-4.94 0L5 19l1.53-1.53a3.5 3.5 0 0 1 4.94 0Z"/><path d="M15.47 13.47 17 15l-1.53 1.53a3.5 3.5 0 0 1-4.94 0L9 15l1.53-1.53a3.5 3.5 0 0 1 4.94 0Z"/><path d="M19.47 9.47 21 11l-1.53 1.53a3.5 3.5 0 0 1-4.94 0L13 11l1.53-1.53a3.5 3.5 0 0 1 4.94 0Z"/>'],
-    egg: ['Egg', 'food', '<path d="M12 22c6.23-.05 7.87-5.57 7.5-10-.36-4.34-3.95-9.96-7.5-10-3.55.04-7.14 5.66-7.5 10-.37 4.43 1.27 9.95 7.5 10z"/>'],
-    fish: ['Fish', 'food', '<path d="M6.5 12c.94-3.46 4.94-6 8.5-6 3.56 0 6.06 2.54 7 6-.94 3.47-3.44 6-7 6s-7.56-2.53-8.5-6Z"/><path d="M18 12v.5"/><path d="M16 17.93a9.77 9.77 0 0 1 0-11.86"/><path d="M7 10.67C7 8 5.58 5.97 2.73 5.5c-1 1.5-1 5 .23 6.5-1.24 1.5-1.24 5-.23 6.5C5.58 18.03 7 16 7 13.33"/><path d="M10.46 7.26C10.2 5.88 9.17 4.24 8 3h5.8a2 2 0 0 1 1.98 1.67l.23 1.4"/><path d="m16.01 17.93-.23 1.4A2 2 0 0 1 13.8 21H9.5a5.96 5.96 0 0 0 1.49-3.98"/>'],
-    beef: ['Beef', 'food', '<circle cx="12.5" cy="8.5" r="2.5"/><path d="M12.5 2a6.5 6.5 0 0 0-6.22 4.6c-1.1 3.13-.78 3.9-3.18 6.08A3 3 0 0 0 5 18c4 0 8.4-1.8 11.4-4.3A6.5 6.5 0 0 0 12.5 2Z"/><path d="m18.5 6 2.19 4.5a6.48 6.48 0 0 1 .31 2 6.49 6.49 0 0 1-2.6 5.2C15.4 20.2 11 22 7 22a3 3 0 0 1-2.68-1.66L2.4 16.5"/>'],
-    sandwich: ['Sandwich', 'food', '<path d="m2.37 11.223 8.372-6.777a2 2 0 0 1 2.516 0l8.371 6.777"/><path d="M21 15a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1h-5.25"/><path d="M3 15a1 1 0 0 0-1 1v2a1 1 0 0 0 1 1h9"/><path d="m6.67 15 6.13 4.6a2 2 0 0 0 2.8-.4l3.15-4.2"/><rect width="20" height="4" x="2" y="11" rx="1"/>'],
-    pizza: ['Pizza', 'food', '<path d="m12 14-1 1"/><path d="m13.75 18.25-1.25 1.42"/><path d="M17.775 5.654a15.68 15.68 0 0 0-12.121 12.12"/><path d="M18.8 9.3a1 1 0 0 0 2.1 7.7"/><path d="M21.964 20.732a1 1 0 0 1-1.232 1.232l-18-5a1 1 0 0 1-.695-1.232A19.68 19.68 0 0 1 15.732 2.037a1 1 0 0 1 1.232.695z"/>'],
-    soup: ['Soup', 'food', '<path d="M12 21a9 9 0 0 0 9-9H3a9 9 0 0 0 9 9Z"/><path d="M7 21h10"/><path d="M19.5 12 22 6"/><path d="M16.25 3c.27.1.8.53.75 1.36-.06.83-.93 1.2-1 2.02-.05.78.34 1.24.73 1.62"/><path d="M11.25 3c.27.1.8.53.74 1.36-.05.83-.93 1.2-.98 2.02-.06.78.33 1.24.72 1.62"/><path d="M6.25 3c.27.1.8.53.75 1.36-.06.83-.93 1.2-1 2.02-.05.78.34 1.24.74 1.62"/>'],
-    utensils: ['Utensils', 'food', '<path d="M3 2v7c0 1.1.9 2 2 2h4a2 2 0 0 0 2-2V2"/><path d="M7 2v20"/><path d="M21 15V2a5 5 0 0 0-5 5v6c0 1.1.9 2 2 2h3Zm0 0v7"/>'],
-    'arrow-big-up': ['Arrow big up', 'training', '<path d="M9 19a1 1 0 0 0 1 1h4a1 1 0 0 0 1-1v-6a1 1 0 0 1 1-1h3.293a.707.707 0 0 0 .5-1.207l-7.086-7.086a1 1 0 0 0-1.414 0l-7.086 7.086a.707.707 0 0 0 .5 1.207H8a1 1 0 0 1 1 1z"/>'],
-    'arrow-down-from-line': ['Arrow down from line', 'training', '<path d="M19 3H5"/> <path d="M12 21V7"/> <path d="m6 15 6 6 6-6"/>'],
-    'arrow-down-to-dot': ['Arrow down to dot', 'training', '<path d="M12 2v14"/> <path d="m19 9-7 7-7-7"/> <circle cx="12" cy="21" r="1"/>'],
-    'arrow-down-to-line': ['Arrow down to line', 'training', '<path d="M12 17V3"/> <path d="m6 11 6 6 6-6"/> <path d="M19 21H5"/>'],
-    'arrow-down-up': ['Arrow down up', 'training', '<path d="m3 16 4 4 4-4"/> <path d="M7 20V4"/> <path d="m21 8-4-4-4 4"/> <path d="M17 4v16"/>'],
-    'arrow-left-to-line': ['Arrow left to line', 'training', '<path d="M3 19V5"/> <path d="m13 6-6 6 6 6"/> <path d="M7 12h14"/>'],
-    'arrow-up-from-line': ['Arrow up from line', 'training', '<path d="m18 9-6-6-6 6"/> <path d="M12 3v14"/> <path d="M5 21h14"/>'],
-    'arrow-up-to-line': ['Arrow up to line', 'training', '<path d="M5 3h14"/> <path d="m18 13-6-6-6 6"/> <path d="M12 7v14"/>'],
-    barbell: ['Barbell', 'training', '<path d="M6 7v10"/><path d="M18 7v10"/><path d="M3 9.5v5"/><path d="M21 9.5v5"/><path d="M6 12h12"/>'],
-    bean: ['Bean', 'food', '<path d="M10.165 6.598C9.954 7.478 9.64 8.36 9 9c-.64.64-1.521.954-2.402 1.165A6 6 0 0 0 8 22c7.732 0 14-6.268 14-14a6 6 0 0 0-11.835-1.402Z"/> <path d="M5.341 10.62a4 4 0 1 0 5.279-5.28"/>'],
-    beer: ['Beer', 'food', '<path d="M17 11h1a3 3 0 0 1 0 6h-1"/> <path d="M9 12v6"/> <path d="M13 12v6"/> <path d="M14 7.5c-1 0-1.44.5-3 .5s-2-.5-3-.5-1.72.5-2.5.5a2.5 2.5 0 0 1 0-5c.78 0 1.57.5 2.5.5S9.44 2 11 2s2 1.5 3 1.5 1.72-.5 2.5-.5a2.5 2.5 0 0 1 0 5c-.78 0-1.5-.5-2.5-.5Z"/> <path d="M5 8v12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V8"/>'],
-    blender: ['Blender', 'food', '<path d="M8 14a2 2 0 0 0-1.963 1.615l-1.018 5.193A1 1 0 0 0 6 22h12a1 1 0 0 0 .981-1.192l-1.018-5.193A2 2 0 0 0 16 14z"/> <path d="m17 2-1 12"/> <path d="M8.006 14 7 2"/> <path d="M7.565 8.787A5 5 0 0 0 12 8a5 5 0 0 1 4.56-.75"/> <path d="M19 2H5a2 2 0 0 0-2 2v5a2 2 0 0 0 .688 1.5"/> <path d="M12 18h.01"/>'],
-    'book-open': ['Book open', 'body', '<path d="M12 5v16"/> <path d="M20.001 19A2 2 0 0022 17V5a2 2 0 00-1.999-2L16 3.002A5 5 0 0012 5a5 5 0 00-4-2H4a2 2 0 00-2 2v12a2 2 0 001.999 2H8a5 5 0 014 2 5 5 0 014-2z"/>'],
-    briefcase: ['Briefcase', 'training', '<path d="M16 20V4a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/> <rect width="20" height="14" x="2" y="6" rx="2"/>'],
-    broccoli: ['Broccoli', 'food', '<path d="M10 13a3 3 0 01-2.121-5.121"/> <path d="M15.606 14.204c-3.5 1.5-5.899 4.503-8.899 7.503A1 1 0 016 22c-2 0-4-2-4-4a1 1 0 01.293-.707c1.911-1.911 3.823-3.578 5.347-5.441"/> <path d="M16.573 14.737A4 4 0 0114 11"/> <path d="M7.14 10.907a4 4 0 112.756-7.43A4 4 0 0116.7 4.48a2 2 0 012.82 2.82 4 4 0 011.002 6.805 4 4 0 11-7.51 1.59"/>'],
-    cable: ['Cable', 'training', '<path d="M17 19a1 1 0 0 1-1-1v-2a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2a1 1 0 0 1-1 1z"/> <path d="M17 21v-2"/> <path d="M19 14V6.5a1 1 0 0 0-7 0v11a1 1 0 0 1-7 0V10"/> <path d="M21 21v-2"/> <path d="M3 5V3"/> <path d="M4 10a2 2 0 0 1-2-2V6a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2a2 2 0 0 1-2 2z"/> <path d="M7 5V3"/>'],
-    camera: ['Camera', 'body', '<path d="M13.997 4a2 2 0 0 1 1.76 1.05l.486.9A2 2 0 0 0 18.003 7H20a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2h1.997a2 2 0 0 0 1.759-1.048l.489-.904A2 2 0 0 1 10.004 4z"/> <circle cx="12" cy="13" r="3"/>'],
-    'can-soda': ['Can soda', 'food', '<path d="m17 22 1.664-2.496a2 2 0 00.336-1.11V5.606a2 2 0 00-.336-1.11L17 2"/> <path d="M18 22H6"/> <path d="M18 2H6"/> <path d="M5 17h14"/> <path d="M5 7h14"/> <path d="m7 22-1.664-2.496A2 2 0 015 18.394V5.606a2 2 0 01.336-1.11L7 2"/>'],
-    candy: ['Candy', 'food', '<path d="M10 7v10.9"/> <path d="M14 6.1V17"/> <path d="M16 7V3a1 1 0 0 1 1.707-.707 2.5 2.5 0 0 0 2.152.717 1 1 0 0 1 1.131 1.131 2.5 2.5 0 0 0 .717 2.152A1 1 0 0 1 21 8h-4"/> <path d="M16.536 7.465a5 5 0 0 0-7.072 0l-2 2a5 5 0 0 0 0 7.07 5 5 0 0 0 7.072 0l2-2a5 5 0 0 0 0-7.07"/> <path d="M8 17v4a1 1 0 0 1-1.707.707 2.5 2.5 0 0 0-2.152-.717 1 1 0 0 1-1.131-1.131 2.5 2.5 0 0 0-.717-2.152A1 1 0 0 1 3 16h4"/>'],
-    'chef-hat': ['Chef hat', 'body', '<path d="M17 21a1 1 0 0 0 1-1v-5.35c0-.457.316-.844.727-1.041a4 4 0 0 0-2.134-7.589 5 5 0 0 0-9.186 0 4 4 0 0 0-2.134 7.588c.411.198.727.585.727 1.041V20a1 1 0 0 0 1 1Z"/> <path d="M6 17h12"/>'],
-    'chevrons-down': ['Chevrons down', 'training', '<path d="m7 6 5 5 5-5"/> <path d="m7 13 5 5 5-5"/>'],
-    'chevrons-up': ['Chevrons up', 'training', '<path d="m17 11-5-5-5 5"/> <path d="m17 18-5-5-5 5"/>'],
-    cog: ['Cog', 'training', '<path d="M11 10.27 7 3.34"/> <path d="m11 13.73-4 6.93"/> <path d="M12 22v-2"/> <path d="M12 2v2"/> <path d="M14 12h8"/> <path d="m17 20.66-1-1.73"/> <path d="m17 3.34-1 1.73"/> <path d="M2 12h2"/> <path d="m20.66 17-1.73-1"/> <path d="m20.66 7-1.73 1"/> <path d="m3.34 17 1.73-1"/> <path d="m3.34 7 1.73 1"/> <circle cx="12" cy="12" r="2"/> <circle cx="12" cy="12" r="8"/>'],
-    cookie: ['Cookie', 'food', '<path d="M11 17h.01"/> <path d="M11.496 2c.324-.016.558.292.529.615a4 4 0 004.235 4.368.713.713 0 01.758.757 4 4 0 004.366 4.237c.323-.03.63.204.614.527a10 10 0 01-2.915 6.566A1 1 0 114.93 4.918 10 10 0 0111.496 2"/> <path d="M12 12h.01"/> <path d="M16 16h.01"/> <path d="M16 3h.01"/> <path d="M21 4h.01"/> <path d="M21 8h.01"/> <path d="M7 14h.01"/> <path d="M9 8h.01"/>'],
-    'cooking-pot': ['Cooking pot', 'food', '<path d="M2 12h20"/> <path d="M20 12v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-8"/> <path d="m4 8 16-4"/> <path d="m8.86 6.78-.45-1.81a2 2 0 0 1 1.45-2.43l1.94-.48a2 2 0 0 1 2.43 1.46l.45 1.8"/>'],
-    croissant: ['Croissant', 'food', '<path d="M10.2 18H4.774a1.5 1.5 0 0 1-1.352-.97 11 11 0 0 1 .132-6.487"/> <path d="M18 10.2V4.774a1.5 1.5 0 0 0-.97-1.352 11 11 0 0 0-6.486.132"/> <path d="M18 5a4 3 0 0 1 4 3 2 2 0 0 1-2 2 10 10 0 0 0-5.139 1.42"/> <path d="M5 18a3 4 0 0 0 3 4 2 2 0 0 0 2-2 10 10 0 0 1 1.42-5.14"/> <path d="M8.709 2.554a10 10 0 0 0-6.155 6.155 1.5 1.5 0 0 0 .676 1.626l9.807 5.42a2 2 0 0 0 2.718-2.718l-5.42-9.807a1.5 1.5 0 0 0-1.626-.676"/>'],
-    cylinder: ['Cylinder', 'body', '<ellipse cx="12" cy="5" rx="9" ry="3"/> <path d="M3 5v14a9 3 0 0 0 18 0V5"/>'],
-    disc: ['Disc', 'training', '<circle cx="12" cy="12" r="10"/> <circle cx="12" cy="12" r="2"/>'],
-    donut: ['Donut', 'food', '<path d="M20.5 10a2.5 2.5 0 0 1-2.4-3H18a2.95 2.95 0 0 1-2.6-4.4 10 10 0 1 0 6.3 7.1c-.3.2-.8.3-1.2.3"/> <circle cx="12" cy="12" r="3"/>'],
-    'door-stairwell': ['Door stairwell', 'training', '<path d="M12 17v-3a1 1 0 011-1h6"/> <path d="M19 17h-9a1 1 0 00-1 1v3"/> <path d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16"/> <path d="M19 9h-3a1 1 0 00-1 1v3"/> <path d="M22 21H2"/>'],
-    droplet: ['Droplet', 'food', '<path d="M12 22a7 7 0 0 0 7-7c0-2-1-3.9-3-5.5s-3.5-4-4-6.5c-.5 2.5-2 4.9-4 6.5C6 11.1 5 13 5 15a7 7 0 0 0 7 7z"/>'],
-    drumstick: ['Drumstick', 'food', '<path d="M15.4 15.63a7.875 6 135 1 1 6.23-6.23 4.5 3.43 135 0 0-6.23 6.23"/> <path d="m8.29 12.71-2.6 2.6a2.5 2.5 0 1 0-1.65 4.65A2.5 2.5 0 1 0 8.7 18.3l2.59-2.59"/>'],
-    'egg-fried': ['Egg fried', 'food', '<circle cx="11.5" cy="12.5" r="3.5"/> <path d="M3 8c0-3.5 2.5-6 6.5-6 5 0 4.83 3 7.5 5s5 2 5 6c0 4.5-2.5 6.5-7 6.5-2.5 0-2.5 2.5-6 2.5s-7-2-7-5.5c0-3 1.5-3 1.5-5C3.5 10 3 9 3 8Z"/>'],
-    fence: ['Fence', 'training', '<path d="M4 3 2 5v15c0 .6.4 1 1 1h2c.6 0 1-.4 1-1V5Z"/> <path d="M6 8h4"/> <path d="M6 18h4"/> <path d="m12 3-2 2v15c0 .6.4 1 1 1h2c.6 0 1-.4 1-1V5Z"/> <path d="M14 8h4"/> <path d="M14 18h4"/> <path d="m20 3-2 2v15c0 .6.4 1 1 1h2c.6 0 1-.4 1-1V5Z"/>'],
-    'fish-symbol': ['Fish symbol', 'food', '<path d="M2 16s9-15 20-4C11 23 2 8 2 8"/>'],
-    'flask-conical': ['Flask conical', 'body', '<path d="M14 2v6a2 2 0 0 0 .245.96l5.51 10.08A2 2 0 0 1 18 22H6a2 2 0 0 1-1.755-2.96l5.51-10.08A2 2 0 0 0 10 8V2"/> <path d="M6.453 15h11.094"/> <path d="M8.5 2h7"/>'],
-    'flower-2': ['Flower', 'body', '<path d="M12 5a3 3 0 1 1 3 3m-3-3a3 3 0 1 0-3 3m3-3v1M9 8a3 3 0 1 0 3 3M9 8h1m5 0a3 3 0 1 1-3 3m3-3h-1m-2 3v-1"/> <circle cx="12" cy="8" r="2"/> <path d="M12 10v12"/> <path d="M12 22c4.2 0 7-1.667 7-5-4.2 0-7 1.667-7 5Z"/> <path d="M12 22c-4.2 0-7-1.667-7-5 4.2 0 7 1.667 7 5Z"/>'],
-    grape: ['Grape', 'food', '<path d="M22 5V2l-5.89 5.89"/> <circle cx="16.6" cy="15.89" r="3"/> <circle cx="8.11" cy="7.4" r="3"/> <circle cx="12.35" cy="11.65" r="3"/> <circle cx="13.91" cy="5.85" r="3"/> <circle cx="18.15" cy="10.09" r="3"/> <circle cx="6.56" cy="13.2" r="3"/> <circle cx="10.8" cy="17.44" r="3"/> <circle cx="5" cy="19" r="3"/>'],
-    'grid-3x2': ['Grid 3x2', 'training', '<path d="M15 3v18"/> <path d="M3 12h18"/> <path d="M9 3v18"/> <rect x="3" y="3" width="18" height="18" rx="2"/>'],
-    ham: ['Ham', 'food', '<path d="M13.144 21.144A7.274 10.445 45 1 0 2.856 10.856"/> <path d="M13.144 21.144A7.274 4.365 45 0 0 2.856 10.856a7.274 4.365 45 0 0 10.288 10.288"/> <path d="M16.565 10.435 18.6 8.4a2.501 2.501 0 1 0 1.65-4.65 2.5 2.5 0 1 0-4.66 1.66l-2.024 2.025"/> <path d="m8.5 16.5-1-1"/>'],
-    hammer: ['Hammer', 'training', '<path d="m15 12-9.373 9.373a1 1 0 0 1-3.001-3L12 9"/> <path d="m18 15 4-4"/> <path d="m21.5 11.5-1.914-1.914A2 2 0 0 1 19 8.172v-.344a2 2 0 0 0-.586-1.414l-1.657-1.657A6 6 0 0 0 12.516 3H9l1.243 1.243A6 6 0 0 1 12 8.485V10l2 2h1.172a2 2 0 0 1 1.414.586L18.5 14.5"/>'],
-    'hand-platter': ['Hand platter', 'food', '<path d="M12 3V2"/> <path d="m15.4 17.4 3.2-2.8a2 2 0 1 1 2.8 2.9l-3.6 3.3c-.7.8-1.7 1.2-2.8 1.2h-4c-1.1 0-2.1-.4-2.8-1.2l-1.302-1.464A1 1 0 0 0 6.151 19H5"/> <path d="M2 14h12a2 2 0 0 1 0 4h-2"/> <path d="M4 10h16"/> <path d="M5 10a7 7 0 0 1 14 0"/> <path d="M5 14v6a1 1 0 0 1-1 1H2"/>'],
-    hexagon: ['Hexagon', 'training', '<path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>'],
-    'hiking-stick': ['Hiking stick', 'training', '<path d="M13.5 10.5 2 22"/> <path d="M16.352 11.648a1.205 1.205 0 01-1.704 0l-2.296-2.296a1.205 1.205 0 010-1.704l.72-.72a2 2 0 011.022-.546l.599-.12a2 2 0 001.569-1.57l.12-.598a2 2 0 01.546-1.022l.72-.72a1.205 1.205 0 011.704 0l2.296 2.296a1.205 1.205 0 010 1.704l-6.02 6.02a1 1 0 103 3l.201-.201A7.4 7.4 0 0021 9.93V7"/> <path d="m6 21-3-3"/>'],
-    'ice-cream-bowl': ['Ice cream bowl', 'food', '<path d="M12 17c5 0 8-2.69 8-6H4c0 3.31 3 6 8 6m-4 4h8m-4-3v3M5.14 11a3.5 3.5 0 1 1 6.71 0"/> <path d="M12.14 11a3.5 3.5 0 1 1 6.71 0"/> <path d="M15.5 6.5a3.5 3.5 0 1 0-7 0"/>'],
-    'ice-cream-cone': ['Ice cream cone', 'food', '<path d="m7 11 4.08 10.35a1 1 0 0 0 1.84 0L17 11"/> <path d="M17 7A5 5 0 0 0 7 7"/> <path d="M17 7a2 2 0 0 1 0 4H7a2 2 0 0 1 0-4"/>'],
-    kayak: ['Kayak', 'training', '<path d="M18 17a1 1 0 0 0-1 1v1a2 2 0 1 0 2-2z"/> <path d="M20.97 3.61a.45.45 0 0 0-.58-.58C10.2 6.6 6.6 10.2 3.03 20.39a.45.45 0 0 0 .58.58C13.8 17.4 17.4 13.8 20.97 3.61"/> <path d="m6.707 6.707 10.586 10.586"/> <path d="M7 5a2 2 0 1 0-2 2h1a1 1 0 0 0 1-1z"/>'],
-    layers: ['Layers', 'training', '<path d="M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83z"/> <path d="M2 12a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 12"/> <path d="M2 17a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 17"/>'],
-    leaf: ['Leaf', 'food', '<path d="M11 20a10 10 0 0010-10 25.9 25.9 0 00-1.04-7.281 1 1 0 00-1.755-.325C15.833 5.5 13 5.5 9.8 6.1A7 7 0 0011 20"/> <path d="M2 21a5 5 0 012.911-4.544C7.613 15.212 8.351 15.24 11 13"/>'],
-    'leafy-green': ['Leafy green', 'food', '<path d="M2 22c1.25-.987 2.27-1.975 3.9-2.2a5.56 5.56 0 0 1 3.8 1.5 4 4 0 0 0 6.187-2.353 3.5 3.5 0 0 0 3.69-5.116A3.5 3.5 0 0 0 20.95 8 3.5 3.5 0 1 0 16 3.05a3.5 3.5 0 0 0-5.831 1.373 3.5 3.5 0 0 0-5.116 3.69 4 4 0 0 0-2.348 6.155C3.499 15.42 4.409 16.712 4.2 18.1 3.926 19.743 3.014 20.732 2 22"/> <path d="M2 22 17 7"/>'],
-    milk: ['Milk', 'food', '<path d="M8 2h8"/> <path d="M9 2v2.789a4 4 0 0 1-.672 2.219l-.656.984A4 4 0 0 0 7 10.212V20a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2v-9.789a4 4 0 0 0-.672-2.219l-.656-.984A4 4 0 0 1 15 4.788V2"/> <path d="M7 15a6.472 6.472 0 0 1 5 0 6.47 6.47 0 0 0 5 0"/>'],
-    'milk-off': ['Milk off', 'food', '<path d="M8 2h8"/> <path d="M9 2v1.343M15 2v2.789a4 4 0 0 0 .672 2.219l.656.984a4 4 0 0 1 .672 2.22v1.131M7.8 7.8l-.128.192A4 4 0 0 0 7 10.212V20a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2v-3"/> <path d="M7 15a6.47 6.47 0 0 1 5 0 6.472 6.472 0 0 0 3.435.435"/> <line x1="2" x2="22" y1="2" y2="22"/>'],
-    'mountain-snow': ['Mountain snow', 'training', '<path d="m8 3 4 8 5-5 5 15H2L8 3z"/> <path d="M4.14 15.08c2.62-1.57 5.24-1.43 7.86.42 2.74 1.94 5.49 2 8.23.19"/>'],
-    'move-diagonal': ['Move diagonal', 'training', '<path d="M11 19H5v-6"/> <path d="M13 5h6v6"/> <path d="M19 5 5 19"/>'],
-    'move-down': ['Move down', 'training', '<path d="M8 18L12 22L16 18"/> <path d="M12 2V22"/>'],
-    'move-horizontal': ['Move horizontal', 'training', '<path d="m18 8 4 4-4 4"/> <path d="M2 12h20"/> <path d="m6 8-4 4 4 4"/>'],
-    'move-up': ['Move up', 'training', '<path d="M8 6L12 2L16 6"/> <path d="M12 2V22"/>'],
-    'move-up-right': ['Move up right', 'training', '<path d="M13 5H19V11"/> <path d="M19 5L5 19"/>'],
-    'notebook-pen': ['Notebook pen', 'body', '<path d="M13.4 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7.4"/> <path d="M2 6h4"/> <path d="M2 10h4"/> <path d="M2 14h4"/> <path d="M2 18h4"/> <path d="M21.378 5.626a1 1 0 1 0-3.004-3.004l-5.01 5.012a2 2 0 0 0-.506.854l-.837 2.87a.5.5 0 0 0 .62.62l2.87-.837a2 2 0 0 0 .854-.506z"/>'],
-    nut: ['Nut', 'food', '<path d="M16.847 5.847 20 9a7.23 7.23 0 011.551 7.516C21.241 17.352 21 17.932 21 19v1a1 1 0 01-1 1h-1c-1.069 0-1.648.242-2.485.552A7.2 7.2 0 019.002 20l-3.155-3.153"/> <path d="M18.21 5.43c-1.71.69-5.07 1.07-6.71 1.07.46 1.38.91 2.74.61 4.88a.88.88 0 01-.73.74c-1.78.28-3.54-.17-4.88-.62 0 1.64-.38 5-1.07 6.71-.21.52-.82.55-1.17.12A10 10 0 0118.33 4.26c.43.35.4.97-.12 1.17"/> <path d="M4.93 4.93 3 3a.7.7 0 010-1"/>'],
-    'pill-bottle': ['Pill bottle', 'body', '<path d="M18 11h-4a1 1 0 0 0-1 1v5a1 1 0 0 0 1 1h4"/> <path d="M6 7v13a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7"/> <rect width="16" height="5" x="4" y="2" rx="1"/>'],
-    popcorn: ['Popcorn', 'food', '<path d="M18 8a2 2 0 0 0 0-4 2 2 0 0 0-4 0 2 2 0 0 0-4 0 2 2 0 0 0-4 0 2 2 0 0 0 0 4"/> <path d="M10 22 9 8"/> <path d="m14 22 1-14"/> <path d="M20 8c.5 0 .9.4.8 1l-2.6 12c-.1.5-.7 1-1.2 1H7c-.6 0-1.1-.4-1.2-1L3.2 9c-.1-.6.3-1 .8-1Z"/>'],
-    'redo-2': ['Redo', 'training', '<path d="m15 14 5-5-5-5"/> <path d="M20 9H9.5A5.5 5.5 0 0 0 4 14.5A5.5 5.5 0 0 0 9.5 20H13"/>'],
-    'refresh-cw': ['Refresh cw', 'training', '<path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/> <path d="M21 3v5h-5"/> <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/> <path d="M8 16H3v5"/>'],
-    repeat: ['Repeat', 'training', '<path d="m17 2 4 4-4 4"/> <path d="M3 11v-1a4 4 0 0 1 4-4h14"/> <path d="m7 22-4-4 4-4"/> <path d="M21 13v1a4 4 0 0 1-4 4H3"/>'],
-    shield: ['Shield', 'training', '<path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/>'],
-    shrimp: ['Shrimp', 'food', '<path d="M10 2a3.28 3.28 0 003.227 1.798l6.17-.561A1 1 0 1119.614 8H8.5a6.44 6.44 0 00-5.63 9.75A6.5 6.5 0 008.5 21c1.38 0 2-.5 2.5-1"/> <path d="M10 8a8.5 8.5 0 000 8"/> <path d="M11 22c-.5-.5-1.12-1-2.5-1a1 1 0 010-5H12a7 7 0 007-7V8"/> <path d="M13 12h.01"/> <path d="M8 16c-2 0-4.5-4-4-6"/>'],
-    skull: ['Skull', 'training', '<path d="m12.5 17-.5-1-.5 1h1z"/> <path d="M15 22a1 1 0 0 0 1-1v-1a2 2 0 0 0 1.56-3.25 8 8 0 1 0-11.12 0A2 2 0 0 0 8 20v1a1 1 0 0 0 1 1z"/> <circle cx="15" cy="12" r="1"/> <circle cx="9" cy="12" r="1"/>'],
-    slice: ['Slice', 'food', '<path d="M11 16.586V19a1 1 0 0 1-1 1H2L18.37 3.63a1 1 0 1 1 3 3l-9.663 9.663a1 1 0 0 1-1.414 0L8 14"/>'],
-    'sport-shoe': ['Sport shoe', 'training', '<path d="m15 10.42 4.8-5.07"/> <path d="M19 18h3"/> <path d="M9.5 22 21.414 9.415A2 2 0 0 0 21.2 6.4l-5.61-4.208A1 1 0 0 0 14 3v2a2 2 0 0 1-1.394 1.906L8.677 8.053A1 1 0 0 0 8 9c-.155 6.393-2.082 9-4 9a2 2 0 0 0 0 4h14"/>'],
-    'stretch-horizontal': ['Stretch horizontal', 'training', '<rect width="20" height="6" x="2" y="4" rx="2"/> <rect width="20" height="6" x="2" y="14" rx="2"/>'],
-    sunrise: ['Sunrise', 'body', '<path d="M12 2v8"/> <path d="m4.93 10.93 1.41 1.41"/> <path d="M2 18h2"/> <path d="M20 18h2"/> <path d="m19.07 10.93-1.41 1.41"/> <path d="M22 22H2"/> <path d="m8 6 4-4 4 4"/> <path d="M16 18a4 4 0 0 0-8 0"/>'],
-    'thermometer-snowflake': ['Thermometer snowflake', 'body', '<path d="m10 20-1.25-2.5L6 18"/> <path d="M10 4 8.75 6.5 6 6"/> <path d="M10.585 15H10"/> <path d="M2 12h6.5L10 9"/> <path d="M20 14.54a4 4 0 1 1-4 0V4a2 2 0 0 1 4 0z"/> <path d="m4 10 1.5 2L4 14"/> <path d="m7 21 3-6-1.5-3"/> <path d="m7 3 3 6h2"/>'],
-    'thermometer-sun': ['Thermometer sun', 'body', '<path d="M12 2v2"/> <path d="M12 8a4 4 0 0 0-1.645 7.647"/> <path d="M2 12h2"/> <path d="M20 14.54a4 4 0 1 1-4 0V4a2 2 0 0 1 4 0z"/> <path d="m4.93 4.93 1.41 1.41"/> <path d="m6.34 17.66-1.41 1.41"/>'],
-    toothbrush: ['Toothbrush', 'body', '<path d="M15 11c-2 2-4 2-6 4l-7 7"/> <path d="m22 4-7.414 7.414-2-2A2 2 0 0114 6c0-.512.196-1.024.586-1.414A2 2 0 0116 4a2 2 0 013.262-1.552l2.152 2.138"/>'],
-    'trending-up': ['Trending up', 'training', '<path d="M16 7h6v6"/> <path d="m22 7-8.5 8.5-5-5L2 17"/>'],
-    'tube-lotion': ['Tube lotion', 'body', '<path d="M15 18v3a1 1 0 0 1-1 1h-4a1 1 0 0 1-1-1v-3"/> <path d="M17 2a2 2 0 0 1 1.6 3.2A8 8 0 0 0 17 10v6a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2v-6a8 8 0 0 0-1.6-4.8A2 2 0 0 1 7 2z"/> <path d="M7 10a6.47 6.47 0 0 1 5 0 6.47 6.47 0 0 0 5 0"/>'],
-    'undo-2': ['Undo', 'training', '<path d="M9 14 4 9l5-5"/> <path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5a5.5 5.5 0 0 1-5.5 5.5H11"/>'],
-    'unfold-horizontal': ['Unfold horizontal', 'training', '<path d="M16 12h6"/> <path d="M8 12H2"/> <path d="M12 2v2"/> <path d="M12 8v2"/> <path d="M12 14v2"/> <path d="M12 20v2"/> <path d="m19 15 3-3-3-3"/> <path d="m5 9-3 3 3 3"/>'],
-    vegan: ['Vegan', 'food', '<path d="M16 8q6 0 6-6-6 0-6 6"/> <path d="M17.41 3.59a10 10 0 1 0 3 3"/> <path d="M2 2a26.6 26.6 0 0 1 10 20c.9-6.82 1.5-9.5 4-14"/>'],
-    'waves-ladder': ['Waves ladder', 'training', '<path d="M19 5a2 2 0 0 0-2 2v11"/> <path d="M2 18c.6.5 1.2 1 2.5 1 2.5 0 2.5-2 5-2 2.6 0 2.4 2 5 2 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1"/> <path d="M7 13h10"/> <path d="M7 9h10"/> <path d="M9 5a2 2 0 0 0-2 2v11"/>'],
-    'weight-tilde': ['Weight tilde', 'training', '<path d="M6.5 8a2 2 0 0 0-1.906 1.46L2.1 18.5A2 2 0 0 0 4 21h16a2 2 0 0 0 1.925-2.54L19.4 9.5A2 2 0 0 0 17.48 8z"/> <path d="M7.999 15a2.5 2.5 0 0 1 4 0 2.5 2.5 0 0 0 4 0"/> <circle cx="12" cy="5" r="3"/>'],
-    wind: ['Wind', 'body', '<path d="M12.8 19.6A2 2 0 1 0 14 16H2"/> <path d="M17.5 8a2.5 2.5 0 1 1 2 4H2"/> <path d="M9.8 4.4A2 2 0 1 1 11 8H2"/>'],
-    wine: ['Wine', 'food', '<path d="M8 22h8"/> <path d="M7 10h10"/> <path d="M12 15v7"/> <path d="M12 15a5 5 0 0 0 5-5c0-2-.5-4-2-8H9c-1.5 4-2 6-2 8a5 5 0 0 0 5 5Z"/>'],
-    'wine-off': ['Wine off', 'body', '<path d="M8 22h8"/> <path d="M7 10h3m7 0h-1.343"/> <path d="M12 15v7"/> <path d="M7.307 7.307A12.33 12.33 0 0 0 7 10a5 5 0 0 0 7.391 4.391M8.638 2.981C8.75 2.668 8.872 2.34 9 2h6c1.5 4 2 6 2 8 0 .407-.05.809-.145 1.198"/> <line x1="2" x2="22" y1="2" y2="22"/>'],
-  };
+     Every exercise, tracker, cup and saved food shows an icon: the user's choice (an optional
+     `icon` key) or a default by type. ITEM_ICONS (js/icons.js) maps key -> [label, picker
+     category, Lucide paths]. */
+  const { ITEM_ICONS } = window.FitIcons;
   const ITEM_ICON_CATEGORIES = [['common', 'Common'], ['training', 'Training'], ['body', 'Body'], ['food', 'Food']];
   const COMMON_ICONS = ['dumbbell', 'weight', 'activity', 'footprints', 'bike', 'timer', 'flame', 'scale', 'ruler', 'heart', 'moon', 'droplets', 'glass', 'apple', 'utensils', 'coffee', 'biceps', 'pill'];
   const EXERCISE_DEFAULT_ICON = { weight: 'dumbbell', reps: 'activity', cardio: 'footprints', habit: 'standing' };
@@ -4706,15 +3285,13 @@
   const cupIconHtml = (cup, small) => itemIconHtml(cupIconKey(cup), small);
   const savedFoodIconHtml = (food, small) => itemIconHtml(savedFoodIconKey(food), small);
 
-  // The "Icon" field of an Add/Edit form: a row showing the current icon
-  // that opens a grid to pick another. `getDefault` is what shows with
-  // nothing chosen (it can change as the form's type does); the returned
-  // `value()` is the chosen key, or null for the default.
+  // The "Icon" field of an Add/Edit form: shows the current icon and opens a grid
+  // to pick another. `getDefault` gives the icon shown when none is chosen;
+  // `value()` returns the chosen key, or null for the default.
   const PENCIL_ICON_SVG = '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/></svg>';
-  // The top of every Add/Edit form: a large icon tile with a small pencil
-  // badge beside the Name field. Tapping the tile opens the icon search and
-  // picker right under it. (Exercise, tracker, cup and saved-food forms all
-  // use this one helper, so they stay identical.)
+  // Top of every Add/Edit form: a large icon tile with a pencil badge beside the
+  // Name field; tapping it opens the icon picker. Shared by the exercise, tracker,
+  // cup and saved-food forms.
   function nameIconHtml({ iconId, inputId, value, placeholder, maxlength, label = 'Name' }) {
     return `
       <div class="field">
@@ -4775,71 +3352,45 @@
     return { value: () => chosen, refresh: paintRow };
   }
 
-  // Visible label per domain — "Body" rather than "Measurements" purely so
-  // four labels fit as comfortably at this tap-target size as three used
-  // to; the underlying id stays "measurements" (matches the settings flag
-  // trackMeasurements below), same "id stays put, only the label changes"
-  // precedent as Workout (id stays "workout" even though this used to say
-  // "Exercises" in Manage specifically).
+  // Display label per domain. The id stays `measurements` (matching
+  // settings.trackMeasurements) though it is labelled "Body".
   const DOMAIN_LABELS = { workout: 'Workout', measurements: 'Body', water: 'Water', food: 'Food' };
   const DOMAIN_ORDER = ['workout', 'measurements', 'water', 'food'];
 
-  // One master "Track this" toggle per domain (settings.trackWorkout/
-  // trackMeasurements/trackWater/trackFood — see DEFAULT_SETTINGS) rather
-  // than four different ways of expressing "this whole feature is off,"
-  // the way it used to be (Food had an explicit toggle, Water was "off"
-  // only by implication — zero cups defined — and Workout/Body had no
-  // domain-level off state at all, only per-item archiving). All four
-  // domains now answer the same "is this domain on at all" question the
-  // same way, on top of whichever finer-grained per-item state
-  // (archived exercises/trackers, individual macro tracking) already
-  // existed underneath it.
-  function domainTracked(id) {
-    if (id === 'workout') return state.settings.trackWorkout || habitsTracked();
-    if (id === 'measurements') return state.settings.trackMeasurements;
-    if (id === 'water') return state.settings.trackWater;
-    return state.settings.trackFood;
-  }
+  // Master "Track this" switch per domain (settings.trackWorkout/trackMeasurements/
+  // trackWater/trackFood). The Workout domain counts as on while Lifting, Running &
+  // cardio or Habits is on (js/features.js).
+  function domainTracked(id) { return F.domainTracked(state.settings, id); }
 
-  // Log/History only ever offer a domain that's actually turned on — a
-  // fully-off domain simply isn't a tab to switch to, rather than a tab
-  // that opens to an explanatory empty state. See ALL_DOMAIN_CATEGORIES
-  // below for Manage's different rule.
+  // Log and History offer only domains that are on. Manage offers all four
+  // (ALL_DOMAIN_CATEGORIES).
   function availableDomainCategories() {
-    return DOMAIN_ORDER.filter(domainTracked).map((id) => ({ id, label: DOMAIN_LABELS[id] }));
+    // With only Habits on, "Workout" would promise lifting that isn't being
+    // tracked, so Log and History call it what it holds.
+    const habitsOnly = F.habitsOnly(state.settings);
+    return DOMAIN_ORDER.filter(domainTracked).map((id) => ({ id, label: id === 'workout' && habitsOnly ? 'Habits' : DOMAIN_LABELS[id] }));
   }
 
-  // Manage always offers all four regardless of tracked state — same
-  // reasoning the old MANAGE_NUTRITION_SUBS constant this replaces already
-  // established: Manage is specifically where a turned-off domain gets
-  // turned back on, so it can't gate its own tabs on the very flag they
-  // exist to change.
+  // Manage always offers all four domains: it is where an off domain is turned back on.
   const ALL_DOMAIN_CATEGORIES = DOMAIN_ORDER.map((id) => ({ id, label: DOMAIN_LABELS[id] }));
 
-  // Shared domain-tab markup builder for Log, History, and Manage — all
-  // three now render this identical component from the same list of
-  // categories (Log/History pass availableDomainCategories(), Manage
-  // passes ALL_DOMAIN_CATEGORIES) rather than three separately hand-built
-  // copies that could drift. A domain that's toggled off gets the shared
-  // `.is-toggled-off` dimmed treatment (Manage only, since that's the only
-  // caller that ever renders an off domain's tab at all) — still fully
-  // tappable, since Manage is where you'd tap it to turn it back on.
+  // Domain tab markup shared by Log, History and Manage. An off domain gets
+  // `.is-toggled-off` (dimmed but still tappable); only Manage shows one.
   function domainTabsHtml(cats, activeId) {
     return cats.map((c) => `
       <button type="button" class="domain-tab${domainTracked(c.id) ? '' : ' is-toggled-off'}" data-domain-cat="${c.id}" role="radio" aria-checked="${c.id === activeId}">
-        ${DOMAIN_TAB_ICONS[c.id] || ''}
+        ${c.label === 'Habits' ? STATIC_ICONS.habits : (DOMAIN_TAB_ICONS[c.id] || '')}
         <span>${c.label}</span>
       </button>`).join('');
   }
 
   function renderLogCategorySegmented() {
     const cats = availableDomainCategories();
-    // Every domain toggled off at once is a real (if unusual) reachable
-    // state — see renderLogView()'s own guard below — so this can't just
-    // assume cats[0] exists.
+    // All domains can be off at once, so cats[0] may not exist.
     if (cats.length && !cats.some((c) => c.id === logCategory)) logCategory = cats[0].id;
     const seg = document.getElementById('logCategorySegmented');
     seg.innerHTML = domainTabsHtml(cats, logCategory);
+    seg.hidden = cats.length < 2; // a single tracked section needs no switcher
     seg.querySelectorAll('button').forEach((b) => {
       b.addEventListener('click', () => { logCategory = b.dataset.domainCat; renderLogView(); });
     });
@@ -4849,8 +3400,8 @@
     const select = document.getElementById('logExercise');
     const prevValue = select.value;
     populateExerciseSelect(select);
-    // Nothing is chosen until the user picks from the list (or opens one
-    // from elsewhere in the app) — hence the blank first option.
+    // Nothing is chosen until the user picks one (or opens one from elsewhere in
+    // the app), hence the blank first option.
     select.insertAdjacentHTML('afterbegin', '<option value=""></option>');
     select.value = prevValue && [...select.options].some((o) => o.value === prevValue) ? prevValue : '';
     document.getElementById('logDate').value = document.getElementById('logDate').value || todayISO();
@@ -4884,19 +3435,16 @@
     const date = document.getElementById('logMeasurementDate').value || todayISO();
     const note = document.getElementById('logMeasurementNote').value.trim();
     const quality = tracker.kind === 'sleep' ? clampQuality(document.getElementById('logSleepQuality').dataset.value) : undefined;
-    // If this tracker has a goal but never got a baseline (e.g. the goal was
-    // set before this feature existed and the v6->v7 migration found no
-    // history to backfill from), the value it was AT before this new entry
-    // becomes that baseline — or, if this is the very first entry ever,
-    // the entry's own value (0% progress, which is correct: nothing to
-    // measure movement against yet).
+    // A goal with no baseline (e.g. an older tracker with no history to backfill)
+    // takes the previous latest value as its baseline, or this entry's value if it
+    // is the first.
     if (tracker.goal != null && tracker.baseline == null) {
       const prevLatest = latestMeasurement(tracker.id);
       tracker.baseline = prevLatest ? prevLatest.value : trackerCanonicalFromDisplay(tracker, raw);
     }
     state.measurements.push({ id: genId('meas'), trackerId: tracker.id, date, value: trackerCanonicalFromDisplay(tracker, raw), quality, note: note || null });
-    // A new bodyweight entry can move any lift's bodyweight-standard goal —
-    // see recomputeStandardGoals(). A no-op for every other tracker.
+    // A new bodyweight entry can move a lift's bodyweight-standard goal (see
+    // recomputeStandardGoals()). A no-op for other trackers.
     if (tracker.id === BODY_WEIGHT_TRACKER_ID) recomputeStandardGoals();
     if (!save()) return;
     toast('Entry saved');
@@ -4918,15 +3466,14 @@
     }));
   }
 
-  // Only currently-tracked macros (see trackedMacroKeys) — a macro turned
-  // off in Manage -> Nutrition -> Food doesn't show up here at all. Calories
-  // is always first and always required (handleLogFoodSubmit below); every
-  // other tracked field stays genuinely optional.
+  // A food entry needs at least one tracked value; no single field is required.
+  const anyMacro = (values) => Object.values(values).some((v) => v != null);
+
   function renderLogFoodForm() {
     document.getElementById('logFoodDate').value = document.getElementById('logFoodDate').value || todayISO();
     const wrap = document.getElementById('logFoodDynamicFields');
     wrap.innerHTML = trackedMacroKeys().map((k) => {
-      const req = k === 'calories';
+      const req = false; // no single field is forced: any one value is enough
       return `
       <label class="field"><span class="field-label">${MACRO_LABELS[k]}${MACRO_UNITS[k] ? ` (${MACRO_UNITS[k]})` : ''} ${req ? '<span class="req-mark">*</span>' : '<span class="muted-text">(optional)</span>'}</span>
         <input type="number" step="any" min="0" id="logFood_${k}" placeholder="e.g. ${MACRO_PLACEHOLDERS[k]}" ${req ? 'required' : ''} /></label>`;
@@ -4941,10 +3488,7 @@
       const raw = el ? parseFloat(el.value) : NaN;
       values[k] = (!Number.isNaN(raw) && raw >= 0) ? raw : null;
     });
-    // Calories is the one required field — an entry with, say, only sodium
-    // filled in isn't a usable food log (see the "Food / nutrition"
-    // section). Every other tracked macro stays optional.
-    if (values.calories == null) { toast('Enter calories to log a food entry.'); return; }
+    if (!anyMacro(values)) { toast('Enter at least one value to log a food entry.'); return; }
     const date = document.getElementById('logFoodDate').value || todayISO();
     const note = document.getElementById('logFoodNote').value.trim();
     state.food.entries.push({ id: genId('food'), date, ...values, note: note || null });
@@ -4957,21 +3501,11 @@
     renderHistory();
   }
 
-  // Redraws whichever Log form is currently selected, plus the shared
-  // "Recent entries" list below it. Water and Food used to share one
-  // "Nutrition" wrapper div with their own nested sub-tab; now that they're
-  // flat top-level categories like Workout/Body, each is just another
-  // sibling form gated directly on `logCategory`, same as the other two.
+  // Redraw the selected Log form and the shared "Recent entries" list.
   function renderLogView() {
     renderLogCategorySegmented();
     const cats = availableDomainCategories();
-    // Every domain off: renderLogCategorySegmented() deliberately leaves a
-    // stale `logCategory` alone when there's no cats[0] to fall back to
-    // (see its own comment), so this can't just key every form's `hidden`
-    // off `logCategory !== '<id>'` — that left whichever form matched the
-    // stale category (e.g. Food) visible right alongside logAllOffHint.
-    // `allOff` forces every form hidden regardless of what `logCategory`
-    // still happens to say.
+    // With every domain off, `logCategory` may be stale, so `allOff` forces every form hidden.
     const allOff = cats.length === 0;
     document.getElementById('logAllOffHint').hidden = !allOff;
     // Which of the workout pieces (picker / form / switch row) show is decided in syncLogWorkoutUI().
@@ -4997,35 +3531,35 @@
       if (logCategory === 'water') renderLogWaterPanel();
       if (logCategory === 'food') { renderLogFoodForm(); renderSavedFoodLogList(); }
     }
+    renderTodayBars();
     renderRecentEntries();
   }
 
-  // "Recent entries" always reflects whichever Log category is active,
-  // rather than always showing workouts — otherwise it would look broken
-  // while logging water, a measurement, or food.
+  // "Recent entries" follows the active Log category.
   function renderRecentEntries() {
+    renderTodayBars();
     const wrap = document.getElementById('recentEntries');
     if (!availableDomainCategories().length) { wrap.innerHTML = ''; return; }
     if (logCategory === 'measurements') {
-      const recent = state.measurements.slice().sort((a, b) => (b.date + b.id).localeCompare(a.date + a.id)).slice(0, 8);
+      const recent = state.measurements.slice().sort((a, b) => (b.date + b.id).localeCompare(a.date + a.id)).slice(0, 1);
       wrap.innerHTML = recent.length ? recent.map((m) => measurementRowHtml(m)).join('') : `<p class="muted-text">Nothing logged yet.</p>`;
       wireMeasurementRowClicks(wrap);
       return;
     }
     if (logCategory === 'water') {
-      const recent = state.waterEntries.slice().sort((a, b) => (b.date + b.id).localeCompare(a.date + a.id)).slice(0, 8);
+      const recent = state.waterEntries.slice().sort((a, b) => (b.date + b.id).localeCompare(a.date + a.id)).slice(0, 1);
       wrap.innerHTML = recent.length ? recent.map((e) => waterEntryRowHtml(e)).join('') : `<p class="muted-text">Nothing logged yet.</p>`;
       wireWaterEntryRowClicks(wrap);
       return;
     }
     if (logCategory === 'food') {
-      const recent = state.food.entries.slice().sort((a, b) => (b.date + b.id).localeCompare(a.date + a.id)).slice(0, 8);
+      const recent = state.food.entries.slice().sort((a, b) => (b.date + b.id).localeCompare(a.date + a.id)).slice(0, 1);
       wrap.innerHTML = recent.length ? recent.map((e) => foodEntryRowHtml(e)).join('') : `<p class="muted-text">Nothing logged yet.</p>`;
       wireFoodEntryRowClicks(wrap);
       return;
     }
-    const recent = state.entries.slice().sort((a, b) => (b.date + b.id).localeCompare(a.date + a.id)).slice(0, 8);
-    if (!recent.length) { wrap.innerHTML = `<p class="muted-text">Nothing logged yet — your first entry will show up here.</p>`; return; }
+    const recent = state.entries.slice().sort((a, b) => (b.date + b.id).localeCompare(a.date + a.id)).slice(0, 1);
+    if (!recent.length) { wrap.innerHTML = `<p class="muted-text">Nothing logged yet — your latest entry will show up here.</p>`; return; }
     wrap.innerHTML = recent.map((e) => entryRowHtml(e)).join('');
     wireEntryRowClicks(wrap);
   }
@@ -5037,7 +3571,7 @@
       return (entry.sets || []).map((s) => `${round(Units.lbToDisplay(s.weight), 1)}${Units.weightUnitLabel()}×${s.reps}`).join(', ');
     }
     if (exercise.kind === 'reps') {
-      return (entry.sets || []).map((s) => `${s.reps}${s.addedWeight ? ` (+${round(Units.lbToDisplay(s.addedWeight), 1)}${Units.weightUnitLabel()})` : ''}`).join(', ') + ' reps';
+      return (entry.sets || []).map((s) => `${isTimed(exercise) ? fmtHold(s.reps) : s.reps}${s.addedWeight ? ` (+${round(Units.lbToDisplay(s.addedWeight), 1)}${Units.weightUnitLabel()})` : ''}`).join(', ') + (isTimed(exercise) ? '' : ' reps');
     }
     const bits = [];
     if (entry.distance != null) bits.push(fmtDistance(entry.distance));
@@ -5136,13 +3670,8 @@
     });
   }
 
-  // Whether this entry is, for all practical purposes, already a saved
-  // food — its note matches a saved food's name (case-insensitive,
-  // trimmed). Logging a saved food stamps note = food.name exactly (see
-  // logSavedFood), so this reliably catches that case; it also catches a
-  // hand-typed entry whose note happens to match one, which is the right
-  // call too — no reason to offer a near-duplicate. Used only to hide the
-  // "Save as a saved food" button below, never to block anything.
+  // Whether an entry is already a saved food: its note matches a saved food's
+  // name (case-insensitive). Used only to hide the "Save as a saved food" button.
   function savedFoodMatching(entry) {
     if (!entry.note) return null;
     const name = entry.note.trim().toLowerCase();
@@ -5150,25 +3679,20 @@
   }
   function foodEntryAlreadySaved(entry) { return !!savedFoodMatching(entry); }
 
-  // Edit modal only shows currently-tracked macro fields (see
-  // trackedMacroKeys) — a field that's off doesn't render an input at all,
-  // so `Object.assign(e, values)` below only ever touches tracked keys and
-  // any value already saved for an untracked one is left exactly as it was.
+  // Only tracked macro fields are shown, so `Object.assign(e, values)` below
+  // leaves any saved value for an untracked macro alone.
   function openFoodEntryModal(entryId) {
     const e = state.food.entries.find((x) => x.id === entryId);
     if (!e) return;
-    // "Save as a saved food" turns a food that was only ever typed by hand
-    // into a one-tap Saved Food from now on, without retyping its numbers —
-    // see openSavedFoodForm's `prefill` param. Hidden once it's already
-    // effectively saved (foodEntryAlreadySaved) so it doesn't invite a
-    // near-duplicate every time this same food gets logged and re-opened.
+    // "Save as a saved food" prefills the saved-food form from this entry (its
+    // `prefill` param). Hidden once a saved food with this name exists.
     const offerSaveAsFood = !foodEntryAlreadySaved(e);
     openModal(`
       <div class="modal-title-row"><h2>Edit food entry</h2><button class="modal-close" data-action="close-modal">${CLOSE_ICON_SVG}</button></div>
       <div class="form-card">
         <label class="field"><span class="field-label">Date</span><input type="date" id="editFoodDate" value="${e.date}" /></label>
         ${trackedMacroKeys().map((k) => {
-          const req = k === 'calories';
+          const req = false; // no single field is forced: any one value is enough
           return `
         <label class="field"><span class="field-label">${MACRO_LABELS[k]}${MACRO_UNITS[k] ? ` (${MACRO_UNITS[k]})` : ''} ${req ? '<span class="req-mark">*</span>' : '<span class="muted-text">(optional)</span>'}</span>
           <input type="number" step="any" min="0" id="editFood_${k}" value="${e[k] != null ? e[k] : ''}" ${req ? 'required' : ''} /></label>`;
@@ -5186,7 +3710,7 @@
     document.getElementById('saveFoodEntryBtn').addEventListener('click', () => {
       const values = {};
       trackedMacroKeys().forEach((k) => { values[k] = readMacro(`editFood_${k}`); });
-      if (values.calories == null) { toast('Enter calories to save this entry.'); return; }
+      if (!anyMacro(values)) { toast('Enter at least one value to save this entry.'); return; }
       e.date = document.getElementById('editFoodDate').value || e.date;
       Object.assign(e, values);
       e.note = document.getElementById('editFoodNote').value.trim() || null;
@@ -5214,33 +3738,13 @@
   }
 
   /* ============================== Saved Foods ==============================
-     The exercise-library equivalent for food: research a food's numbers
-     once, save it under a name (Manage -> Nutrition -> Food -> Saved
-     foods), and every later logging of it is one tap — optionally scaled by
-     quantity — instead of retyping every macro. A saved food stores
-     whatever tracked macros were filled in when it was created/edited, same
-     shape as a food entry; logging one just scales those fields by the
-     chosen quantity and pushes a normal entry, indistinguishable afterward
-     from one typed by hand. No database, no barcode lookup, no network —
-     just a shortcut list the user curates themselves. */
+     Named food templates (Manage -> Food -> Saved foods). Logging one is a
+     single tap, optionally scaled by quantity, and creates a normal food entry. */
 
   function savedFoodById(id) { return state.food.savedFoods.find((f) => f.id === id); }
 
-  // Only currently-tracked macros are asked for (same fields as the log
-  // form itself, Calories required) — a saved food is just a template for
-  // a food entry, so it follows the same tracking rules one would.
-  //
-  // `prefill` (only used when `foodId` is null, i.e. creating a new saved
-  // food) seeds the name/macro fields from something other than a blank
-  // form — specifically, an existing food entry's own values, via the
-  // "Save as a saved food" button on openFoodEntryModal below, so someone
-  // who typed a food's numbers by hand once doesn't have to retype them to
-  // also have it as a one-tap saved food from then on. Same shape as a
-  // saved food minus its id: `{ name, calories, protein, ... }`.
-  // Every saved food has a category — one of SAVED_FOOD_CATEGORIES — so the
-  // Log → Food list can be filtered down (see renderSavedFoodLogList()).
-  // 'other' is the default for anything saved before this field existed, so
-  // nothing already-saved becomes invisible under the new filter chips.
+  // Category per saved food (default 'other'), used by the Log -> Food filter
+  // chips (see renderSavedFoodLogList()).
   const SAVED_FOOD_CATEGORIES = [
     { value: 'meal', label: 'Meal' },
     { value: 'snack', label: 'Snack' },
@@ -5272,7 +3776,7 @@
           ${switchHtml('id="savedFoodFavorite"', 'Favorite', selectedFavorite)}
         </div></div>
         ${trackedMacroKeys().map((k) => {
-          const req = k === 'calories';
+          const req = false; // no single field is forced: any one value is enough
           return `
         <label class="field"><span class="field-label">${MACRO_LABELS[k]}${MACRO_UNITS[k] ? ` (${MACRO_UNITS[k]})` : ''} ${req ? '<span class="req-mark">*</span>' : '<span class="muted-text">(optional)</span>'}</span>
           <input type="number" step="any" min="0" id="savedFood_${k}" value="${seed && seed[k] != null ? seed[k] : ''}" ${req ? 'required' : ''} /></label>`;
@@ -5305,7 +3809,7 @@
         const raw = el ? parseFloat(el.value) : NaN;
         values[k] = (!Number.isNaN(raw) && raw >= 0) ? raw : null;
       });
-      if (values.calories == null) { toast('Enter calories to save this food.'); return; }
+      if (!anyMacro(values)) { toast('Enter at least one value to save this food.'); return; }
       if (editing) {
         food.name = name;
         food.category = selectedCategory;
@@ -5337,18 +3841,13 @@
     }
   }
 
-  // Log -> Food's quantity picker is transient UI state, not saved
-  // anywhere — which saved food (if any) is expanded, and what quantity is
-  // currently chosen for it. Reset to 1x whenever a different row is
-  // tapped, same "one open at a time" behavior used elsewhere (e.g. the
-  // suggestion-info modal).
+  // Transient UI state (not saved) for the Log -> Food quantity picker: the
+  // expanded saved food and its quantity, reset to 1x when another row opens.
   let expandedSavedFoodId = null;
   let savedFoodQty = 1;
   
-  // Every tracked macro on `food`, scaled by `qty` and rounded to one
-  // decimal place — e.g. 1.5x on 280 cal / 53g protein logs 420 cal /
-  // 79.5g protein. A macro the saved food has no value for stays null, same
-  // as any other optional field.
+  // Every tracked macro on `food` scaled by `qty` and rounded to 1 decimal;
+  // macros it has no value for stay null.
   function scaledSavedFoodValues(food, qty) {
     const values = {};
     trackedMacroKeys().forEach((k) => { values[k] = food[k] != null ? round(food[k] * qty, 1) : null; });
@@ -5362,7 +3861,7 @@
   const FOOD_LIST_LIMIT = 5;
   let savedFoodDate = null;
 
-  // "1 medium · 105 kcal · P 1 · C 27 · F 0" — the compact line under a food.
+  // Compact food line: serving, kcal, tracked macros (P/C/F) and caffeine.
   function compactFoodLine(food) {
     const tracked = trackedMacroKeys();
     const parts = [];
@@ -5373,22 +3872,40 @@
     return parts.join(' · ');
   }
 
+  function todayBarHtml(value, goalText, label, fillPct, over, linkId, linkText) {
+    return `
+      <div class="today-bar-top"><span class="num"><b>${value}</b> <span class="muted-text">${goalText ? `/ ${goalText} ${label}` : label}</span></span><button type="button" class="link-btn" id="${linkId}">${linkText}</button></div>
+      ${fillPct != null ? `<div class="meter meter-sm"><div class="meter-fill${over ? ' is-over' : ''}" style="--fill:${Math.min(100, fillPct)}%"></div></div>` : ''}`;
+  }
+
+  // Food and Water each get their own "today" bar on their own Log tab only.
   function renderFoodTodayBar() {
     const bar = document.getElementById('foodTodayBar');
-    const on = state.settings.trackFood && logCategory === 'food';
+    const on = state.settings.trackFood && logCategory === 'food' && availableDomainCategories().length > 0;
     bar.hidden = !on; if (!on) return;
     const totals = foodTotalsForDate(todayISO());
     const cal = macroGoalInfo('calories');
     const hasGoal = cal.enabled && cal.goal != null;
     const eaten = totals.calories || 0;
-    bar.innerHTML = `
-      <div class="food-today-top"><span class="num"><b>${Math.round(eaten).toLocaleString()}</b> <span class="muted-text">${hasGoal ? `/ ${Math.round(cal.goal).toLocaleString()} kcal today` : 'kcal today'}</span></span><button type="button" class="link-btn" id="foodViewDayBtn">View day</button></div>
-      ${hasGoal ? `<div class="meter meter-sm"><div class="meter-fill${eaten > cal.goal ? ' is-over' : ''}" style="--fill:${Math.min(100, (eaten / cal.goal) * 100)}%"></div></div>` : ''}`;
+    bar.innerHTML = todayBarHtml(Math.round(eaten).toLocaleString(), hasGoal ? Math.round(cal.goal).toLocaleString() : '', hasGoal ? 'kcal today' : 'kcal today',
+      hasGoal ? (eaten / cal.goal) * 100 : null, hasGoal && eaten > cal.goal, 'foodViewDayBtn', 'View day');
     document.getElementById('foodViewDayBtn').addEventListener('click', () => openFoodDetail());
   }
 
+  function renderWaterTodayBar() {
+    const bar = document.getElementById('waterTodayBar');
+    const on = state.settings.trackWater && logCategory === 'water' && availableDomainCategories().length > 0;
+    bar.hidden = !on; if (!on) return;
+    const total = waterTotalForDate(todayISO());
+    const goal = state.water.goalMl;
+    bar.innerHTML = todayBarHtml(fmtVolume(total), goal ? fmtVolume(goal) : '', 'today',
+      goal ? (total / goal) * 100 : null, false, 'waterGoalLinkBtn', goal ? 'Edit goal' : 'Set a goal');
+    document.getElementById('waterGoalLinkBtn').addEventListener('click', () => openManageCategory('water'));
+  }
+
+  function renderTodayBars() { renderFoodTodayBar(); renderWaterTodayBar(); }
+
   function renderSavedFoodLogList() {
-    renderFoodTodayBar();
     const wrap = document.getElementById('savedFoodsWrap');
     const list = document.getElementById('savedFoodLogList');
     const foods = state.food.savedFoods;
@@ -5641,30 +4158,18 @@
 
   /* ============================== Rendering: History ============================== */
 
-  // A month calendar sitting above the filterable entry list — a second,
-  // date-first way into the same History data rather than a replacement
-  // for the list below it. Each day gets a small colored dot per category
-  // that had activity that day (fixed colors, not user-configurable — see
-  // .cal-dot-* in styles.css): green for any workout logged, blue for
-  // hitting that day's water goal (not just for drinking anything — the
-  // dot means "goal met"), purple for any body measurement logged. Tapping
-  // a day toggles it as the selected date, filtering the "All entries" list
-  // below (within whatever domain tab is active) down to just that day's
-  // entries — tapping the same day again clears the filter. It never opens
-  // a separate view; the calendar and the list below it stay on one screen.
+  // A month calendar above the entry list, with a dot per category active that day
+  // (colors in `.cal-dot-*` in styles.css): workout, water goal met, body
+  // measurement, food. Tapping a day filters "All entries" (within the active
+  // domain tab) to that day; tapping it again clears the filter.
 
   let calendarMonth = (() => { const d = new Date(); d.setDate(1); return d; })();
 
-  // Which date the "All entries" list below the calendar is filtered to —
-  // null means no filter (show everything for the active domain tab).
-  // Defaults to today, so the History screen opens showing just what's been
-  // recorded today rather than the whole history at once.
+  // Date filter for the "All entries" list; null shows everything. Starts as today.
   let historySelectedDate = todayISO();
 
   function dayActivity(dateIso) {
-    // A domain toggled off in Manage (Track this) shouldn't surface its dot
-    // here either — same "off means hidden, not just archived" rule the
-    // rest of the app applies (Log/History/Manage tabs, Dashboard sections).
+    // A domain switched off in Manage shows no dot.
     const workout = domainTracked('workout') && state.entries.some((e) => e.date === dateIso);
     const body = domainTracked('measurements') && state.measurements.some((m) => m.date === dateIso);
     const waterHit = domainTracked('water') && !!(state.water.goalMl && waterTotalForDate(dateIso) >= state.water.goalMl);
@@ -5730,24 +4235,22 @@
     if (cats.length && !cats.some((c) => c.id === historyCategory)) historyCategory = cats[0].id;
     const seg = document.getElementById('historyCategorySegmented');
     seg.innerHTML = domainTabsHtml(cats, historyCategory);
+    seg.hidden = cats.length < 2;
     seg.querySelectorAll('button').forEach((b) => {
       b.addEventListener('click', () => { historyCategory = b.dataset.domainCat; renderHistory(); });
     });
     document.getElementById('historyFilterField').hidden = historyCategory !== 'workout' || !cats.length;
   }
 
-  // "Today" / a formatted date / "All entries" depending on whether the
-  // calendar has a day selected — keeps the list's heading honest about
-  // what's actually filtered below it.
+  // Heading for the list: "All entries", "Today", or the selected date.
   function historyListHeadingText() {
     if (!historySelectedDate) return 'All entries';
     if (historySelectedDate === todayISO()) return 'Today';
     return new Date(historySelectedDate + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
   }
 
-  // Sets #historyEmpty's visibility and wording together — "nothing logged
-  // today" reads very differently from "nothing logged yet" when a
-  // calendar day is selected, so the empty state should say which is true.
+  // Set #historyEmpty's visibility and wording; an empty selected day reads
+  // differently from an empty history.
   function setHistoryEmpty(isEmpty) {
     document.getElementById('historyEmpty').hidden = !isEmpty;
     if (!isEmpty) return;
@@ -5789,11 +4292,8 @@
       return;
     }
     if (historyCategory === 'food') {
-      // Grouped by date with each day's totals as a header, rather than one
-      // flat list — "total everything by day" is the whole point of the
-      // feature, so History is where those totals actually live, not just
-      // the dashboard's "today" card. When a day is selected on the
-      // calendar, that collapses to just the one date's group.
+      // Grouped by date with each day's totals as the header; a selected calendar day
+      // shows only its own group.
       const relevantEntries = state.food.entries.filter((e) => !historySelectedDate || e.date === historySelectedDate);
       setHistoryEmpty(relevantEntries.length === 0);
       const byDate = {};
@@ -5863,12 +4363,8 @@
     });
   }
 
-  // Jumps straight to the Log tab with this exercise/tracker already
-  // selected — the detail modal's "Log entry" button, so a person who
-  // tapped in just to log a set doesn't have to close the modal, switch
-  // tabs, and re-pick from a dropdown they were just looking at. Reuses
-  // the same change handling the dropdown's own listener runs (dispatching
-  // a real 'change' event) rather than duplicating what it does.
+  // The detail modal's "Log entry" button: opens Log with this exercise selected,
+  // dispatching a real 'change' event so the dropdown's own handler runs.
   function logExerciseFromDetail(exId) {
     closeModal();
     openLogFor(exId);
@@ -5892,8 +4388,8 @@
 
   /* ============================== Exercise detail modal ============================== */
 
-  // A habit's detail: today's count, how often the target was met lately,
-  // and its entries (there is no trend chart — nothing to measure but "done").
+  // A habit's detail: today's count, how often the target was met lately, and its
+  // entries. There is no trend chart: there is nothing to measure but "done".
   function renderHabitDetail(ex) {
     const goal = ex.goal || 1;
     const entries = entriesFor(ex.id).slice().sort((a, b) => (b.date + b.id).localeCompare(a.date + a.id));
@@ -5918,7 +4414,10 @@
         ${habitPanelHtml(ex)}
         <p class="muted-text">Target met on ${hit} of the last 30 days.</p>
       </div>
-      <button type="button" class="btn btn-primary btn-block" id="habitDoneBtn">Done</button>
+      <div class="btn-row detail-actions">
+        <button type="button" class="btn btn-primary" id="habitDoneBtn">Done</button>
+        <button type="button" class="btn btn-secondary" id="editGoalFromDetailBtn">Edit goal</button>
+      </div>
       <div class="btn-row">
         <button class="btn btn-secondary" id="archiveExerciseBtn">${ex.archived ? 'Unarchive' : 'Archive'}</button>
       </div>
@@ -5928,6 +4427,7 @@
     wireEntryRowClicks(document.getElementById('exerciseEntryList'));
     document.getElementById('editExerciseBtn').addEventListener('click', () => openExerciseForm(ex.id));
     document.getElementById('habitDoneBtn').addEventListener('click', () => logHabit(ex.id));
+    document.getElementById('editGoalFromDetailBtn').addEventListener('click', () => editGoalShortcut(() => openExerciseForm(ex.id), 'goalFieldWrap'));
     document.getElementById('archiveExerciseBtn').addEventListener('click', () => {
       ex.archived = !ex.archived;
       if (!save()) return;
@@ -5937,10 +4437,8 @@
     });
   }
 
-  // `chartMetric` only matters for cardio exercises with two configured
-  // goals — it selects which one the trend chart plots. It is ignored (and
-  // defaults sensibly) for every other case, so existing callers that don't
-  // pass it keep working unchanged.
+  // `chartMetric` picks which goal the trend chart plots for a cardio exercise with
+  // two goals; ignored otherwise.
   function renderExerciseDetail(exId, scale, chartMetric) {
     const ex = exerciseById(exId);
     if (!ex) return;
@@ -5988,7 +4486,10 @@
            old "Sessions logged / Lifetime total" tiles here, which just
            restated numbers already visible in the progress meter/chart
            below without offering anything to do. -->
-      <button type="button" class="btn btn-primary btn-block" id="logEntryFromDetailBtn">Log entry</button>
+      <div class="btn-row detail-actions">
+        <button type="button" class="btn btn-primary" id="logEntryFromDetailBtn">Log entry</button>
+        <button type="button" class="btn btn-secondary" id="editGoalFromDetailBtn">Edit goal</button>
+      </div>
 
       <!-- Concise "at a glance" headline only — the detail sentence and the
            method note (and the well-researched general explanation) now
@@ -6045,6 +4546,7 @@
     });
     document.getElementById('editExerciseBtn').addEventListener('click', () => openExerciseForm(ex.id));
     document.getElementById('logEntryFromDetailBtn').addEventListener('click', () => logExerciseFromDetail(ex.id));
+    document.getElementById('editGoalFromDetailBtn').addEventListener('click', () => editGoalShortcut(() => openExerciseForm(ex.id), 'goalFieldWrap'));
     document.getElementById('archiveExerciseBtn').addEventListener('click', () => {
       ex.archived = !ex.archived;
       if (!save()) return;
@@ -6054,19 +4556,21 @@
     });
   }
 
+  // Detail screens' "Edit goal" shortcut: opens the normal edit form and puts the cursor on the goal.
+  function editGoalShortcut(openForm, wrapId) {
+    openForm();
+    const wrap = document.getElementById(wrapId);
+    const target = wrap && wrap.querySelector('input, button');
+    if (target) { wrap.scrollIntoView({ block: 'center' }); target.focus(); }
+  }
+
   function openExerciseDetail(exId) {
     renderExerciseDetail(exId, state.settings.chartScale);
   }
 
-  // The "Why?" tap target on a suggestion card — the specific detail/method
-  // note for THIS suggestion, followed by a general, always-the-same
-  // explanation of the progression logic behind every suggestion the app
-  // makes (see suggestWeightOrReps()/suggestCardioMetric() above). Keeping
-  // this as its own screen (rather than an inline expand) is what lets the
-  // card itself stay a one-line "at a glance" headline. "‹ Back" returns to
-  // the exercise detail rather than closing outright — this app's modal is
-  // a single sheet with no stack, so going back means re-rendering the
-  // previous screen from scratch, the same trick confirmDialog() etc. use.
+  // The "Why?" screen for a suggestion: this suggestion's method note plus the
+  // general progression logic (see suggestWeightOrReps()/suggestCardioMetric()).
+  // The modal is one sheet with no stack, so Back re-renders the exercise detail.
   function openSuggestionInfoModal(exId, scale, activeMetric, sugg) {
     const ex = exerciseById(exId);
     openModal(`
@@ -6171,12 +4675,12 @@
     `);
 
     let selectedKind = kind;
+    let selectedUnit = ex && ex.unit === 'time' ? 'time' : 'reps';
     let selectedSection = section;
     let selectedRegion = bodyRegion;
     let selectedLiftType = (ex && ex.liftType) || '';
-    // Muscle group: whatever's saved (or inferred from the name for older
-    // exercises). A brand-new exercise follows its name/type until a chip is
-    // tapped, so "Incline Dumbbell Press" lands on Chest without any extra tap.
+    // Muscle group: the saved one, or inferred from the name for older exercises. A
+    // new exercise follows its name/type until a chip is tapped.
     let selectedGroup = ex ? exerciseGroup(ex) : 'other';
     let groupTouched = !!ex;
     let selectedFavorite = ex ? isFavoriteExercise(ex) : false;
@@ -6191,13 +4695,9 @@
     const favSwitch = document.getElementById('exFavorite');
     favSwitch.setAttribute('aria-checked', String(selectedFavorite));
     favSwitch.addEventListener('click', () => { selectedFavorite = !selectedFavorite; favSwitch.setAttribute('aria-checked', String(selectedFavorite)); });
-    // Goal style for a weight-kind exercise with a lift type set — 'fixed'
-    // (a plain typed number) or 'standard' (recomputed from a bodyweight
-    // multiplier tier; see computeStandardGoal/standardGoalPreviewRows).
-    // Defaults to whatever's already saved, or 'fixed' for a brand-new
-    // exercise — never defaults to 'standard' on its own even once a lift
-    // type is picked, since that would silently overwrite a goal the user
-    // may already have typed in.
+    // Goal style for a weight exercise with a lift type: 'fixed' (typed number) or
+    // 'standard' (bodyweight tier; see computeStandardGoal). Defaults to the saved
+    // value, else 'fixed', so an existing goal is never overwritten silently.
     let selectedGoalMode = (ex && ex.goalMode) || 'fixed';
     let selectedGoalTier = (ex && ex.goalTier) || 'intermediate';
     let selectedTimes = (ex && ex.kind === 'habit' && ex.goal) || 1;
@@ -6227,10 +4727,8 @@
     function setLiftTypeUI(t) {
       selectedLiftType = t;
       document.querySelectorAll('#exLiftTypeSegmented button').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.liftType === t)));
-      // A bodyweight-standard goal only means anything once a lift type is
-      // picked (it's what selects the LIFT_STANDARDS table) — clearing the
-      // lift type falls back to a plain fixed number rather than leaving
-      // the form stuck showing a tier picker for no lift.
+      // A standard goal needs a lift type (it picks the LIFT_STANDARDS table), so
+      // clearing the type falls back to 'fixed'.
       if (!t) selectedGoalMode = 'fixed';
       if (selectedKind === 'weight' && document.getElementById('goalFieldWrap')) renderGoalField();
     }
@@ -6241,12 +4739,8 @@
     setRegionUI(selectedRegion);
     setLiftTypeUI(selectedLiftType);
 
-    // The weight-kind goal field: a plain number by default, or — once a
-    // lift type is set — a "Fixed number" / "Bodyweight standard" toggle
-    // matching the one in the setup wizard, complete with the same live
-    // Beginner..Elite preview table so switching a lift's goal mode after
-    // the fact (the whole point of this being here instead of only in the
-    // wizard) is exactly as informative as setting it up the first time.
+    // The weight goal field: a plain number, or, with a lift type, a "Fixed number" /
+    // "Bodyweight standard" toggle with the same Beginner..Elite preview as the wizard.
     function weightGoalFieldHtml() {
       const fixedVal = ex && ex.goal ? round(Units.lbToDisplay(ex.goal), 1) : '';
       if (!selectedLiftType || !LIFT_STANDARDS[selectedLiftType]) {
@@ -6318,13 +4812,17 @@
         paint();
       } else if (selectedKind === 'reps') {
         const v = ex && ex.goal ? ex.goal : '';
-        wrap.innerHTML = `<label class="field"><span class="field-label">Goal reps (single set)</span><input type="number" step="1" min="1" id="goalInput" value="${v}" placeholder="e.g. 20" /></label>`;
+        const timed = selectedUnit === 'time';
+        wrap.innerHTML = `
+          <div class="field"><span class="field-label">Measured in${hasEntries ? ' (locked — has logged entries)' : ''}</span>
+            <div class="segmented" id="exUnitSeg" role="radiogroup">
+              <button type="button" role="radio" data-unit="reps" aria-checked="${!timed}" ${hasEntries ? 'disabled' : ''}>Reps</button>
+              <button type="button" role="radio" data-unit="time" aria-checked="${timed}" ${hasEntries ? 'disabled' : ''}>Seconds held</button>
+            </div></div>
+          <label class="field"><span class="field-label">${timed ? 'Goal time (seconds, single set)' : 'Goal reps (single set)'}</span><input type="number" step="1" min="1" id="goalInput" value="${v}" placeholder="${timed ? 'e.g. 60' : 'e.g. 20'}" /></label>`;
+        wrap.querySelectorAll('#exUnitSeg button').forEach((b) => b.addEventListener('click', () => { if (b.disabled) return; selectedUnit = b.dataset.unit; renderGoalField(); }));
       } else {
-        // Cardio carries two independent, optional goals rather than a
-        // single choice — a distance goal, a pace goal, or both — because
-        // one logged run (distance + time) always yields both a distance
-        // and a pace, so there is no reason to make the user pick only one
-        // to track.
+        // Cardio has optional distance and pace goals, either or both: one run yields both.
         const distVal = ex && ex.distanceGoal ? round(Units.miToDisplay(ex.distanceGoal), 2) : '';
         const secPerUnit = ex && ex.paceGoal ? Units.secPerMiToDisplaySecPerUnit(ex.paceGoal) : null;
         const mins = secPerUnit != null ? Math.floor(secPerUnit / 60) : '';
@@ -6371,8 +4869,7 @@
           goal = selectedKind === 'weight' ? Units.displayToLb(raw) : raw;
         }
       } else {
-        // Cardio: read both optional goals independently — either, neither,
-        // or both may be set.
+        // Cardio: read both optional goals independently; either, neither or both may be set.
         const rawDist = parseFloat(document.getElementById('goalDistanceInput').value);
         if (!Number.isNaN(rawDist) && rawDist > 0) distanceGoal = Units.displayToMi(rawDist);
         const m = parseFloat(document.getElementById('goalPaceMin').value) || 0;
@@ -6397,6 +4894,7 @@
           ex.paceGoal = paceGoal;
         }
         ex.goal = goal; // meaningful for weight/reps only; left null and unread for cardio
+        if (selectedKind === 'reps' && selectedUnit === 'time') ex.unit = 'time'; else delete ex.unit;
         if (selectedKind === 'habit') ex.repeat = selectedRepeat; else delete ex.repeat;
         if (iconField.value()) ex.icon = iconField.value(); else delete ex.icon;
       } else {
@@ -6408,6 +4906,7 @@
         }
         if (selectedKind === 'cardio') { newEx.distanceGoal = distanceGoal; newEx.paceGoal = paceGoal; }
         if (selectedKind === 'habit') newEx.repeat = selectedRepeat;
+        if (selectedKind === 'reps' && selectedUnit === 'time') newEx.unit = 'time';
         if (iconField.value()) newEx.icon = iconField.value();
         state.exercises.push(newEx);
       }
@@ -6418,12 +4917,8 @@
     });
 
     if (editing) {
-      // Archiving is the safe, reversible way to hide an exercise from the
-      // dashboard, and is offered unconditionally — whether or not it has
-      // logged entries — matching the toggle in the exercise detail modal.
-      // Permanent deletion is a separate, deliberately lower-emphasis action
-      // below it, so it's never the default choice for "I don't want to see
-      // this anymore."
+      // Archiving hides an exercise reversibly and is always offered, as in the detail
+      // modal. Permanent deletion is a separate, lower-emphasis action below it.
       document.getElementById('archiveToggleBtn').addEventListener('click', () => {
         ex.archived = !ex.archived;
         if (!save()) return;
@@ -6513,10 +5008,8 @@
     });
   }
 
-  // Mirrors renderExerciseDetail: current value/goal/meter, a trend chart,
-  // and the full entry list — deliberately simpler (no progressive-overload
-  // suggestion, no PR grid) since a body/wellness tracker's job is showing
-  // where things stand and where they've been, not coaching a next session.
+  // Like renderExerciseDetail but simpler: current value, goal, meter, trend chart
+  // and entry list, with no suggestion or PR grid.
   function renderTrackerDetail(trackerId, scale) {
     const tracker = trackerById(trackerId);
     if (!tracker) return;
@@ -6529,11 +5022,8 @@
 
     const qualityLine = tracker.kind === 'sleep' && latest && latest.quality != null
       ? `<div class="insight-line">Last quality ${fmtQuality(latest.quality)}</div>` : '';
-    // BMI (Weight tracker) and the fuller sleep breakdown (Sleep tracker)
-    // each get their own detail-on-demand card here, same "tap in for the
-    // deeper insight" placement already used for a lift's Strength/Pace
-    // level — gated behind the same Settings → Insights toggles that used
-    // to gate their old, plainer dashboard-card lines.
+    // BMI (Weight) and the fuller sleep breakdown (Sleep) show here, gated by their
+    // Settings -> Insights toggles.
     const insightDetailHtml = tracker.id === BODY_WEIGHT_TRACKER_ID && state.settings.showWeightInsights ? bmiDetailHtml()
       : tracker.kind === 'sleep' && state.settings.showSleepInsights ? sleepInsightDetailHtml()
       : '';
@@ -6563,7 +5053,10 @@
 
       <!-- Quick access to logging this tracker, same as the exercise detail
            modal's own Log entry button — see logTrackerFromDetail(). -->
-      <button type="button" class="btn btn-primary btn-block" id="logEntryFromDetailBtn">Log entry</button>
+      <div class="btn-row detail-actions">
+        <button type="button" class="btn btn-primary" id="logEntryFromDetailBtn">Log entry</button>
+        <button type="button" class="btn btn-secondary" id="editGoalFromDetailBtn">Edit goal</button>
+      </div>
 
       ${insightDetailHtml}
 
@@ -6590,6 +5083,7 @@
     wireMeasurementRowClicks(document.getElementById('trackerEntryList'));
     document.getElementById('editTrackerBtn').addEventListener('click', () => openTrackerForm(tracker.id));
     document.getElementById('logEntryFromDetailBtn').addEventListener('click', () => logTrackerFromDetail(tracker.id));
+    document.getElementById('editGoalFromDetailBtn').addEventListener('click', () => editGoalShortcut(() => openTrackerForm(tracker.id), 'trkGoalFieldWrap'));
     document.getElementById('archiveTrackerBtn').addEventListener('click', () => {
       tracker.archived = !tracker.archived;
       if (!save()) return;
@@ -6624,9 +5118,8 @@
     const hasEntries = editing && measurementsFor(trackerId).length > 0;
     const unitKind = tracker ? tracker.unitKind : 'weight';
     const direction = tracker ? (tracker.direction || 'up') : 'up';
-    // Sleep's value type is fixed (hours + a quality rating are part of what
-    // `kind: 'sleep'` means, not a plain unitKind choice) — locked the same
-    // way an in-use tracker's type is, just for a different reason.
+    // Sleep's value type is fixed (hours plus a quality rating come with
+    // `kind: 'sleep'`), so the type is locked like an in-use tracker's.
     const isSleep = tracker && tracker.kind === 'sleep';
     const typeLocked = hasEntries || isSleep;
 
@@ -6719,20 +5212,9 @@
       const fields = { unitKind: selectedUnitKind, unitLabel, ratingMax: selectedUnitKind === 'rating' ? selectedRatingMax : null, direction: selectedDirection, showOnDashboard: selectedShowOnDashboard, ...(iconField.value() && { icon: iconField.value() }) };
       const canonicalGoal = hasGoal ? trackerCanonicalFromDisplay(Object.assign({}, tracker, fields), rawGoal) : null;
       if (editing) {
-        // A baseline means "where you started, toward THIS goal" —
-        // trackerProgressPct() measures the fraction of (baseline -> goal)
-        // already covered, which only means something for the goal/
-        // direction it was captured under. Editing to a genuinely
-        // DIFFERENT goal number, or flipping direction (Higher/Lower is
-        // better), changes what "toward this goal" even means; keeping the
-        // OLD baseline around for a NEW goal is what let the percentage go
-        // nonsensical (e.g. 267%, or negative-reading) once that stale
-        // baseline ended up on the wrong side of the new goal — e.g. a
-        // "lose weight" baseline left in place after switching to "gain
-        // weight." So a changed goal or direction recaptures the baseline
-        // from the latest logged value, exactly like a goal set for the
-        // first time already did; removing the goal entirely clears it
-        // (nothing left to measure progress toward).
+        // A baseline is where progress toward THIS goal starts. A new goal number or
+        // direction can leave the old baseline on the wrong side of the goal, so
+        // recapture it from the latest value; removing the goal clears it.
         const prevGoal = tracker.goal;
         const prevDirection = tracker.direction || 'up';
         const goalOrDirectionChanged = canonicalGoal != null
@@ -6843,21 +5325,10 @@
   }
 
   /* ============================== Manage ==============================
-     One tab with four flat, identically-styled domain panels — Workout,
-     Body (measurements), Water, and Food — switched by
-     manageCategorySegmented using the same domainTabsHtml()/
-     domainTracked() helpers Log and History use, except Manage always
-     shows all four (see ALL_DOMAIN_CATEGORIES) regardless of each domain's
-     tracked state: it's specifically where a turned-off domain gets turned
-     back on (add a cup here even with zero cups today; flip Water back on
-     here even while it's off), so it can't gate on the very thing it's
-     meant to change. Each panel carries the identical "Track this" master
-     toggle (trackWorkoutSwitch/trackMeasurementsSwitch/
-     trackWaterSwitch/trackFoodSwitch, each writing the matching
-     settings.track* flag via renderDomainTrackToggle() below) — Food had
-     this pattern first, the other three were added to match it exactly.
-     All configuration lives here now; Settings (reached from the header)
-     is app-wide preferences only. */
+     One tab with four domain panels (Workout, Body, Water, Food) switched by
+     manageCategorySegmented. All four always show (ALL_DOMAIN_CATEGORIES), since this is
+     where an off domain is turned back on. Each has a "Track this" switch
+     (renderDomainTrackToggle()); Settings holds app-wide preferences only. */
 
   let manageCategory = 'workout';
 
@@ -6874,12 +5345,9 @@
     document.getElementById('manageFoodPanel').hidden = cat !== 'food';
   }
 
-  // Shared by all four Manage panels' "Track this" master toggle: shows the
-  // segmented's current state, shows/hides the off-hint paragraph, and
-  // shows/hides the panel's `${id}TrackedFields` wrapper — mirroring the
-  // pattern Food's trackFood toggle originally used alone. Returns whether
-  // the domain is tracked, so each panel's render function can skip
-  // rebuilding its (hidden) fields when off, same as Food already did.
+  // Shared "Track this" switch logic for the Manage panels: sets the switch, shows
+  // or hides the off hint and the panel's `${id}TrackedFields`. Returns whether the
+  // domain is tracked, so a panel can skip rebuilding hidden fields.
   function renderDomainTrackToggle(id) {
     const tracked = domainTracked(id);
     const cap = id.charAt(0).toUpperCase() + id.slice(1);
@@ -6889,10 +5357,8 @@
     return tracked;
   }
 
-  // The Nutrition calculator card at the bottom of the Food panel — options
-  // list built once (same one-time-build reasoning as renderMacroGoalRows
-  // above), everything else refreshed every render since the live preview
-  // needs to track whatever Profile/body-weight facts currently exist.
+  // Nutrition calculator card (bottom of the Food panel). The activity options are
+  // built once; the rest refreshes each render so the preview follows Profile and body weight.
   function renderNutritionCalcCard() {
     const select = document.getElementById('nutritionActivityLevel');
     if (!select.dataset.built) {
@@ -6930,12 +5396,8 @@
     }
   }
 
-  // Which non-calorie macros are tracked at all — a compact chip row rather
-  // than the full toggle+label rows this used to be, since a chip only
-  // needs to say "this one, or not" (the goal, if any, lives one section
-  // down in renderMacroGoalRows). Built once (guarded by wrap.dataset.built)
-  // since MACRO_KEYS can grow (already has, 4 fields to 7), same reasoning
-  // as renderMacroGoalRows below.
+  // Chip row for which non-calorie macros are tracked. Built once (wrap.dataset.built)
+  // because MACRO_KEYS can grow; the goal lives in renderMacroGoalRows().
   function renderMacroTrackChips() {
     const wrap = document.getElementById('macroTrackChips');
     const keys = MACRO_KEYS.filter((k) => k !== 'calories');
@@ -6962,13 +5424,9 @@
     });
   }
 
-  // Daily-goal rows, one per MACRO_KEYS entry, but only shown once its
-  // macro is tracked (see renderMacroTrackChips above) — except Calories,
-  // which is always tracked and always shown here since having a goal for
-  // it is its own separate on/off (see macroTracked). Row markup is built
-  // once, same "MACRO_KEYS can grow, and rebuilding via innerHTML would
-  // blow away in-progress typing in another field" reasoning as before;
-  // click/change stay delegated on the container for the same reason.
+  // Daily-goal rows, one per MACRO_KEYS entry, shown for tracked macros (Calories
+  // always). Built once so a re-render does not wipe a half-typed value; click and
+  // change are delegated on the container.
   function renderMacroGoalRows() {
     const wrap = document.getElementById('macroGoalRows');
     if (!wrap.dataset.built) {
@@ -7064,11 +5522,10 @@
 
   function renderManage() {
     setManageCategory(manageCategory);
-    renderExerciseManageList();
-    renderTidyCard();
-    renderTrackerManageList();
-    renderWaterManagePanel();
-    renderFoodManagePanel();
+    // One section failing must not blank the others.
+    [renderExerciseManageList, renderTidyCard, renderTrackerManageList, renderWaterManagePanel, renderFoodManagePanel].forEach((fn) => {
+      try { fn(); } catch (e) { console.error('Manage section failed:', fn.name, e); }
+    });
   }
 
   /* ============================== Settings ============================== */
@@ -7076,13 +5533,19 @@
   // Settings flags driven by a plain on/off switch in index.html.
   const settingSwitches = {
     trackWorkoutSwitch: 'trackWorkout', trackMeasurementsSwitch: 'trackMeasurements',
-    trackWaterSwitch: 'trackWater', trackFoodSwitch: 'trackFood', trackHabitsSwitch: 'trackHabits',
+    trackWaterSwitch: 'trackWater', trackFoodSwitch: 'trackFood', trackHabitsSwitch: 'trackHabits', trackCardioSwitch: 'trackCardio',
     showWeightInsightsSwitch: 'showWeightInsights', showStrengthLevelSwitch: 'showStrengthLevel',
     showPaceLevelSwitch: 'showPaceLevel', showSleepInsightsSwitch: 'showSleepInsights',
     showMacroGuidanceSwitch: 'showMacroGuidance',
   };
+  // Home-block switches write into settings.homeSections rather than a flat key.
+  const homeSwitches = {
+    homeChecklistSwitch: 'checklist', homeTrainingSwitch: 'training', homeNutritionSwitch: 'nutrition',
+    homeMiniSwitch: 'mini', homeGoalsSwitch: 'goals',
+  };
   function syncSwitches() {
     Object.entries(settingSwitches).forEach(([id, key]) => document.getElementById(id).setAttribute('aria-checked', String(state.settings[key])));
+    Object.entries(homeSwitches).forEach(([id, key]) => document.getElementById(id).setAttribute('aria-checked', String(homeSectionOn(key))));
   }
 
   function renderSettings() {
@@ -7093,12 +5556,9 @@
     document.querySelectorAll('#lengthUnitSegmented button').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.unitChoice === state.settings.lengthUnit)));
     document.querySelectorAll('#volumeUnitSegmented button').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.unitChoice === state.settings.volumeUnit)));
 
-    // Which height field to show follows the unit setting; the *values* in
-    // them are deliberately NOT synced here — see syncProfileHeightInputs()
-    // and openSettings() below for why: syncing on every render would
-    // clobber a height the user just typed but hasn't saved yet, the moment
-    // they tap the adjacent Sex control (which, like every other settings
-    // control, saves instantly and re-renders this whole view).
+    // Which height field shows follows the unit setting. The values are not synced
+    // here: that would overwrite a height typed but not yet saved whenever another
+    // Settings control re-renders this view (see syncProfileHeightInputs()).
     document.getElementById('profileHeightFieldCm').hidden = state.settings.lengthUnit !== 'cm';
     document.getElementById('profileHeightFieldFtIn').hidden = state.settings.lengthUnit === 'cm';
     document.querySelectorAll('#profileSexSegmented button').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.sexChoice === (state.profile.sex || ''))));
@@ -7107,128 +5567,31 @@
     document.querySelectorAll('#insightsWindowSegmented button').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.windowChoice === String(state.settings.insightsWindowDays))));
   }
 
-  /* ============================== Backup validation ==============================
-     A hand-written shape/type check for an imported backup — deliberately
-     lenient about fields older schema versions won't have yet (those get
-     backfilled by runMigrations, same as a normal load()), but strict about
-     type and about the enum-like fields the rest of the app switches on
-     directly (kind, direction, ...), since a bad value there would otherwise
-     surface as a rendering bug deep in the app instead of a clear rejection
-     here. Returns an error string, or null when the shape is acceptable to
-     hand to runMigrations(). Not a full re-implementation of every rule in
-     the app (e.g. it won't catch a negative water goal) — it exists to
-     reject garbage and hostile input, not to replace normal validation. */
-  const VALID_EX_KINDS = new Set(['weight', 'reps', 'cardio', 'habit']);
-  const VALID_TRACKER_KINDS = new Set(['metric', 'sleep']);
-  const VALID_DIRECTIONS = new Set(['up', 'down']);
-  const VALID_SEX = new Set(['male', 'female']);
-  const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+  // Settings > About the numbers: built from FitStandards.REFERENCES so the
+  // screen and the maths cannot drift apart.
+  function openReferencesModal() {
+    const link = (r) => (r && r.url ? `<a href="${escapeHtml(r.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(r.label)}</a>` : r ? escapeHtml(r.label) : '');
+    const badge = (k) => `<span class="tag${k === 'reference' ? ' tag-good' : ''}">${k === 'reference' ? 'Published reference' : 'App assumption'}</span>`;
+    openModal(`
+      <div class="modal-title-row"><h2>About the numbers</h2><button class="modal-close" data-action="close-modal">${CLOSE_ICON_SVG}</button></div>
+      <p class="muted-text">Fit Log estimates are general guides, not medical advice. A published reference comes from a named source. An app assumption is a sensible default the app chose.</p>
+      ${S.REFERENCES.map((r) => `
+        <div class="card ref-card">
+          <div class="ref-head"><h3>${escapeHtml(r.title)}</h3>${badge(r.kind)}</div>
+          <p>${escapeHtml(r.summary)}</p>
+          ${r.caveat ? `<p class="muted-text">${escapeHtml(r.caveat)}</p>` : ''}
+          ${r.source || r.alt ? `<p class="muted-text ref-src">Source: ${[link(r.source), link(r.alt)].filter(Boolean).join(' &middot; ')}</p>` : '<p class="muted-text ref-src">No single published source.</p>'}
+        </div>`).join('')}
+      <p class="muted-text">Standards version ${S.version}, reviewed ${S.reviewed}.</p>
+    `, { tall: true });
+  }
 
+  /* ============================== Backup validation ==============================
+     The checks live in js/backup.js (FitBackup.validate). Returns an error string or null. */
   function isPlainObject(v) { return v != null && typeof v === 'object' && !Array.isArray(v); }
-  function isNumOrNull(v) { return v == null || (typeof v === 'number' && Number.isFinite(v)); }
 
   function validateBackupShape(parsed) {
-    if (!isPlainObject(parsed)) return 'This file isn’t a Fit Log backup.';
-    if (parsed.version != null && !(typeof parsed.version === 'number' && parsed.version >= 1)) return 'Unrecognized backup version.';
-    if (typeof parsed.version === 'number' && parsed.version > SCHEMA_VERSION) {
-      return `This backup is from a newer version of Fit Log (v${parsed.version}) than this app supports (v${SCHEMA_VERSION}) — update the app before importing it.`;
-    }
-
-    if (!Array.isArray(parsed.exercises)) return 'Missing or invalid exercise list.';
-    for (const ex of parsed.exercises) {
-      if (!isPlainObject(ex) || typeof ex.id !== 'string' || typeof ex.name !== 'string') return 'One of the exercises is malformed.';
-      if (ex.kind != null && !VALID_EX_KINDS.has(ex.kind)) return `Unknown exercise type “${ex.kind}”.`;
-      if (!isNumOrNull(ex.goal) || !isNumOrNull(ex.distanceGoal) || !isNumOrNull(ex.paceGoal)) return `"${ex.name}" has an invalid goal value.`;
-    }
-
-    if (!Array.isArray(parsed.entries)) return 'Missing or invalid entry list.';
-    for (const en of parsed.entries) {
-      if (!isPlainObject(en) || typeof en.id !== 'string' || typeof en.exerciseId !== 'string') return 'One of the logged entries is malformed.';
-      if (typeof en.date !== 'string' || !ISO_DATE_RE.test(en.date)) return 'One of the logged entries has an invalid date.';
-      if (en.sets != null && !Array.isArray(en.sets)) return 'One of the logged entries has an invalid sets list.';
-    }
-
-    if (parsed.trackers != null) {
-      if (!Array.isArray(parsed.trackers)) return 'Invalid tracker list.';
-      for (const t of parsed.trackers) {
-        if (!isPlainObject(t) || typeof t.id !== 'string' || typeof t.name !== 'string') return 'One of the trackers is malformed.';
-        if (t.kind != null && !VALID_TRACKER_KINDS.has(t.kind)) return `Unknown tracker type “${t.kind}”.`;
-        if (t.direction != null && !VALID_DIRECTIONS.has(t.direction)) return `Tracker "${t.name}" has an invalid direction.`;
-        if (!isNumOrNull(t.goal) || !isNumOrNull(t.baseline)) return `Tracker "${t.name}" has an invalid goal value.`;
-      }
-    }
-
-    if (parsed.measurements != null) {
-      if (!Array.isArray(parsed.measurements)) return 'Invalid tracker-entry list.';
-      for (const m of parsed.measurements) {
-        if (!isPlainObject(m) || typeof m.id !== 'string' || typeof m.trackerId !== 'string') return 'One of the tracker entries is malformed.';
-        if (typeof m.date !== 'string' || !ISO_DATE_RE.test(m.date)) return 'One of the tracker entries has an invalid date.';
-        if (!isNumOrNull(m.value)) return 'One of the tracker entries has an invalid value.';
-      }
-    }
-
-    if (parsed.water != null) {
-      if (!isPlainObject(parsed.water) || !isNumOrNull(parsed.water.goalMl)) return 'Invalid water settings.';
-      if (parsed.water.cups != null && !Array.isArray(parsed.water.cups)) return 'Invalid water cup list.';
-    }
-    if (parsed.waterEntries != null) {
-      if (!Array.isArray(parsed.waterEntries)) return 'Invalid water-entry list.';
-      for (const w of parsed.waterEntries) {
-        if (!isPlainObject(w) || !isNumOrNull(w.amountMl) || typeof w.date !== 'string' || !ISO_DATE_RE.test(w.date)) return 'One of the water entries is malformed.';
-      }
-    }
-
-    if (parsed.profile != null) {
-      if (!isPlainObject(parsed.profile) || !isNumOrNull(parsed.profile.heightCm)) return 'Invalid profile data.';
-      if (parsed.profile.sex != null && !VALID_SEX.has(parsed.profile.sex)) return 'Invalid sex value in profile.';
-      if (parsed.profile.age != null && !isNumOrNull(parsed.profile.age)) return 'Invalid age value in profile.';
-    }
-
-    // Food was a complete gap here — every field below is read directly by
-    // name (macroGoalInfo(), foodTotalsForDate(), the Log/Manage food
-    // forms) with no defensive checks of its own, the same way exercises/
-    // trackers/water above assume validateBackupShape already screened
-    // them out.
-    if (parsed.food != null) {
-      if (!isPlainObject(parsed.food)) return 'Invalid food data.';
-      if (parsed.food.entries != null) {
-        if (!Array.isArray(parsed.food.entries)) return 'Invalid food-entry list.';
-        for (const f of parsed.food.entries) {
-          if (!isPlainObject(f) || typeof f.id !== 'string') return 'One of the food entries is malformed.';
-          if (typeof f.date !== 'string' || !ISO_DATE_RE.test(f.date)) return 'One of the food entries has an invalid date.';
-          for (const k of MACRO_KEYS) { if (!isNumOrNull(f[k])) return 'One of the food entries has an invalid nutrition value.'; }
-        }
-      }
-      if (parsed.food.savedFoods != null) {
-        if (!Array.isArray(parsed.food.savedFoods)) return 'Invalid saved-foods list.';
-        for (const f of parsed.food.savedFoods) {
-          if (!isPlainObject(f) || typeof f.id !== 'string' || typeof f.name !== 'string') return 'One of the saved foods is malformed.';
-          for (const k of MACRO_KEYS) { if (!isNumOrNull(f[k])) return `Saved food "${f.name}" has an invalid nutrition value.`; }
-        }
-      }
-    }
-
-    // settings.macroGoals/nutritionCalc are the two settings sub-objects
-    // every render path dereferences straight through (macroGoalInfo()
-    // does `state.settings.macroGoals[key].enabled` with no guard at all —
-    // see its own comment), so a wrong-shaped value here doesn't fail
-    // softly, it throws deep in a render call. Everything else in
-    // `settings` is either a plain flag/string switched on defensively
-    // elsewhere or gets papered over by DEFAULT_SETTINGS's own
-    // Object.assign in importBackup(), so this stays scoped to the two
-    // fields that actually crash.
-    if (parsed.settings != null) {
-      if (!isPlainObject(parsed.settings)) return 'Invalid settings data.';
-      if (parsed.settings.macroGoals != null) {
-        if (!isPlainObject(parsed.settings.macroGoals)) return 'Invalid macro-goal settings.';
-        for (const [k, v] of Object.entries(parsed.settings.macroGoals)) {
-          if (!isPlainObject(v) || !isNumOrNull(v.goal)) return `Invalid macro-goal setting for "${k}".`;
-        }
-      }
-      if (parsed.settings.nutritionCalc != null && !isPlainObject(parsed.settings.nutritionCalc)) return 'Invalid nutrition-calculator settings.';
-    }
-
-    return null;
+    return window.FitBackup.validate(parsed, { schemaVersion: SCHEMA_VERSION, macroKeys: MACRO_KEYS, todayIso: todayISO() });
   }
 
   function exportBackup() {
@@ -7249,43 +5612,22 @@
     reader.onload = () => {
       try {
         const parsed = JSON.parse(reader.result);
-        // Imported data is untrusted — a hand-typed or corrupted file, or
-        // one from somewhere other than this app's own Export — so its
-        // shape is checked in full before it ever reaches runMigrations()
-        // or state, not just spot-checked the way load()'s catch-all is.
+        // Imported data is untrusted: check its shape in full before runMigrations() or state see it.
         const shapeError = validateBackupShape(parsed);
         if (shapeError) { toast(`Can't import: ${shapeError}`); return; }
         confirmDialog('Replace all data?', 'Importing will overwrite everything currently in the app with this backup file.', 'Import', () => {
-          // Kept so a failed write below can put things back exactly as
-          // they were rather than leaving the in-memory state (and
-          // everything rendered from it) pointed at data that was never
-          // actually persisted — a plain "importing failed" isn't enough
-          // here since a whole-data replace has much more to lose than a
-          // single entry does.
+          // Kept so a failed write below can restore the in-memory state.
           const previousState = state;
           parsed.settings = Object.assign({}, DEFAULT_SETTINGS, parsed.settings || {});
-          // The Object.assign above is shallow — a backup whose settings
-          // has a `macroGoals` object at all (even one missing keys, e.g.
-          // hand-edited, or from a version where a key was optional)
-          // replaces DEFAULT_SETTINGS.macroGoals wholesale rather than
-          // filling gaps in it. Normally that gap gets backfilled by the
-          // version-gated migrations (see MIGRATIONS[8]/[9]), but those
-          // only run for a backup whose declared version predates them —
-          // one carrying the CURRENT version with a key missing anyway
-          // (validateBackupShape above only checks the keys that ARE
-          // present, not that every key is present) would skip every
-          // migration and reach macroGoalInfo()'s unguarded
-          // `state.settings.macroGoals[key].enabled` with a hole in it.
-          // Doing the same per-key backfill here, unconditionally, closes
-          // that gap regardless of the backup's declared version.
+          // Object.assign is shallow, so a backup with a partial `macroGoals` would replace
+          // the defaults wholesale. Migrations only backfill older versions and
+          // validateBackupShape does not require every key, so backfill per key here.
           parsed.settings.macroGoals = Object.assign({}, DEFAULT_SETTINGS.macroGoals, parsed.settings.macroGoals || {});
           MACRO_KEYS.forEach((k) => {
             if (!isPlainObject(parsed.settings.macroGoals[k])) parsed.settings.macroGoals[k] = DEFAULT_SETTINGS.macroGoals[k];
           });
           parsed.settings.nutritionCalc = Object.assign({}, DEFAULT_SETTINGS.nutritionCalc, parsed.settings.nutritionCalc || {});
-          // Run the same migration pipeline load() uses — a backup exported
-          // from an older version of the app is brought up to the current
-          // shape the same way, additively, instead of being rejected.
+          // Same migration pipeline as load(): older backups are upgraded (additively), not rejected.
           state = runMigrations(parsed);
           if (!save()) { state = previousState; return; }
           applyTheme();
@@ -7300,30 +5642,20 @@
   }
 
   /* ============================== First-run setup wizard ==============================
-     Shown exactly once — only when there is no saved data at all (see
-     load() below) — instead of silently seeding the same fixed starter
-     goals for everyone. It builds the same kind of shape defaultData()
-     would, just tailored to what this person actually wants to track;
-     anything skipped here is still addable later from Manage/Settings,
-     exactly as if it had come from the old fixed defaults. */
+     Shown once, only when there is no saved data (see load()). It builds a starting state like
+     defaultData(), tailored to the answers; anything skipped can be added later in Manage or
+     Settings. */
 
-  // The wizard's step list isn't fixed-length — it's computed fresh from
-  // the Interests step's answers every time (see setupStepSequence below),
-  // so `setupStepIndex` is an offset into whatever that sequence currently
-  // is rather than a fixed 1-4 count. Turning an interest off doesn't just
-  // hide content within a step the way the old per-step toggles did; the
-  // whole step disappears from the sequence, so "Step 2 of 5" always
-  // reflects only what's actually left to answer.
+  // The step list is computed from the Interests answers (setupStepSequence()),
+  // so `setupStepIndex` indexes whatever that sequence currently is. Turning an
+  // interest off removes its step.
   let setupStepIndex = 0;
   let setupAnswers = {
-    // What this install tracks at all (see renderSetupStepInterests) —
-    // Lifting/Running/Body weight/Water default on (same as this app
-    // always tracked before interests existed); Sleep/Food default off,
-    // the actual declutter this step was for. Lifting also decides whether
-    // the daily bodyweight-target exercises (push-ups/squats/pull-ups) get
-    // seeded — those are exercise tracking too, not a separate concern.
+    // What this install tracks (see renderSetupStepInterests). Lifting, Running,
+    // Habits, Body weight and Water start on; Sleep and Food start off. Lifting also
+    // decides whether the daily bodyweight exercises are seeded.
     interests: { lifting: true, running: true, habits: true, bodyweight: true, sleep: false, water: true, food: false },
-    // Starter packs from the catalog — nothing is ticked for you.
+    // Starter packs from the catalog; none are ticked by default.
     packs: {},
     // How the calorie target is set: 'calc' | 'manual' | 'none'.
     calorieMode: 'none', calorieManual: '', calorieGoal: 'maintain', commonFoods: true, macros: null,
@@ -7341,30 +5673,24 @@
     waterGoal: '',
     weightGoalEnabled: false,
     weightGoalValue: '',
-    // On by default, same reasoning as DEFAULT_SETTINGS.showWeightInsights
-    // etc. above — these are general published benchmarks, not something
-    // that needs an opt-in.
+    // On by default, like DEFAULT_SETTINGS.showWeightInsights.
     insightsEnabled: true,
   };
 
-  // Recomputed on every render rather than fixed at wizard start — its
-  // first two entries (interests, about) are always present; everything
-  // after depends on what got turned on in the Interests step, which can
-  // only be (re)answered at index 0, so the sequence is always accurate by
-  // the time the user reaches any later index. 'goals' is always last
-  // (before Finish) even when both Water and Body weight are off, since
-  // the Insight calculators toggle lives there regardless.
+  // Recomputed on every render. 'interests' and 'about' always come first; the rest
+  // follow the Interests answers (changeable only at index 0). 'goals' is always
+  // last, since the Insights toggle lives there.
   function setupStepSequence() {
     const seq = ['interests', 'about'];
     if (setupAnswers.interests.lifting) seq.push('lifting');
     if (setupAnswers.interests.running) seq.push('running');
-    if (setupAnswers.interests.lifting && CATALOG.packs.length) seq.push('packs');
+    if (setupPacks().length) seq.push('packs');
     if (setupAnswers.interests.food) seq.push('food');
     seq.push('goals');
     return seq;
   }
   const SETUP_STEP_LEADS = {
-    interests: 'Pick only what you will use. Anything left off stays out of sight, and you can turn it on later in Settings.',
+    interests: 'Pick only what you will use. Anything left off stays out of sight, and you can turn it on later in Manage.',
     about: 'Optional. Height, weight, age and sex unlock BMI, strength standards and a calorie estimate. Skip any of it.',
     lifting: 'Each lift can use a fixed plates goal or a bodyweight-multiple standard.',
     packs: 'Optional. Start with a ready-made list, or skip and add movements one at a time from the catalog later.',
@@ -7372,13 +5698,9 @@
   };
   const SETUP_STEP_TITLES = { interests: 'What do you want to track?', about: 'About you', lifting: 'Lifting goals', running: 'Running goal', packs: 'Starter exercises', food: 'Food targets', goals: 'Other goals' };
 
-  // The topbar normally reserves the iOS notch/status-bar area itself (its
-  // own top padding includes env(safe-area-inset-top) — see styles.css —
-  // rather than an ancestor, since a sticky element must carry its own
-  // safe-area padding or the inset gets lost the moment it scrolls to
-  // top:0). Any screen that hides the topbar (the setup wizard, the
-  // recovery screen) loses that protection and needs its own, via the
-  // `#app.no-topbar` CSS rule these two helpers toggle.
+  // The topbar normally carries its own iOS safe-area padding (a sticky element
+  // must). Screens that hide it (setup wizard, recovery screen) use the
+  // `#app.no-topbar` CSS rule, toggled by these helpers.
   function hideAppChrome() {
     document.getElementById('topbar').hidden = true;
     document.getElementById('tabbar').hidden = true;
@@ -7414,7 +5736,7 @@
 
   function renderSetupStep() {
     const seq = setupStepSequence();
-    if (setupStepIndex >= seq.length) setupStepIndex = seq.length - 1; // interest turned off after passing its step — land on the new last step instead of an index that no longer exists
+    if (setupStepIndex >= seq.length) setupStepIndex = seq.length - 1; // an interest was turned off after its step: clamp to the new last step
     const key = seq[setupStepIndex];
     document.getElementById('setupProgress').innerHTML = seq.map((_, i) => `<i class="${i <= setupStepIndex ? 'on' : ''}"></i>`).join('');
     document.getElementById('setupKicker').textContent = setupStepIndex === 0 ? 'Welcome to Fit Log' : `Step ${setupStepIndex + 1} of ${seq.length}`;
@@ -7432,11 +5754,9 @@
     else renderSetupStepGoals();
   }
 
-  // Six independent on/off tiles rather than a radiogroup — any combination
-  // is valid, including all-off (someone who just wants the bare workout
-  // log with nothing else). Tapping a tile only flips its own answer and
-  // re-renders this step; the sequence itself (and therefore which later
-  // steps exist) is recomputed the next time Next/Back moves off this step.
+  // Independent on/off tiles: any combination is valid, including none. Tapping
+  // one flips its answer and re-renders this step; the step sequence updates when
+  // Next/Back leaves it.
   function interestTileHtml(key, icon, label, on, desc) {
     return `<button type="button" class="setup-tile${on ? ' is-on' : ''}" data-interest="${key}" aria-pressed="${on}">
       <span class="setup-tile-ico">${icon}</span>
@@ -7450,12 +5770,12 @@
     document.getElementById('setupContent').innerHTML = `
       <div class="setup-tiles">
         ${interestTileHtml('lifting', DOMAIN_TAB_ICONS.workout, 'Lifting', i.lifting, 'Sets, reps, weight and personal bests')}
-        ${interestTileHtml('running', FOOTPRINTS_ICON_SVG, 'Running', i.running, 'Runs with pace and distance goals')}
+        ${interestTileHtml('running', STATIC_ICONS.footprints, 'Running', i.running, 'Runs with pace and distance goals')}
         ${interestTileHtml('habits', STATIC_ICONS.habits, 'Habits', i.habits, 'Creatine, stretching, daily reps, anything daily')}
-        ${interestTileHtml('food', APPLE_ICON_SVG, 'Food', i.food, 'Calories and macros, common foods ready')}
-        ${interestTileHtml('water', WATER_DROP_ICON_SVG, 'Water', i.water, 'Glasses and bottles against a daily goal')}
-        ${interestTileHtml('bodyweight', SCALE_ICON_SVG, 'Body weight', i.bodyweight, 'Weight and BMI over time')}
-        ${interestTileHtml('sleep', MOON_ICON_SVG, 'Sleep', i.sleep, 'Hours slept each night')}
+        ${interestTileHtml('food', DOMAIN_TAB_ICONS.food, 'Food', i.food, 'Calories and macros, common foods ready')}
+        ${interestTileHtml('water', DOMAIN_TAB_ICONS.water, 'Water', i.water, 'Glasses and bottles against a daily goal')}
+        ${interestTileHtml('bodyweight', DOMAIN_TAB_ICONS.measurements, 'Body', i.bodyweight, 'Weight, BMI and other measurements')}
+        ${interestTileHtml('sleep', STATIC_ICONS.moon, 'Sleep', i.sleep, 'Hours slept each night')}
       </div>
       <div class="note-box">${uiIconInfo()}<span>Each choice adds one section to Home and one to Log. Nothing you leave off shows up anywhere.</span></div>`;
     document.querySelectorAll('#setupContent [data-interest]').forEach((btn) => {
@@ -7501,10 +5821,7 @@
     });
   }
 
-  // Reached only when the Interests step turned Lifting on — no separate
-  // "Track lifting goals" toggle here anymore (that decision already got
-  // made). Content and wiring below are otherwise unchanged from before the
-  // interests rework.
+  // Shown only when the Interests step turned Lifting on.
   function renderSetupStepLifting() {
     const lifts = setupAnswers.lifts;
     const canUseStandards = setupAnswers.weight !== '' && setupAnswers.sex !== '';
@@ -7546,9 +5863,7 @@
     });
   }
 
-  // Reached only when the Interests step turned Running on — see the
-  // Lifting step's comment above for why there's no separate track/don't
-  // track toggle here anymore either.
+  // Shown only when the Interests step turned Running on.
   function renderSetupStepRunning() {
     const t = setupAnswers.runningGoalType;
     document.getElementById('setupContent').innerHTML = `
@@ -7576,10 +5891,8 @@
     }));
   }
 
-  // Reached last, always — even when both Water and Body weight are off, so
-  // the Insight-calculators toggle always has somewhere to live. No more
-  // on/off toggle for Water or Body weight themselves here — the Interests
-  // step already decided that; this step only asks about their goal.
+  // Always the last step, even with Water and Body weight off, since the Insights
+  // toggle lives here. Those two are decided in the Interests step; this asks only for their goals.
   function renderSetupStepGoals() {
     const i = setupAnswers.interests;
     document.getElementById('setupContent').innerHTML = `
@@ -7599,10 +5912,17 @@
     wireSetupBoolRow('setupInsightsToggle', (v) => { captureSetupStep(); setupAnswers.insightsEnabled = v; renderSetupStepGoals(); });
   }
 
+  // Packs offered at setup: Strength and Bodyweight & home go with Lifting, Cardio
+  // only with Running.
+  function setupPacks() {
+    const i = setupAnswers.interests;
+    return CATALOG.packs.filter((pk) => (pk.id === 'running' ? i.running : i.lifting));
+  }
+
   function renderSetupStepPacks() {
     const picked = setupAnswers.packs;
     document.getElementById('setupContent').innerHTML = `
-      <div class="card card-list">${CATALOG.packs.map((pk) => `
+      <div class="card card-list">${setupPacks().map((pk) => `
         <div class="setting-row"><span>${escapeHtml(pk.name)}<span class="muted-text">${escapeHtml(pk.description || '')}</span></span>${switchHtml(`data-pack="${pk.id}"`, pk.name, !!picked[pk.id])}</div>`).join('')}
       </div>`;
     document.querySelectorAll('#setupContent [data-pack]').forEach((btn) => btn.addEventListener('click', () => {
@@ -7666,12 +5986,8 @@
     }));
   }
 
-  // Plain text/number inputs aren't captured until Back/Next is pressed
-  // (unlike the toggles above, which write into setupAnswers immediately on
-  // click since they also change what's on screen) — this is what reads
-  // them just before the step changes. Keyed by the step's identity in the
-  // (dynamic) sequence rather than a fixed number, same as everything else
-  // in the wizard since the interests rework.
+  // Text and number inputs are read here, just before the step changes (toggles
+  // write to setupAnswers immediately). Keyed by the step's name in the dynamic sequence.
   function captureSetupStep() {
     const key = setupStepSequence()[setupStepIndex];
     if (key === 'about') {
@@ -7725,9 +6041,8 @@
     return (cm >= MIN_HEIGHT_CM && cm <= MAX_HEIGHT_CM) ? cm : null;
   }
 
-  // Builds the real starting `state` from every answer collected above —
-  // the wizard's equivalent of defaultData(), just tailored per-answer
-  // instead of fixed. Runs exactly once, right before the very first save.
+  // Builds the real starting `state` from the wizard answers, like a tailored
+  // defaultData(). Runs once, right before the first save.
   function finishSetup() {
     const now = new Date().toISOString();
     const heightCm = heightCmFromSetup();
@@ -7750,9 +6065,7 @@
           catalogId: key === 'bench' ? 'cat_mv_bench_press' : `cat_mv_${key}`, equipment: 'barbell',
         });
       });
-      // Daily bodyweight targets ride along with the Lifting interest — the
-      // mockup's flow has no separate step for them, so they're exercise
-      // tracking that follows Lifting rather than a concern of their own.
+      // The daily bodyweight exercises follow the Lifting interest.
       exercises.push(
         { id: 'ex_pushups', name: 'Push-ups', kind: 'reps', section: 'daily', goal: 50, archived: false, createdAt: now },
         { id: 'ex_bwsquats', name: 'Bodyweight Squats', kind: 'reps', section: 'daily', goal: 50, archived: false, createdAt: now },
@@ -7767,8 +6080,8 @@
       exercises.push({ id: 'ex_running', name: 'Running', kind: 'cardio', section: 'goal', distanceGoal, paceGoal, goal: null, archived: false, createdAt: now });
     }
 
-    if (i.lifting) {
-      CATALOG.packs.filter((pk) => setupAnswers.packs[pk.id]).forEach((pk) => {
+    {
+      setupPacks().filter((pk) => setupAnswers.packs[pk.id]).forEach((pk) => {
         CATALOG.movements.filter((mv) => mv.packs.includes(pk.id)).forEach((mv) => {
           const eq = mv.equipment.length ? mv.defaultEquipment : null;
           const have = exercises.find((e) => e.liftType && e.liftType === mv.liftType && mv.liftType) || exercises.find((e) => normName(e.name) === normName(mv.name)) || exercises.find((e) => e.catalogId === mv.id && (e.equipment || null) === eq);
@@ -7777,27 +6090,24 @@
           if (eq) ex.equipment = eq;
           if (mv.kind === 'weight') { ex.bodyRegion = guessBodyRegion(mv.name); ex.liftType = mv.liftType || null; }
           if (mv.kind === 'cardio') { ex.distanceGoal = null; ex.paceGoal = null; }
+          if (mv.unit) ex.unit = mv.unit;
           if (ITEM_ICONS[mv.icon]) ex.icon = mv.icon;
           exercises.push(ex);
         });
       });
-      state.settings.catalogPacksSeen = CATALOG.packs.filter((pk) => setupAnswers.packs[pk.id]).map((pk) => pk.id);
+      state.settings.catalogPacksSeen = setupPacks().filter((pk) => setupAnswers.packs[pk.id]).map((pk) => pk.id);
     }
 
     const trackers = defaultTrackers();
-    // Body weight / Sleep off reuses each tracker's own archived flag rather
-    // than omitting the tracker entirely — the same mechanism Manage already
-    // uses to hide a tracker, so re-enabling later is just an un-archive.
+    // An interest that is off archives its tracker (as Manage does) rather than
+    // omitting it, so turning it on later is an un-archive.
     if (!i.bodyweight) trackers.find((tr) => tr.id === 'trk_weight').archived = true;
     if (!i.sleep) trackers.find((tr) => tr.id === 'trk_sleep').archived = true;
 
     const measurements = [];
     if (weightLb != null) {
-      // Seeded regardless of the Body weight interest: it's the one data
-      // point behind BMI/strength-standard math elsewhere (currentBodyWeightLb()
-      // and friends read state.measurements directly, unfiltered by whether
-      // the tracker itself is archived), so hiding the tracker doesn't mean
-      // that starting number should be thrown away.
+      // Seeded even if the Body weight interest is off: BMI and strength standards
+      // read state.measurements regardless of the tracker's archived flag.
       measurements.push({ id: genId('meas'), trackerId: 'trk_weight', date: todayISO(), value: weightLb, note: null });
       if (i.bodyweight && setupAnswers.weightGoalEnabled && setupAnswers.weightGoalValue !== '') {
         const targetLb = Units.displayToLb(parseFloat(setupAnswers.weightGoalValue));
@@ -7805,7 +6115,7 @@
           const weightTracker = trackers.find((tr) => tr.id === 'trk_weight');
           weightTracker.goal = targetLb;
           weightTracker.direction = targetLb < weightLb ? 'down' : 'up';
-          weightTracker.baseline = weightLb; // the weight just entered above — the literal starting point
+          weightTracker.baseline = weightLb; // the weight just entered above is the starting point
         }
       }
     }
@@ -7832,11 +6142,10 @@
     state.settings.showWeightInsights = setupAnswers.insightsEnabled;
     state.settings.showStrengthLevel = setupAnswers.insightsEnabled;
     state.settings.showPaceLevel = setupAnswers.insightsEnabled;
-    // The four Manage domains' master toggles (see DEFAULT_SETTINGS) start
-    // wherever the interests that feed each one landed — Workout covers
-    // both Lifting and Running (either one is enough to keep it on), Body
-    // covers Body weight and Sleep the same way, Water/Food map 1:1.
-    state.settings.trackWorkout = i.lifting || i.running;
+    // Starting domain switches come from the interests: Lifting, Running and Habits
+    // each have their own, Body covers Body weight and Sleep, Water and Food map 1:1.
+    state.settings.trackWorkout = i.lifting;
+    state.settings.trackCardio = i.running;
     state.settings.trackHabits = i.habits;
     state.settings.trackMeasurements = i.bodyweight || i.sleep;
     state.settings.trackWater = i.water;
@@ -7856,9 +6165,8 @@
       if (setupAnswers.macros) Object.keys(setupAnswers.macros).forEach((k) => { if (state.settings.macroGoals[k]) state.settings.macroGoals[k].enabled = !!setupAnswers.macros[k]; });
     }
 
-    // On failure, stay on the wizard rather than declaring victory and
-    // switching away from it — save() already surfaced why, and the
-    // answers are still sitting in setupAnswers/state for another attempt.
+    // On failure stay on the wizard: save() has said why and the answers are still
+    // in setupAnswers/state.
     if (!save()) return;
     showAppChrome();
     switchTab('dashboard');
@@ -7868,15 +6176,9 @@
 
   /* ============================== Tabs / global wiring ============================== */
 
-  // Hides every <section class="view"> except the one whose data-view
-  // matches `tab`, updates the bottom tab bar's highlighted icon, and
-  // re-renders that one tab so it always shows current data (rather than
-  // whatever it last looked like). There's no real router here — with only
-  // a handful of screens, "show this one, hide the rest" is simplest.
-  // Settings has no tabbar button (it opens from the header gear icon
-  // instead — see openSettings() below), so switching to it correctly
-  // leaves every tab unhighlighted, which is the desired look for a screen
-  // layered on top rather than a sixth peer tab.
+  // Show only the `.view` whose data-view matches `tab`, highlight its bottom tab
+  // and re-render it. Settings has no tab button (it opens from the header gear),
+  // so no tab is highlighted for it.
   function switchTab(tab) {
     navOnSwitchTab(tab);
     document.querySelectorAll('.view').forEach((v) => { v.hidden = v.dataset.view !== tab; });
@@ -7884,15 +6186,8 @@
       if (t.dataset.tab === tab) t.setAttribute('aria-current', 'page');
       else t.removeAttribute('aria-current');
     });
-    // The page itself scrolls (#app/#main have no overflow of their own —
-    // see styles.css), and every .view is a sibling sharing that one
-    // window scroll position rather than a scroll container of its own. So
-    // switching which .view is visible used to leave the window exactly
-    // where it was on the PREVIOUS tab — scroll to the bottom of Dashboard,
-    // tap Log, and Log would silently open scrolled down too, rather than
-    // at its own top. Every tab should start at its own top on arrival,
-    // same as switching screens in any native app (and the same call
-    // openModal already makes for the modal sheet's own scroll position).
+    // The window scrolls, not the views, so reset it: each tab should open at its
+    // top, not wherever the previous tab was scrolled.
     window.scrollTo(0, 0);
     if (tab === 'dashboard') renderHome();
     if (tab === 'progress') renderProgress();
@@ -7902,17 +6197,12 @@
     if (tab === 'settings') renderSettings();
   }
 
-  // Settings is reached from the header gear icon rather than a bottom tab,
-  // so it needs to remember which tab was active in order to return there
-  // on close instead of always landing back on Dashboard.
+  // Settings opens from the header gear, not a tab, so remember the active tab to
+  // return to on close.
   let lastTabBeforeSettings = 'dashboard';
-  // One-time value sync for the Profile height field(s) (and, for the same
-  // reason, Age), on entry only — see the comment in renderSettings() for
-  // why this can't live in the general re-render path. Height is also
-  // re-run whenever the length unit itself is switched (see wireEvents'
-  // lengthUnitSegmented handler), since that changes which fields are shown
-  // and what they should contain — unlike every other settings control,
-  // that one *has* to resync the value.
+  // Sync the Profile height and age inputs on entry only: doing it in the general
+  // re-render would overwrite a value typed but not saved (see renderSettings()).
+  // Height is also resynced when the length unit changes, since the fields change.
   function syncProfileHeightInputs() {
     if (state.settings.lengthUnit === 'cm') {
       document.getElementById('profileHeightCm').value = state.profile.heightCm ? round(state.profile.heightCm, 1) : '';
@@ -7925,16 +6215,9 @@
   }
 
   function openSettings() {
-    // The header gear button lives outside <main> (see index.html), so it
-    // stays visible and clickable even while the Settings view is already
-    // open — nothing in switchTab() hides it. Pressing it again in that
-    // state used to re-run the "remember where I came from" capture below,
-    // but by then none of the bottom tabs carry aria-current="page" (Settings
-    // isn't one of them), so activeTab came back null and clobbered
-    // lastTabBeforeSettings to the 'dashboard' fallback — silently changing
-    // where the close (X) button would return to, out from under whatever
-    // tab was actually active before Settings was first opened. Settings
-    // already being open is exactly the state that must NOT re-capture it.
+    // The header gear sits outside <main>, so it can be pressed while Settings is
+    // already open. Re-capturing then would find no active tab and reset the return
+    // tab to 'dashboard', so skip it.
     if (!document.getElementById('view-settings').hidden) return;
     const activeTab = document.querySelector('.tab[aria-current="page"]');
     lastTabBeforeSettings = activeTab ? activeTab.dataset.tab : 'dashboard';
@@ -7945,10 +6228,8 @@
     switchTab(lastTabBeforeSettings);
   }
 
-  // The heavy-handed "just redraw everything" refresh, used after anything
-  // that could affect more than one screen at once (import, unit change,
-  // adding/editing/archiving an exercise or tracker). Cheap enough for how
-  // little data this app holds — no need for more surgical updates.
+  // Redraw everything, after changes that can affect several screens (import,
+  // unit change, adding or archiving items). Cheap at this data size.
   function renderAll() {
     applyTheme();
     renderDashboard();
@@ -7984,14 +6265,14 @@
       syncLogWorkoutUI();
     });
     wireLogExercisePicker();
+    document.getElementById('streakCard').addEventListener('click', () => switchTab('history'));
+    document.getElementById('recentHistoryBtn').addEventListener('click', () => switchTab('history'));
     wireManageExercises();
     wireFoodLog();
     wireManageFood();
     document.getElementById('logForm').addEventListener('submit', handleLogSubmit);
 
-    // Reuses renderLogMeasurementForm() rather than re-deriving the label/
-    // quality-field visibility here too — one place decides what a tracker
-    // selection changes on screen.
+    // Reuses renderLogMeasurementForm() for the label and the quality field.
     document.getElementById('logTracker').addEventListener('change', renderLogMeasurementForm);
     document.getElementById('logMeasurementForm').addEventListener('submit', handleLogMeasurementSubmit);
     wireChipPicker(document.getElementById('logSleepQuality'));
@@ -8006,10 +6287,8 @@
     document.getElementById('logFoodForm').addEventListener('submit', handleLogFoodSubmit);
 
     document.getElementById('historyFilter').addEventListener('change', renderHistory);
-    // historyCategorySegmented's buttons are wired inline, on every rebuild,
-    // by renderHistoryCategorySegmented() itself (it's rebuilt via
-    // domainTabsHtml() whenever the tracked-domain set can change) — same
-    // pattern manageCategorySegmented uses below via setManageCategory().
+    // historyCategorySegmented's buttons are wired by renderHistoryCategorySegmented()
+    // on each rebuild; manageCategorySegmented does the same via setManageCategory().
     document.getElementById('calPrevBtn').addEventListener('click', () => {
       calendarMonth.setMonth(calendarMonth.getMonth() - 1);
       renderHistoryCalendar();
@@ -8030,11 +6309,8 @@
     document.querySelectorAll('[data-action="open-catalog"]').forEach((btn) => btn.addEventListener('click', () => openCatalogSheet(btn.dataset.catTabOpen)));
     document.querySelectorAll('[data-action="add-saved-food"]').forEach((btn) => btn.addEventListener('click', () => openSavedFoodForm(null)));
 
-    // Macro/goal toggle + amount rows are wired inside renderFoodManagePanel()
-    // itself (event delegation on #macroGoalRows, built once) rather than
-    // here, since that list of fields can grow (it already has — see
-    // MACRO_KEYS) and per-field getElementById wiring here would throw the
-    // moment a field's static markup stopped existing.
+    // Macro toggle and goal rows are wired by delegation in renderFoodManagePanel(),
+    // not here, because MACRO_KEYS can grow.
     document.getElementById('saveWaterGoalBtn').addEventListener('click', () => {
       const raw = parseFloat(document.getElementById('waterGoalInput').value);
       state.water.goalMl = (!Number.isNaN(raw) && raw > 0) ? Units.displayToMl(raw) : null;
@@ -8053,10 +6329,17 @@
       });
     });
 
-    // Nutrition calculator (Manage -> Nutrition -> Food) — "Use calculator"
-    // only shows/updates the live preview below; nothing is written into
-    // macroGoals until "Apply to daily goals" is tapped (see the comment on
-    // applyNutritionCalcTargets()).
+    Object.entries(homeSwitches).forEach(([id, key]) => {
+      document.getElementById(id).addEventListener('click', () => {
+        state.settings.homeSections = Object.assign({}, HOME_SECTION_DEFAULTS, state.settings.homeSections, { [key]: !homeSectionOn(key) });
+        if (!save()) return;
+        renderAll();
+      });
+    });
+
+    // Nutrition calculator: its settings only drive the live preview. The target
+    // numbers are written into macroGoals only by "Apply to daily goals"
+    // (applyNutritionCalcTargets()).
     document.getElementById('calorieModeSegmented').addEventListener('click', (ev) => {
       const b = ev.target.closest('[data-calorie-mode]');
       if (!b) return;
@@ -8109,7 +6392,7 @@
       state.settings.lengthUnit = btn.dataset.unitChoice;
       if (!save()) return;
       renderAll();
-      syncProfileHeightInputs(); // unit switch changes which fields show — this one has to resync
+      syncProfileHeightInputs(); // a unit switch changes which fields show, so this one must resync
     });
     document.getElementById('volumeUnitSegmented').addEventListener('click', (ev) => {
       const btn = ev.target.closest('button'); if (!btn) return;
@@ -8151,10 +6434,7 @@
         if (rawAge >= MIN_AGE && rawAge <= MAX_AGE) age = rawAge;
         else ageOutOfRange = true;
       }
-      // Reject the whole save rather than silently clamping/clearing an
-      // out-of-range field — a P1 data-integrity bug was users getting no
-      // feedback at all when e.g. "999" years old or "40 ft" tall just got
-      // quietly dropped to blank on save.
+      // Reject the whole save rather than silently clearing an out-of-range height or age.
       if (heightOutOfRange || ageOutOfRange) {
         const what = heightOutOfRange && ageOutOfRange ? 'Height and age' : heightOutOfRange ? 'Height' : 'Age';
         toast(`${what} looks out of range — please check the value before saving.`);
@@ -8164,13 +6444,9 @@
       state.profile.age = age;
       if (!save()) return;
       toast('Profile saved');
-      // Height/age both feed the nutrition calculator's live preview (see
-      // computeNutritionTargets()) — renderAll() re-renders Manage -> Food's
-      // panel too, so the preview reflects the new numbers immediately. It
-      // does NOT re-apply them into macroGoals on its own: applying is
-      // always the explicit "Apply to daily goals" button, so a Profile
-      // edit never silently overwrites a goal the user has set (or since
-      // hand-edited) via the calculator.
+      // renderAll() refreshes the calculator preview in Manage -> Food. Do not
+      // re-apply into macroGoals here: only "Apply to daily goals" does that, so a
+      // Profile edit never overwrites goals.
       renderAll();
     });
 
@@ -8187,6 +6463,7 @@
       renderAll();
     });
 
+    document.getElementById('aboutNumbersBtn').addEventListener('click', openReferencesModal);
     document.getElementById('exportBtn').addEventListener('click', exportBackup);
     document.getElementById('importBtn').addEventListener('click', () => document.getElementById('importFile').click());
     document.getElementById('importFile').addEventListener('change', (ev) => {
@@ -8208,9 +6485,8 @@
   }
 
   /* ============================== Data recovery screen ==============================
-     Shown instead of the normal app when load() couldn't make sense of an
-     existing (non-empty) saved payload. Offers an explicit choice rather
-     than silently discarding data that might still be salvageable. */
+     Shown instead of the app when load() could not read an existing saved payload. It offers an
+     explicit choice instead of discarding data that may be salvageable. */
 
   function showRecoveryScreen() {
     hideAppChrome();
@@ -8241,21 +6517,15 @@
   /* ============================== Init ============================== */
 
   function init() {
-    // Tag the page's own initial history entry, then push one guard entry
-    // on top of it so there's always at least one poppable entry for a
-    // Back press to land on — without it, a Back press on a freshly loaded
-    // Dashboard (nothing else open, nothing pushed yet) would have nowhere
-    // to pop TO within the page and would exit immediately, silently
-    // skipping the "press back again to exit" warning below. See the
-    // "Back-button / swipe-back step navigation" comment above switchTab()/
-    // openModal() for the rest of this mechanism.
+    // Tag the initial history entry and push a guard entry above it, so a Back press
+    // on a fresh Dashboard has something to pop and the "press back again to exit"
+    // warning can run (see "Back-button / swipe-back step navigation").
     history.replaceState({ nav: 'base' }, '');
     history.pushState({ nav: 'exit-guard' }, '');
     hydrateStaticIcons();
     load();
-    // wireEvents() only ever attaches listeners (nothing here reads `state`
-    // synchronously), so it's safe to wire even in recovery mode — that's
-    // what makes the recovery screen's own confirm dialog (Cancel/✕) work.
+    // wireEvents() only attaches listeners and reads no state, so it is safe in
+    // recovery mode; the recovery screen's confirm dialog needs it.
     wireEvents();
     if (needsRecovery) { showRecoveryScreen(); registerServiceWorker(); return; }
     applyTheme();
@@ -8266,12 +6536,23 @@
     registerServiceWorker();
   }
 
+  // Registers the service worker, checks for updates when the app returns to the
+  // foreground, and offers a reload once one installs (never reloads by itself).
   function registerServiceWorker() {
-    if ('serviceWorker' in navigator) {
-      window.addEventListener('load', () => {
-        navigator.serviceWorker.register('sw.js').catch((e) => console.warn('Service worker registration failed', e));
-      });
-    }
+    if (!('serviceWorker' in navigator)) return;
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('sw.js').then((reg) => {
+        const offerReload = () => toast('A new version is ready.', { label: 'Reload', run: () => window.location.reload() });
+        reg.addEventListener('updatefound', () => {
+          const worker = reg.installing;
+          if (!worker) return;
+          worker.addEventListener('statechange', () => {
+            if (worker.state === 'installed' && navigator.serviceWorker.controller) offerReload();
+          });
+        });
+        document.addEventListener('visibilitychange', () => { if (!document.hidden) reg.update().catch(() => {}); });
+      }).catch((e) => console.warn('Service worker registration failed', e));
+    });
   }
 
   document.addEventListener('DOMContentLoaded', init);
