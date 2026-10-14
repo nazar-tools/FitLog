@@ -1346,11 +1346,22 @@
   // Falls back to the old direct ratio when there's no usable baseline yet
   // (a brand-new tracker with a goal but no logged history) so a goal still
   // shows *something* meaningful before any progress exists to measure.
+  // A baseline is only a usable starting point when it sits on the far side
+  // of the goal from where the tracker is headed — below it for "up", above
+  // it for "down". A stale one (say 166 lb left over from before a goal of
+  // 165 lb "up") would make the ratio below blow up to hundreds of percent,
+  // so it is ignored and the plain current/goal ratio is used instead.
+  function trackerBaselineUsable(tracker) {
+    const b = tracker.baseline, g = tracker.goal;
+    if (b == null || g == null || b === g) return false;
+    return tracker.direction === 'down' ? b > g : b < g;
+  }
+
   function trackerProgressPct(tracker, value) {
     if (value == null || tracker.goal == null) return { pct: 0, achieved: false };
     const goal = tracker.goal;
     const achieved = tracker.direction === 'down' ? value <= goal : value >= goal;
-    const baseline = tracker.baseline;
+    const baseline = trackerBaselineUsable(tracker) ? tracker.baseline : null;
     if (baseline == null || baseline === goal) {
       const pct = tracker.direction === 'down'
         ? (value <= 0 ? 0 : (goal / value) * 100)
@@ -1367,7 +1378,7 @@
   // body metric. Returns null when there's no baseline to measure a delta
   // from yet, or nothing left to describe (goal already reached).
   function trackerProgressDeltaText(tracker, value) {
-    if (value == null || tracker.goal == null || tracker.baseline == null) return null;
+    if (value == null || tracker.goal == null || !trackerBaselineUsable(tracker)) return null;
     const moved = Math.abs(tracker.baseline - value);
     const remaining = Math.abs(tracker.goal - value);
     if (remaining <= 0) return null;
@@ -1831,6 +1842,11 @@
     if (!sex) missing.push('sex');
     if (!bw) missing.push('a logged body weight');
     if (missing.length) return { missing };
+    return nutritionTargetsFor(bw, heightCm, age, sex, activityLevel, goal);
+  }
+  // The same maths from plain numbers, so the setup wizard can preview a
+  // target before anything has been saved.
+  function nutritionTargetsFor(bw, heightCm, age, sex, activityLevel, goal) {
     const kg = bw * LB_PER_KG;
     const bmr = sex === 'male'
       ? 10 * kg + 6.25 * heightCm - 5 * age + 5
@@ -2089,7 +2105,7 @@
   // screens (exercise/tracker/food detail) rather than a quick action or
   // form — see the `.is-detail-sheet` comment in styles.css for why a
   // fixed height instead of the usual shrink-to-content matters there.
-  function openModal(html, { tall = false } = {}) {
+  function openModal(html, { tall = false, split = false } = {}) {
     // A handful of call sites open a new modal while one is already showing
     // (e.g. a food entry's "Save as a saved food" button opens the saved-
     // food form right over it) — there's no real stacking here, just this
@@ -2101,6 +2117,7 @@
     sheet.style.transform = '';
     sheet.classList.remove('is-dragging');
     sheet.classList.toggle('is-detail-sheet', tall);
+    sheet.classList.toggle('is-split-sheet', split);
     sheet.innerHTML = `<div class="modal-handle"></div>${html}`;
     // A dialog needs an accessible name; every modal here starts with an
     // <h2> title, so point at it rather than requiring each call site to
@@ -2323,11 +2340,34 @@
       return;
     }
     const sets = (existingEntry && existingEntry.sets && existingEntry.sets.length) ? existingEntry.sets : [{}];
+    // "Last time" — the previous session on this exact exercise, with a
+    // one-tap way to start from the same sets.
+    const lastEntry = existingEntry ? null : entriesFor(exercise.id).filter((en) => en.sets && en.sets.length).sort((a, b) => (b.date + b.id).localeCompare(a.date + a.id))[0];
+    const setText = (st) => exercise.kind === 'weight' ? `${round(Units.lbToDisplay(st.weight), 2)} × ${st.reps}` : `${st.reps}${st.addedWeight ? ` +${round(Units.lbToDisplay(st.addedWeight), 2)}` : ''}`;
+    const lastHtml = lastEntry ? `
+      <div class="last-time">
+        <div class="last-time-head"><span class="lbl">Last time · ${escapeHtml(fmtDateShort(lastEntry.date))}</span><button type="button" class="link-btn" data-action="copy-last">Copy sets</button></div>
+        <div class="last-time-sets num">${lastEntry.sets.map(setText).join(' · ')}</div>
+      </div>` : '';
     container.innerHTML = `
+      ${lastHtml}
       <div class="sets-wrap" data-kind="${exercise.kind}">
         <div class="sets-label"><span class="field-label">Sets</span><button type="button" class="btn-ghost" data-action="add-set">+ Add set</button></div>
         <div class="sets-container">${sets.map((s, i) => setRowHtml(exercise.kind, i, s)).join('')}</div>
+        ${exercise.kind === 'weight' ? '<div class="best-note" aria-live="polite"></div>' : ''}
       </div>`;
+    if (exercise.kind === 'weight') {
+      const refresh = () => updateBestNote(container, exercise, existingEntry);
+      container.querySelector('.sets-wrap').addEventListener('input', refresh);
+      container.querySelector('.sets-wrap').addEventListener('click', (ev) => { if (ev.target.closest('[data-action="remove-set"]')) setTimeout(refresh, 0); });
+      refresh();
+    }
+    const copyBtn = container.querySelector('[data-action="copy-last"]');
+    if (copyBtn) copyBtn.addEventListener('click', () => {
+      container.querySelector('.sets-container').innerHTML = lastEntry.sets.map((st, i) => setRowHtml(exercise.kind, i, { weight: st.weight, reps: st.reps, addedWeight: st.addedWeight })).join('');
+      wireSetRemoveButtons(container); wireSetPrimaryButtons(container);
+      if (exercise.kind === 'weight') updateBestNote(container, exercise, existingEntry);
+    });
     container.querySelector('[data-action="add-set"]').addEventListener('click', () => {
       const wrap = container.querySelector('.sets-container');
       const idx = wrap.children.length;
@@ -2337,6 +2377,35 @@
     });
     wireSetRemoveButtons(container);
     wireSetPrimaryButtons(container);
+  }
+
+  // "Best" means the heaviest weight logged on this exact exercise (so each
+  // equipment variant has its own). A set that beats it is a New best; one
+  // that matches it is Ties best, shown once per weight. Before the first
+  // logged set there is nothing to beat, so nothing is tagged.
+  function priorBestWeight(exercise, excludeEntryId) {
+    let best = null;
+    entriesFor(exercise.id).forEach((en) => {
+      if (excludeEntryId && en.id === excludeEntryId) return;
+      (en.sets || []).forEach((st) => { if (st.weight != null && (best == null || st.weight > best)) best = st.weight; });
+    });
+    return best;
+  }
+  function updateBestNote(container, exercise, existingEntry) {
+    const note = container.querySelector('.best-note'); if (!note) return;
+    const priorLb = priorBestWeight(exercise, existingEntry && existingEntry.id);
+    const unit = Units.weightUnitLabel();
+    if (priorLb == null) { note.innerHTML = '<span class="muted-text">No best yet. Your heaviest set here becomes it.</span>'; return; }
+    let running = round(Units.lbToDisplay(priorLb), 2);
+    const tagged = new Set(); const tags = [];
+    Array.from(container.querySelectorAll('.set-row')).forEach((row, i) => {
+      const w = round(parseFloat(row.querySelector('.set-weight').value), 2);
+      const r = parseFloat(row.querySelector('.set-reps').value);
+      if (Number.isNaN(w) || Number.isNaN(r) || w <= 0) return;
+      if (w > running) { running = w; tagged.add(w); tags.push(`<span class="tag tag-good">Set ${i + 1} · New best</span>`); }
+      else if (w === running && !tagged.has(w)) { tagged.add(w); tags.push(`<span class="tag tag-good">Set ${i + 1} · Ties best</span>`); }
+    });
+    note.innerHTML = `${tags.length ? `<div class="best-tags">${tags.join('')}</div>` : ''}<span class="muted-text">Best = heaviest set on ${escapeHtml(exerciseLabel(exercise))}: ${fmtWeight(priorLb)}. Tying it is tagged too.</span>`;
   }
 
   function wireSetRemoveButtons(container) {
@@ -3036,14 +3105,16 @@
       const top = topSetOf(ex, en);
       const prior = entriesFor(ex.id).filter((x) => x.date < today).map((x) => entryValue(ex, x)).filter((v) => v != null);
       const val = entryValue(ex, en);
-      const isBest = val != null && prior.length > 0 && (isLowerBetter(ex) ? val < Math.min(...prior) : val > Math.max(...prior));
+      const priorTop = prior.length ? (isLowerBetter(ex) ? Math.min(...prior) : Math.max(...prior)) : null;
+      const isBest = val != null && priorTop != null && (isLowerBetter(ex) ? val < priorTop : val > priorTop);
+      const tiesBest = val != null && priorTop != null && val === priorTop;
       const topText = top && ex.kind === 'weight' ? ` · top ${fmtWeight(top.weight)} × ${top.reps}` : '';
       return `
         <div class="glance-row" data-exercise-id="${ex.id}">
           <div class="glance-open">
             ${exerciseIconHtml(ex)}
             <div class="glance-main">
-              <div class="glance-name">${exerciseLabelHtml(ex)}${isBest ? ' <span class="tag tag-good">New best</span>' : ''}</div>
+              <div class="glance-name">${exerciseLabelHtml(ex)}${isBest ? ' <span class="tag tag-good">New best</span>' : tiesBest ? ' <span class="tag tag-good">Ties best</span>' : ''}</div>
               <div class="glance-sub">Today · ${sets} set${sets === 1 ? '' : 's'}${topText}</div>
             </div>
             ${CHEVRON_RIGHT_SVG}
@@ -3824,10 +3895,12 @@
     const items = tidyCandidates();
     const on = new Set(items.map((c, i) => (c.note ? -1 : i)).filter((i) => i >= 0));
     openModal(`
-      <div class="modal-title-row"><h2>Tidy up</h2><button class="modal-close" data-action="close-modal">${CLOSE_ICON_SVG}</button></div>
-      <p class="muted-text">Tick the ones you want grouped. Your entries and goals stay with each exercise${items.some((c) => c.merge) ? '; where a variant already exists the two are merged' : ''}.</p>
-      <div id="tidyList" class="org-list"></div>
-      <div class="sheet-foot"><button type="button" class="btn btn-primary btn-block" id="tidyApplyBtn"></button></div>`, { tall: true });
+      <div class="split-shell">
+        <div class="modal-title-row"><h2>Tidy up</h2><button class="modal-close" data-action="close-modal">${CLOSE_ICON_SVG}</button></div>
+        <p class="muted-text">Tick the ones you want grouped. Your entries and goals stay with each exercise${items.some((c) => c.merge) ? '; where a variant already exists the two are merged' : ''}.</p>
+        <div class="split-scroll"><div id="tidyList" class="cat-list"></div></div>
+        <div class="split-foot"><button type="button" class="btn btn-primary btn-block" id="tidyApplyBtn"></button></div>
+      </div>`, { tall: true, split: true });
     const paint = () => {
       document.getElementById('tidyList').innerHTML = items.map((c, i) => `
         <div class="entry-row cat-row" data-tidy="${i}" role="checkbox" aria-checked="${on.has(i)}" tabindex="0">
@@ -3859,25 +3932,28 @@
     cat.tab = tab || 'exercises'; cat.query = ''; cat.group = 'all'; cat.pack = 'all'; cat.cat = 'all'; cat.open = null;
     cat.pick = { exercises: new Set(), habits: new Set(), foods: new Set() };
     openModal(`
-      <div class="modal-title-row"><h2>Add from catalog</h2><button class="modal-close" data-action="close-modal">${CLOSE_ICON_SVG}</button></div>
-      <p class="muted-text">Tick what you want and add it. Nothing is added until you do, and everything stays editable.</p>
-      <div class="segmented segmented-fill" id="catTabs" role="radiogroup" aria-label="Catalog">
-        <button type="button" role="radio" data-cat-tab="exercises">Exercises</button>
-        <button type="button" role="radio" data-cat-tab="habits">Habits</button>
-        <button type="button" role="radio" data-cat-tab="foods">Foods</button>
-      </div>
-      <div id="catBody"></div>
-      <div class="sheet-foot"><button type="button" class="btn btn-primary btn-block" id="catAddBtn" disabled>Add</button></div>`, { tall: true });
-    const body = document.getElementById('catBody');
+      <div class="split-shell">
+        <div class="modal-title-row"><h2>Add from catalog</h2><button class="modal-close" data-action="close-modal">${CLOSE_ICON_SVG}</button></div>
+        <div class="segmented segmented-fill" id="catTabs" role="radiogroup" aria-label="Catalog">
+          <button type="button" role="radio" data-cat-tab="exercises">Exercises</button>
+          <button type="button" role="radio" data-cat-tab="habits">Habits</button>
+          <button type="button" role="radio" data-cat-tab="foods">Foods</button>
+        </div>
+        <div class="split-controls" id="catControls"></div>
+        <div class="split-scroll" id="catScroll"><div id="catList" class="cat-list"></div></div>
+        <div class="split-foot"><button type="button" class="btn btn-primary btn-block" id="catAddBtn" disabled>Add</button></div>
+      </div>`, { tall: true, split: true });
     document.getElementById('catTabs').addEventListener('click', (ev) => {
       const b = ev.target.closest('[data-cat-tab]'); if (!b) return;
       cat.tab = b.dataset.catTab; cat.query = ''; cat.open = null; renderCatalogSheet();
     });
-    body.addEventListener('input', (ev) => {
+    const controls = document.getElementById('catControls');
+    controls.addEventListener('input', (ev) => {
       if (ev.target.id !== 'catSearch') return;
       cat.query = ev.target.value; renderCatalogList();
     });
-    body.addEventListener('click', onCatalogClick);
+    controls.addEventListener('click', onCatalogClick);
+    document.getElementById('catScroll').addEventListener('click', onCatalogClick);
     document.getElementById('catAddBtn').addEventListener('click', applyCatalogPicks);
     renderCatalogSheet();
   }
@@ -3886,23 +3962,21 @@
 
   function renderCatalogSheet() {
     document.querySelectorAll('#catTabs button').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.catTab === cat.tab)));
-    const body = document.getElementById('catBody');
+    const body = document.getElementById('catControls');
     let chips = '';
     if (cat.tab === 'exercises') {
-      chips = `<div class="f-scroll pg"><div class="f-chips" id="catGroupChips" role="radiogroup">
+      chips = `<div class="f-scroll"><div class="f-chips" id="catGroupChips" role="radiogroup" aria-label="Muscle group">
         ${chipHtml('all', 'All', null, cat.group === 'all')}
         ${EXERCISE_GROUPS.filter(([g]) => CATALOG.movements.some((m) => m.group === g)).map(([g, l]) => chipHtml(g, l, null, cat.group === g)).join('')}
       </div></div>
-      <div class="cat-packs"><span class="field-label">Starter packs</span>
-        <div class="f-chips" id="catPackChips" role="radiogroup">
-          ${chipHtml('all', 'Everything', null, cat.pack === 'all')}
-          ${CATALOG.packs.map((p) => chipHtml(p.id, escapeHtml(p.name), null, cat.pack === p.id)).join('')}
-        </div>
-        ${cat.pack !== 'all' ? `<p class="muted-text field-hint">${escapeHtml((CATALOG.packs.find((p) => p.id === cat.pack) || {}).description || '')} Nothing is ticked for you.</p>
-          <button type="button" class="btn btn-secondary btn-sm" data-cat-selpack="1">Tick everything in this pack</button>` : ''}
-      </div>`;
+      <div class="f-scroll"><div class="f-chips" id="catPackChips" role="radiogroup" aria-label="Starter pack">
+        <span class="chip-lead">Packs</span>${chipHtml('all', 'None', null, cat.pack === 'all')}
+        ${CATALOG.packs.map((p) => chipHtml(p.id, escapeHtml(p.name), null, cat.pack === p.id)).join('')}
+      </div></div>
+      ${cat.pack !== 'all' ? `<div class="cat-pack-note"><span class="muted-text">${escapeHtml((CATALOG.packs.find((p) => p.id === cat.pack) || {}).description || '')} Nothing is ticked for you.</span>
+        <button type="button" class="btn btn-secondary btn-sm" data-cat-selpack="1">Tick the whole pack</button></div>` : ''}`;
     } else if (cat.tab === 'foods') {
-      chips = `<div class="f-scroll pg"><div class="f-chips" id="catFoodChips" role="radiogroup">
+      chips = `<div class="f-scroll"><div class="f-chips" id="catFoodChips" role="radiogroup">
         ${chipHtml('all', 'All', null, cat.cat === 'all')}
         ${SAVED_FOOD_CATEGORIES.filter((c) => CATALOG.foods.some((f) => f.category === c.value)).map((c) => chipHtml(c.value, SAVED_FOOD_CHIP_LABELS[c.value], null, cat.cat === c.value)).join('')}
       </div></div>`;
@@ -3910,8 +3984,7 @@
     body.innerHTML = `
       <label class="search"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
         <input type="search" id="catSearch" placeholder="Search ${cat.tab}" aria-label="Search ${cat.tab}" autocomplete="off" autocapitalize="off" spellcheck="false" value="${escapeHtml(cat.query)}" /></label>
-      ${chips}
-      <div id="catList" class="org-list"></div>`;
+      ${chips}`;
     ['catGroupChips', 'catFoodChips', 'catPackChips'].forEach((id) => { const el = document.getElementById(id); if (el) wireFScroll(el); });
     renderCatalogList();
   }
@@ -3930,7 +4003,7 @@
         const added = eqs.filter((eq) => variantRecord(m.id, eq) || legacyVariantMatch(m, eq)).length;
         const picked = eqs.filter((eq) => cat.pick.exercises.has(`${m.id}|${eq || ''}`)).length;
         const open = cat.open === m.id && m.equipment.length > 0;
-        const sub = m.equipment.length ? m.equipment.map(equipmentLabel).join(', ') : 'No equipment';
+        const sub = m.equipment.length ? (m.equipment.length === 1 ? equipmentLabel(m.equipment[0]) : `${equipmentLabel(m.equipment[0])} +${m.equipment.length - 1} more`) : 'No equipment';
         return `
           <div class="entry-row cat-row" data-cat-mv="${m.id}" role="button" tabindex="0" aria-expanded="${open}">
             ${catCheck(picked > 0, false)}
@@ -4915,7 +4988,8 @@
     document.getElementById('logFoodManualCard').hidden = !foodOn || !hasSaved;
     document.getElementById('savedFoodsWrap').hidden = !foodOn || !hasSaved;
     if (foodOn && hasSaved) {
-      document.getElementById('logFoodManualBtn').innerHTML = `<span>Enter a food manually<span class="muted-text">Calories and macros you haven’t saved</span></span>${uiIcon(foodLog.manualOpen ? 'chevron-up' : 'chevron-down')}`;
+      document.getElementById('logFoodCreateBtn').innerHTML = `<span class="row-icon">${uiIcon('plus')}</span><span class="row-lead"><b class="link-text">Create a food</b><span class="muted-text">Name, serving and macros</span></span>${uiIcon('chevron-right')}`;
+      document.getElementById('logFoodManualBtn').innerHTML = `<span class="row-icon">${uiIcon('plus')}</span><span class="row-lead"><b class="link-text">Quick calories</b><span class="muted-text">Calories and macros without saving a food</span></span>${uiIcon(foodLog.manualOpen ? 'chevron-up' : 'chevron-down')}`;
     }
     if (!allOff) {
       if (logCategory === 'workout') renderLogForm(); else syncLogWorkoutUI();
@@ -5049,8 +5123,8 @@
       <div class="entry-row" data-food-entry-id="${e.id}">
         ${savedFoodIconHtml(savedFoodMatching(e), true)}
         <div class="entry-row-main">
-          <div class="entry-row-title">${macroSummaryText(e)}</div>
-          ${e.note ? `<div class="entry-row-sub">“${escapeHtml(e.note)}”</div>` : ''}
+          <div class="entry-row-title">${e.note ? escapeHtml(e.note) : 'Quick calories'}</div>
+          <div class="entry-row-sub num">${compactFoodLine(e)}</div>
         </div>
         <div class="entry-row-date">${fmtDateShort(e.date)}</div>
       </div>`;
@@ -5288,7 +5362,33 @@
   const FOOD_LIST_LIMIT = 5;
   let savedFoodDate = null;
 
+  // "1 medium · 105 kcal · P 1 · C 27 · F 0" — the compact line under a food.
+  function compactFoodLine(food) {
+    const tracked = trackedMacroKeys();
+    const parts = [];
+    if (food.serving) parts.push(escapeHtml(food.serving));
+    if (food.calories != null) parts.push(`${Math.round(food.calories)} kcal`);
+    [['protein', 'P'], ['carbs', 'C'], ['fat', 'F']].forEach(([k, l]) => { if (tracked.includes(k) && food[k] != null) parts.push(`${l} ${Math.round(food[k])}`); });
+    if (tracked.includes('caffeine') && food.caffeine) parts.push(`${Math.round(food.caffeine)} mg caffeine`);
+    return parts.join(' · ');
+  }
+
+  function renderFoodTodayBar() {
+    const bar = document.getElementById('foodTodayBar');
+    const on = state.settings.trackFood && logCategory === 'food';
+    bar.hidden = !on; if (!on) return;
+    const totals = foodTotalsForDate(todayISO());
+    const cal = macroGoalInfo('calories');
+    const hasGoal = cal.enabled && cal.goal != null;
+    const eaten = totals.calories || 0;
+    bar.innerHTML = `
+      <div class="food-today-top"><span class="num"><b>${Math.round(eaten).toLocaleString()}</b> <span class="muted-text">${hasGoal ? `/ ${Math.round(cal.goal).toLocaleString()} kcal today` : 'kcal today'}</span></span><button type="button" class="link-btn" id="foodViewDayBtn">View day</button></div>
+      ${hasGoal ? `<div class="meter meter-sm"><div class="meter-fill${eaten > cal.goal ? ' is-over' : ''}" style="--fill:${Math.min(100, (eaten / cal.goal) * 100)}%"></div></div>` : ''}`;
+    document.getElementById('foodViewDayBtn').addEventListener('click', () => openFoodDetail());
+  }
+
   function renderSavedFoodLogList() {
+    renderFoodTodayBar();
     const wrap = document.getElementById('savedFoodsWrap');
     const list = document.getElementById('savedFoodLogList');
     const foods = state.food.savedFoods;
@@ -5335,13 +5435,13 @@
           ${savedFoodIconHtml(food, true)}
           <div class="entry-row-main">
             <div class="entry-row-title">${escapeHtml(food.name)}</div>
-            <div class="entry-row-sub">${food.serving ? `${escapeHtml(food.serving)} · ` : ''}${macroSummaryText(food)}</div>
+            <div class="entry-row-sub num">${compactFoodLine(food)}</div>
           </div>
-          ${starButtonHtml('data-fav', food.id, food.favorite)}
+          <button type="button" class="add-btn" data-quick-add="${food.id}" aria-label="Add one serving of ${escapeHtml(food.name)}">${uiIcon('plus')}</button>
         </div>
         ${expanded ? `
         <div class="card form-card saved-food-qty-card">
-          <div class="field"><span class="field-label">Servings${food.serving ? ` <span class="muted-text">(1 = ${escapeHtml(food.serving)})</span>` : ''}</span>
+          <div class="field"><span class="field-label qty-label"><span>Servings${food.serving ? ` <span class="muted-text">(1 = ${escapeHtml(food.serving)})</span>` : ''}</span>${starButtonHtml('data-fav', food.id, food.favorite)}</span>
             <div class="stepper" id="savedFoodStepper" role="group" aria-label="Servings">
               <button type="button" class="stepper-btn" data-step="-1" aria-label="Fewer servings">${uiIcon('minus')}</button>
               <input type="number" inputmode="decimal" step="0.25" min="0.25" id="savedFoodCustomQty" value="${savedFoodQty}" aria-label="Servings" />
@@ -5417,6 +5517,8 @@
     const pick = (ev) => {
       const star = ev.target.closest('[data-fav]');
       if (star) { ev.stopPropagation(); toggleSavedFoodFavorite(star.dataset.fav); return; }
+      const quick = ev.target.closest('[data-quick-add]');
+      if (quick) { ev.stopPropagation(); logSavedFood(quick.dataset.quickAdd, 1); return; }
       const row = ev.target.closest('.saved-food-log-row');
       if (!row) return;
       const id = row.dataset.savedFoodId;
@@ -5430,6 +5532,7 @@
     });
     document.getElementById('foodShowAll').addEventListener('click', () => { foodLog.showAll = true; renderSavedFoodLogList(); });
     document.getElementById('logFoodManualBtn').addEventListener('click', () => { foodLog.manualOpen = !foodLog.manualOpen; renderLogView(); });
+    document.getElementById('logFoodCreateBtn').addEventListener('click', () => openSavedFoodForm(null));
   }
 
   /* ---------- Manage -> Food: saved foods ---------- */
@@ -7223,7 +7326,7 @@
     // Starter packs from the catalog — nothing is ticked for you.
     packs: {},
     // How the calorie target is set: 'calc' | 'manual' | 'none'.
-    calorieMode: 'none', calorieManual: '',
+    calorieMode: 'none', calorieManual: '', calorieGoal: 'maintain', commonFoods: true, macros: null,
     heightFt: '', heightIn: '', heightCm: '',
     weight: '', age: '', sex: '',
     lifts: {
@@ -7260,6 +7363,13 @@
     seq.push('goals');
     return seq;
   }
+  const SETUP_STEP_LEADS = {
+    interests: 'Pick only what you will use. Anything left off stays out of sight, and you can turn it on later in Settings.',
+    about: 'Optional. Height, weight, age and sex unlock BMI, strength standards and a calorie estimate. Skip any of it.',
+    lifting: 'Each lift can use a fixed plates goal or a bodyweight-multiple standard.',
+    packs: 'Optional. Start with a ready-made list, or skip and add movements one at a time from the catalog later.',
+    food: 'Set a daily calorie target and choose what to track. All of it can be changed in Manage → Food.',
+  };
   const SETUP_STEP_TITLES = { interests: 'What do you want to track?', about: 'About you', lifting: 'Lifting goals', running: 'Running goal', packs: 'Starter exercises', food: 'Food targets', goals: 'Other goals' };
 
   // The topbar normally reserves the iOS notch/status-bar area itself (its
@@ -7306,9 +7416,13 @@
     const seq = setupStepSequence();
     if (setupStepIndex >= seq.length) setupStepIndex = seq.length - 1; // interest turned off after passing its step — land on the new last step instead of an index that no longer exists
     const key = seq[setupStepIndex];
-    document.getElementById('setupStepLabel').textContent = `Step ${setupStepIndex + 1} of ${seq.length} · ${SETUP_STEP_TITLES[key]}`;
+    document.getElementById('setupProgress').innerHTML = seq.map((_, i) => `<i class="${i <= setupStepIndex ? 'on' : ''}"></i>`).join('');
+    document.getElementById('setupKicker').textContent = setupStepIndex === 0 ? 'Welcome to Fit Log' : `Step ${setupStepIndex + 1} of ${seq.length}`;
+    document.getElementById('setupStepLabel').textContent = SETUP_STEP_TITLES[key];
+    document.getElementById('setupLead').textContent = SETUP_STEP_LEADS[key] || '';
     document.getElementById('setupBackBtn').hidden = setupStepIndex === 0;
-    document.getElementById('setupNextBtn').textContent = setupStepIndex === seq.length - 1 ? 'Finish setup' : 'Next';
+    document.getElementById('setupNextBtn').textContent = setupStepIndex === seq.length - 1 ? 'Finish setup' : 'Continue';
+    window.scrollTo(0, 0);
     if (key === 'interests') renderSetupStepInterests();
     else if (key === 'about') renderSetupStepAbout();
     else if (key === 'lifting') renderSetupStepLifting();
@@ -7323,25 +7437,27 @@
   // log with nothing else). Tapping a tile only flips its own answer and
   // re-renders this step; the sequence itself (and therefore which later
   // steps exist) is recomputed the next time Next/Back moves off this step.
-  function interestTileHtml(key, icon, label, on) {
-    return `<button type="button" class="domain-tab interest-tile" data-interest="${key}" aria-pressed="${on}">
-      ${icon}
-      <span>${label}</span>
+  function interestTileHtml(key, icon, label, on, desc) {
+    return `<button type="button" class="setup-tile${on ? ' is-on' : ''}" data-interest="${key}" aria-pressed="${on}">
+      <span class="setup-tile-ico">${icon}</span>
+      <span class="setup-tile-name">${label}</span>
+      <span class="setup-tile-desc">${desc}</span>
+      <span class="setup-tile-check" aria-hidden="true">${on ? CHECK_ICON_SVG : ''}</span>
     </button>`;
   }
   function renderSetupStepInterests() {
     const i = setupAnswers.interests;
     document.getElementById('setupContent').innerHTML = `
-      <p class="muted-text">Tap to turn any of these on or off. Nothing here is permanent — everything stays changeable later in Manage and Settings.</p>
-      <div class="interest-grid">
-        ${interestTileHtml('lifting', DOMAIN_TAB_ICONS.workout, 'Lifting', i.lifting)}
-        ${interestTileHtml('running', FOOTPRINTS_ICON_SVG, 'Running', i.running)}
-        ${interestTileHtml('habits', STATIC_ICONS.habits, 'Habits', i.habits)}
-        ${interestTileHtml('bodyweight', SCALE_ICON_SVG, 'Body weight', i.bodyweight)}
-        ${interestTileHtml('sleep', MOON_ICON_SVG, 'Sleep', i.sleep)}
-        ${interestTileHtml('water', WATER_DROP_ICON_SVG, 'Water', i.water)}
-        ${interestTileHtml('food', APPLE_ICON_SVG, 'Food', i.food)}
-      </div>`;
+      <div class="setup-tiles">
+        ${interestTileHtml('lifting', DOMAIN_TAB_ICONS.workout, 'Lifting', i.lifting, 'Sets, reps, weight and personal bests')}
+        ${interestTileHtml('running', FOOTPRINTS_ICON_SVG, 'Running', i.running, 'Runs with pace and distance goals')}
+        ${interestTileHtml('habits', STATIC_ICONS.habits, 'Habits', i.habits, 'Creatine, stretching, daily reps, anything daily')}
+        ${interestTileHtml('food', APPLE_ICON_SVG, 'Food', i.food, 'Calories and macros, common foods ready')}
+        ${interestTileHtml('water', WATER_DROP_ICON_SVG, 'Water', i.water, 'Glasses and bottles against a daily goal')}
+        ${interestTileHtml('bodyweight', SCALE_ICON_SVG, 'Body weight', i.bodyweight, 'Weight and BMI over time')}
+        ${interestTileHtml('sleep', MOON_ICON_SVG, 'Sleep', i.sleep, 'Hours slept each night')}
+      </div>
+      <div class="note-box">${uiIconInfo()}<span>Each choice adds one section to Home and one to Log. Nothing you leave off shows up anywhere.</span></div>`;
     document.querySelectorAll('#setupContent [data-interest]').forEach((btn) => {
       btn.addEventListener('click', () => {
         const key = btn.dataset.interest;
@@ -7350,11 +7466,11 @@
       });
     });
   }
+  const uiIconInfo = () => lucide('<circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/>');
 
   function renderSetupStepAbout() {
     const cm = state.settings.lengthUnit === 'cm';
     document.getElementById('setupContent').innerHTML = `
-      <p class="muted-text">A couple of basics, all optional — used only to size your goals below and the optional insight calculators in Settings (including the nutrition calculator, which needs age specifically to estimate calories).</p>
       <div class="form-card">
         ${cm ? `
         <label class="field"><span class="field-label">Height (cm)</span>
@@ -7393,7 +7509,7 @@
     const lifts = setupAnswers.lifts;
     const canUseStandards = setupAnswers.weight !== '' && setupAnswers.sex !== '';
     document.getElementById('setupContent').innerHTML = `
-        <p class="muted-text">Each lift can use a fixed plates goal, or a bodyweight-multiple standard${canUseStandards ? '' : ' (enter weight + sex in the previous step to unlock this)'}.</p>
+        ${canUseStandards ? '' : '<p class="muted-text">Enter weight and sex on the About you step to unlock bodyweight standards.</p>'}
         <div class="card form-card">
           ${['bench', 'squat', 'deadlift'].map((key) => {
             const lift = lifts[key];
@@ -7486,7 +7602,6 @@
   function renderSetupStepPacks() {
     const picked = setupAnswers.packs;
     document.getElementById('setupContent').innerHTML = `
-      <p class="muted-text">Optional. Pick a starter pack to fill your exercise list, or skip and add movements one at a time later with Manage → From catalog. Nothing is added unless you tick it.</p>
       <div class="card card-list">${CATALOG.packs.map((pk) => `
         <div class="setting-row"><span>${escapeHtml(pk.name)}<span class="muted-text">${escapeHtml(pk.description || '')}</span></span>${switchHtml(`data-pack="${pk.id}"`, pk.name, !!picked[pk.id])}</div>`).join('')}
       </div>`;
@@ -7496,22 +7611,58 @@
     }));
   }
 
+  function setupCalcPreview() {
+    const w = parseFloat(setupAnswers.weight); const age = parseInt(setupAnswers.age, 10);
+    const h = heightCmFromSetup(); const sex = setupAnswers.sex;
+    if (!(w > 0) || !(age > 0) || !h || !sex) return null;
+    return nutritionTargetsFor(Units.displayToLb(w), h, age, sex, state.settings.nutritionCalc.activityLevel, setupAnswers.calorieGoal);
+  }
+
   function renderSetupStepFood() {
-    const m = setupAnswers.calorieMode;
-    const missing = ['heightCm', 'age', 'sex', 'weight'].some((k) => !setupAnswers[k] && !(k === 'heightCm' && (setupAnswers.heightFt || setupAnswers.heightIn)));
+    const a = setupAnswers; const m = a.calorieMode;
+    if (!a.macros) a.macros = { protein: macroGoalInfo('protein').enabled, carbs: macroGoalInfo('carbs').enabled, fat: macroGoalInfo('fat').enabled, sugar: false, sodium: false, caffeine: false };
+    const starters = CATALOG.foods.filter((f) => f.tier === 'starter');
+    const preview = m === 'calc' ? setupCalcPreview() : null;
     document.getElementById('setupContent').innerHTML = `
-      <p class="muted-text">How should Fit Log set your daily calorie target? You can change this any time in Manage → Food.</p>
-      <div class="segmented segmented-fill" id="setupCalorieSeg" role="radiogroup" aria-label="Calorie target">
-        <button type="button" role="radio" data-mode="calc" aria-checked="${m === 'calc'}">Calculator</button>
-        <button type="button" role="radio" data-mode="manual" aria-checked="${m === 'manual'}">Manual</button>
-        <button type="button" role="radio" data-mode="none" aria-checked="${m === 'none'}">No Target</button>
+      ${starters.length ? `<div class="card pad setup-card">
+        <div class="setting-row"><span><b>Save common foods</b><span class="muted-text">${starters.length} everyday foods ready to tap</span></span>${switchHtml('id="setupCommonFoods"', 'Save common foods', a.commonFoods)}</div>
+        <div class="mini-chips">${starters.slice(0, 8).map((f) => `<span>${escapeHtml(f.name.split(',')[0])}</span>`).join('')}<span>+${starters.length - 8} more</span></div>
+        <div class="note-box">${uiIconInfo()}<span>Typical values for one serving, all editable. Brand and restaurant items are not included. Turn this off to start with an empty list.</span></div>
+      </div>` : ''}
+      <div class="card pad setup-card">
+        <span class="lbl">Daily calorie target</span>
+        <div class="segmented segmented-fill" id="setupCalorieSeg" role="radiogroup" aria-label="Calorie target">
+          <button type="button" role="radio" data-mode="calc" aria-checked="${m === 'calc'}">Calculator</button>
+          <button type="button" role="radio" data-mode="manual" aria-checked="${m === 'manual'}">Manual</button>
+          <button type="button" role="radio" data-mode="none" aria-checked="${m === 'none'}">No Target</button>
+        </div>
+        ${m === 'calc' ? `
+          <div class="segmented segmented-fill" id="setupCalGoalSeg" role="radiogroup" aria-label="Goal">
+            ${[['lose', 'Lose'], ['maintain', 'Maintain'], ['gain', 'Gain']].map(([v, l]) => `<button type="button" role="radio" data-goal="${v}" aria-checked="${a.calorieGoal === v}">${l}</button>`).join('')}
+          </div>
+          ${preview && !preview.missing ? `<div class="setup-big"><b>${preview.calories.toLocaleString()}</b><span class="muted-text">kcal a day</span></div>
+            <div class="muted-text">About ${preview.protein} g protein a day.</div>
+            <div class="note-box">${uiIconInfo()}<span>Estimated from your height, weight, age and sex, with a moderate activity level. A starting point you can change any time.</span></div>`
+            : `<div class="note-box">${uiIconInfo()}<span>Needs your height, weight, age and sex from the About you step. Without them, Fit Log asks you to enter a number instead.</span></div>`}` : ''}
+        ${m === 'manual' ? `<label class="field"><span class="field-label">Daily calories</span>
+          <input type="number" step="any" min="0" id="setupCalories" value="${escapeHtml(a.calorieManual)}" placeholder="e.g. 2300" /></label>` : ''}
+        ${m === 'none' ? '<div class="note-box">' + uiIconInfo() + '<span>No ring or target on Home. You see plain totals for the day.</span></div>' : ''}
       </div>
-      ${m === 'calc' ? `<p class="muted-text">Estimates a target from your height, weight, age and sex${missing ? ' — fill those in on the About you step first, or the calculator will wait until you do' : ''}. You can adjust activity and goal later.</p>` : ''}
-      ${m === 'manual' ? `<div class="card form-card"><label class="field"><span class="field-label">Daily calories</span>
-        <input type="number" step="any" min="0" id="setupCalories" value="${escapeHtml(setupAnswers.calorieManual)}" placeholder="e.g. 2300" /></label></div>` : ''}
-      ${m === 'none' ? '<p class="muted-text">No ring or target on Home — just your totals for the day.</p>' : ''}`;
+      <div class="card pad setup-card">
+        <span class="lbl">Nutrients to track</span>
+        <div class="chip-picker" id="setupMacroChips" role="group" aria-label="Nutrients to track">
+          <button type="button" class="pick-chip is-on is-fixed" disabled>${CHECK_ICON_SVG}Calories</button>
+          ${['protein', 'carbs', 'fat', 'sugar', 'sodium', 'caffeine'].map((k) => `<button type="button" class="pick-chip${a.macros[k] ? ' is-on' : ''}" data-macro="${k}" aria-pressed="${!!a.macros[k]}">${a.macros[k] ? CHECK_ICON_SVG : ''}${MACRO_LABELS[k]}</button>`).join('')}
+        </div>
+      </div>`;
+    const cf = document.getElementById('setupCommonFoods');
+    if (cf) cf.addEventListener('click', () => { a.commonFoods = !isOn(cf); cf.setAttribute('aria-checked', String(a.commonFoods)); });
     document.querySelectorAll('#setupCalorieSeg [data-mode]').forEach((btn) => btn.addEventListener('click', () => {
-      captureSetupStep(); setupAnswers.calorieMode = btn.dataset.mode; renderSetupStepFood();
+      captureSetupStep(); a.calorieMode = btn.dataset.mode; renderSetupStepFood();
+    }));
+    document.querySelectorAll('#setupCalGoalSeg [data-goal]').forEach((btn) => btn.addEventListener('click', () => { a.calorieGoal = btn.dataset.goal; renderSetupStepFood(); }));
+    document.querySelectorAll('#setupMacroChips [data-macro]').forEach((btn) => btn.addEventListener('click', () => {
+      captureSetupStep(); a.macros[btn.dataset.macro] = !a.macros[btn.dataset.macro]; renderSetupStepFood();
     }));
   }
 
@@ -7691,14 +7842,18 @@
     state.settings.trackWater = i.water;
     state.settings.trackFood = i.food;
     if (i.food) {
+      if (setupAnswers.macros) Object.keys(setupAnswers.macros).forEach((k) => { if (state.settings.macroGoals[k]) state.settings.macroGoals[k].enabled = !!setupAnswers.macros[k]; });
+      if (setupAnswers.commonFoods) CATALOG.foods.filter((f) => f.tier === 'starter').forEach(addCatalogFood);
       const cal = state.settings.macroGoals.calories;
       if (setupAnswers.calorieMode === 'manual' && parseFloat(setupAnswers.calorieManual) > 0) {
         cal.enabled = true; cal.goal = Math.round(parseFloat(setupAnswers.calorieManual));
       } else if (setupAnswers.calorieMode === 'calc') {
         state.settings.nutritionCalc.enabled = true;
         const nc = state.settings.nutritionCalc;
+        nc.goal = setupAnswers.calorieGoal;
         applyNutritionCalcTargets(nc.activityLevel, nc.goal); // only applies once the profile has what it needs
       }
+      if (setupAnswers.macros) Object.keys(setupAnswers.macros).forEach((k) => { if (state.settings.macroGoals[k]) state.settings.macroGoals[k].enabled = !!setupAnswers.macros[k]; });
     }
 
     // On failure, stay on the wizard rather than declaring victory and

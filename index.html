@@ -44,12 +44,17 @@
 
     <!-- FIRST-RUN SETUP WIZARD (only ever shown once, before any data exists —
          see startSetupWizard() in app.js) -->
-    <section id="view-setup" class="view" data-view="setup" hidden>
-      <div class="section-head"><h2 id="setupStepLabel">Welcome to Fit Log</h2></div>
+    <section id="view-setup" class="view setup-view" data-view="setup" hidden>
+      <div class="setup-progress" id="setupProgress" aria-hidden="true"></div>
+      <div class="setup-head">
+        <span class="setup-kicker" id="setupKicker">Welcome to Fit Log</span>
+        <h1 id="setupStepLabel"></h1>
+        <p class="setup-lead" id="setupLead"></p>
+      </div>
       <div id="setupContent"></div>
-      <div class="btn-row">
-        <button type="button" class="btn btn-secondary" id="setupBackBtn" hidden>Back</button>
-        <button type="button" class="btn btn-primary" id="setupNextBtn">Next</button>
+      <div class="setup-actions">
+        <button type="button" class="btn btn-primary btn-block" id="setupNextBtn">Continue</button>
+        <button type="button" class="btn btn-ghost btn-block" id="setupBackBtn" hidden>Back</button>
       </div>
     </section>
 
@@ -215,11 +220,9 @@
 
       <!-- Log -> Food leads with saved foods (the one-tap path used every
            day); typing a food in by hand is collapsed under it. -->
+      <div id="foodTodayBar" class="food-today-bar" hidden></div>
       <div id="savedFoodsWrap" class="card form-card" style="gap:12px" hidden>
-        <div class="field">
-          <span class="field-label">My foods — tap one to log it</span>
-          <div class="segmented seg-sm" id="foodSeg" role="radiogroup" aria-label="Which saved foods to list"></div>
-        </div>
+        <div class="segmented seg-sm" id="foodSeg" role="radiogroup" aria-label="Which saved foods to list"></div>
         <label class="search"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg><input type="search" id="foodSearch" placeholder="Search my foods" aria-label="Search my foods" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="search" /></label>
         <div class="f-scroll incard"><div class="f-chips" id="savedFoodCategorySegmented" role="radiogroup"></div><button type="button" class="f-more" aria-label="See more filters"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg></button></div>
         <div id="savedFoodLogList" class="entry-list"></div>
@@ -227,6 +230,7 @@
       </div>
 
       <div id="logFoodManualCard" class="card card-list" hidden>
+        <button type="button" class="setting-row row-switch" id="logFoodCreateBtn"></button>
         <button type="button" class="setting-row row-switch" id="logFoodManualBtn"></button>
       </div>
 
