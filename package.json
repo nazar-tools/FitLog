@@ -1,8 +1,0 @@
-{
-  "name": "fit-log",
-  "private": true,
-  "description": "Fit Log, an offline-first workout, nutrition and body tracker. No build step and no dependencies.",
-  "scripts": {
-    "test": "node --test tests/*.test.js"
-  }
-}
