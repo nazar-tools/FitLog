@@ -1914,8 +1914,8 @@
     `, { tall: true });
 
     const rerender = () => openSetupReviewModal();
-    wireSetupBoolRow('review_trackWorkout', (v) => { s.trackWorkout = v; if (!save()) return; renderAll(); rerender(); });
-    wireSetupBoolRow('review_trackCardio', (v) => { s.trackCardio = v; if (!save()) return; renderAll(); rerender(); });
+    wireSetupBoolRow('review_trackWorkout', (v) => { s.trackWorkout = v; if (v) autoImportFor('trackWorkout'); if (!save()) return; renderAll(); rerender(); });
+    wireSetupBoolRow('review_trackCardio', (v) => { s.trackCardio = v; if (v) autoImportFor('trackCardio'); if (!save()) return; renderAll(); rerender(); });
     wireSetupBoolRow('review_trackHabits', (v) => { s.trackHabits = v; if (!save()) return; renderAll(); rerender(); });
     wireSetupBoolRow('review_trackMeasurements', (v) => { s.trackMeasurements = v; if (!save()) return; renderAll(); rerender(); });
     wireSetupBoolRow('review_trackWater', (v) => { s.trackWater = v; if (!save()) return; renderAll(); rerender(); });
@@ -2612,6 +2612,33 @@
     });
     return 1;
   }
+  // Adds every catalog movement matching `filter` that the user does not have yet, on its usual
+  // equipment. Anything already there (archived too) is left exactly as it is. Returns how many
+  // exercises were created.
+  function importMissingMovements(filter) {
+    let n = 0;
+    CATALOG.movements.filter(filter).forEach((m) => {
+      const eq = m.defaultEquipment || null;
+      if (variantRecord(m.id, eq) || legacyVariantMatch(m, eq)) return;
+      n += addCatalogMovement(m, eq ? [eq] : []);
+    });
+    return n;
+  }
+  const isCardioMovement = (m) => m.kind === 'cardio';
+  const missingMovementCount = () => CATALOG.movements.filter((m) => !(variantRecord(m.id, m.defaultEquipment || null) || legacyVariantMatch(m, m.defaultEquipment || null))).length;
+  // Switching Lifting or Cardio on while that part of the library is empty brings in the whole set,
+  // like setup does, so it is never a blank screen. Returns a short message when it added any.
+  function autoImportFor(key) {
+    if (key === 'trackCardio' && !state.exercises.some((e) => e.kind === 'cardio')) {
+      const n = importMissingMovements(isCardioMovement);
+      return n ? `Added ${n} cardio activities` : '';
+    }
+    if (key === 'trackWorkout' && !state.exercises.some((e) => e.kind === 'weight' || e.kind === 'reps')) {
+      const n = importMissingMovements((m) => !isCardioMovement(m));
+      return n ? `Added ${n} exercises` : '';
+    }
+    return '';
+  }
   function addCatalogFood(f) {
     if (state.food.savedFoods.some((x) => x.catalogId === f.id)) return 0;
     const food = {
@@ -2713,6 +2740,32 @@
     state.settings.tidyUndo = null;
     state.settings.tidyDismissed = false;
     save(); renderAll(); toast('Tidy up undone');
+  }
+
+  // Manage > Exercises: one button brings in the whole catalog instead of ticking each movement.
+  // Shown until it is used or dismissed, and only while a meaningful number are missing.
+  function renderImportCard() {
+    const host = document.getElementById('importCard'); if (!host) return;
+    const n = state.settings.importDismissed ? 0 : missingMovementCount();
+    if (n < 5) { host.hidden = true; host.innerHTML = ''; return; }
+    host.hidden = false;
+    host.innerHTML = `
+      <div class="tidy-text"><b>Add every catalog exercise</b><span class="muted-text">${n} lifts, bodyweight moves and cardio activities are not in your list yet. Yours stay exactly as they are.</span></div>
+      <div class="tidy-actions"><button type="button" class="btn btn-primary btn-sm" id="importAllBtn">Import all ${n}</button><button type="button" class="link-btn" id="importDismissBtn">Not now</button></div>`;
+    document.getElementById('importAllBtn').addEventListener('click', () => {
+      const before = state.exercises.length;
+      const added = importMissingMovements(() => true);
+      state.settings.importDismissed = true;
+      if (!save()) return;
+      renderAll();
+      toast(`Added ${added} exercises`, { label: 'Undo', run: () => {
+        const logged = new Set(state.entries.map((e) => e.exerciseId));
+        state.exercises = state.exercises.filter((e, i) => i < before || logged.has(e.id));
+        state.settings.importDismissed = false;
+        save(); renderAll(); toast('Import undone');
+      } });
+    });
+    document.getElementById('importDismissBtn').addEventListener('click', () => { state.settings.importDismissed = true; save(); renderImportCard(); });
   }
 
   function renderTidyCard() {
@@ -2828,6 +2881,23 @@
 
   const catCheck = (on, disabled) => `<span class="cat-check${on ? ' is-on' : ''}${disabled ? ' is-disabled' : ''}" aria-hidden="true">${on ? CHECK_ICON_SVG : ''}</span>`;
 
+  // What the current tab, filters and search show, as the pick keys of the ones not added yet.
+  // Exercises pick their usual equipment, like "Tick the whole pack".
+  function catUnaddedKeys() {
+    const q = cat.query.trim().toLowerCase();
+    if (cat.tab === 'exercises') {
+      return CATALOG.movements
+        .filter((m) => (cat.group === 'all' || m.group === cat.group) && (cat.pack === 'all' || m.packs.includes(cat.pack)))
+        .filter((m) => !q || m.name.toLowerCase().includes(q) || (EXERCISE_GROUP_LABELS[m.group] || '').toLowerCase().includes(q))
+        .filter((m) => !(variantRecord(m.id, m.defaultEquipment || null) || legacyVariantMatch(m, m.defaultEquipment || null)))
+        .map((m) => `${m.id}|${m.defaultEquipment || ''}`);
+    }
+    if (cat.tab === 'habits') {
+      return CATALOG.habits.filter((h) => (!q || h.name.toLowerCase().includes(q)) && !state.exercises.some((e) => e.catalogId === h.id && !e.archived)).map((h) => h.id);
+    }
+    return CATALOG.foods.filter((f) => (cat.cat === 'all' || f.category === cat.cat) && (!q || f.name.toLowerCase().includes(q)) && !state.food.savedFoods.some((x) => x.catalogId === f.id)).map((f) => f.id);
+  }
+
   function renderCatalogList() {
     const list = document.getElementById('catList');
     const q = cat.query.trim().toLowerCase();
@@ -2894,7 +2964,11 @@
           </div>`;
       }).join('');
     }
-    list.innerHTML = html || '<p class="muted-text org-empty">Nothing matches.</p>';
+    const unadded = catUnaddedKeys();
+    const ticked = unadded.length > 0 && unadded.every((k) => cat.pick[cat.tab].has(k));
+    const bulk = unadded.length > 1 ? `<div class="cat-bulk"><span class="muted-text">${unadded.length} not added yet</span>
+      <button type="button" class="btn btn-secondary btn-sm" data-cat-tickall="1">${ticked ? 'Clear ticks' : `Tick all ${unadded.length}`}</button></div>` : '';
+    list.innerHTML = html ? bulk + html : '<p class="muted-text org-empty">Nothing matches.</p>';
     const n = catPickCount();
     const btn = document.getElementById('catAddBtn');
     btn.disabled = n === 0;
@@ -2911,6 +2985,11 @@
       else if (wrapId === 'catPackChips') cat.pack = chip.dataset.chip;
       else if (wrapId === 'catFoodChips') cat.cat = chip.dataset.chip;
       cat.open = null; renderCatalogSheet(); return;
+    }
+    if (ev.target.closest('[data-cat-tickall]')) {
+      const keys = catUnaddedKeys(); const set = cat.pick[cat.tab];
+      if (keys.every((k) => set.has(k))) keys.forEach((k) => set.delete(k)); else keys.forEach((k) => set.add(k));
+      renderCatalogList(); return;
     }
     if (ev.target.closest('[data-cat-selpack]')) {
       CATALOG.movements.filter((m) => m.packs.includes(cat.pack)).forEach((m) => {
@@ -3327,6 +3406,9 @@
     get ruler() { return DOMAIN_TAB_ICONS.measurements; },
     get water() { return DOMAIN_TAB_ICONS.water; },
     get food() { return DOMAIN_TAB_ICONS.food; },
+    get dumbbell() { return DOMAIN_TAB_ICONS.workout; },
+    get person() { return itemIconSvg('standing'); },
+    get sun() { return itemIconSvg('sun'); },
     get apple() { return DOMAIN_TAB_ICONS.food; },
     get scale() { return itemIconSvg('scale'); },
     get moon() { return itemIconSvg('moon'); },
@@ -3335,6 +3417,7 @@
     chart: lucide('<path d="M3 3v16a2 2 0 0 0 2 2h16"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/>'),
     calendar: lucide('<path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/>'),
     contrast: lucide('<circle cx="12" cy="12" r="10"/><path d="M12 18a6 6 0 0 0 0-12v12z"/>'),
+    get check() { return STATIC_ICONS.habits; },
     habits: lucide('<path d="m3 17 2 2 4-4"/><path d="m3 7 2 2 4-4"/><path d="M13 6h8"/><path d="M13 12h8"/><path d="M13 18h8"/>'),
     calculator: lucide('<rect width="16" height="20" x="4" y="2" rx="2"/><line x1="8" x2="16" y1="6" y2="6"/><line x1="16" x2="16" y1="14" y2="18"/><path d="M16 10h.01"/><path d="M12 10h.01"/><path d="M8 10h.01"/><path d="M12 14h.01"/><path d="M8 14h.01"/><path d="M12 18h.01"/><path d="M8 18h.01"/>'),
     download: lucide('<path d="M12 15V3"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/>'),
@@ -4236,10 +4319,21 @@
     const date = readDate('logDate', todayISO());
     if (!date) return;
     const note = document.getElementById('logNote').value.trim();
-    const entry = Object.assign({ id: genId('en'), exerciseId: ex.id, date, note: note || null }, fields);
-    state.entries.push(entry);
+    // Lifting and rep exercises: logging the same exercise again on the same day adds sets to that
+    // day's entry rather than starting a second workout, since each time is another set toward
+    // the day's total. Cardio runs (and habits) stay separate entries.
+    const sameDay = Array.isArray(fields.sets) ? state.entries.filter((e) => e.exerciseId === ex.id && e.date === date && Array.isArray(e.sets) && e.sets.length).pop() : null;
+    let message = 'Entry saved';
+    if (sameDay) {
+      const hasPrimary = sameDay.sets.some((st) => st.primary);
+      sameDay.sets = sameDay.sets.concat(fields.sets.map((st) => (hasPrimary && st.primary ? Object.assign({}, st, { primary: undefined }) : st)));
+      if (note) sameDay.note = sameDay.note && !sameDay.note.includes(note) ? `${sameDay.note} · ${note}` : (sameDay.note || note);
+      message = `Added ${fields.sets.length === 1 ? 'a set' : `${fields.sets.length} sets`} to ${date === todayISO() ? 'today’s' : 'that day’s'} ${ex.name}`;
+    } else {
+      state.entries.push(Object.assign({ id: genId('en'), exerciseId: ex.id, date, note: note || null }, fields));
+    }
     if (!save()) return;
-    toast('Entry saved');
+    toast(message);
     document.getElementById('logNote').value = '';
     renderDynamicFields(document.getElementById('logDynamicFields'), ex);
     renderLogExerciseHead();
@@ -5644,7 +5738,7 @@
   function renderManage() {
     setManageCategory(manageCategory);
     // One section failing must not blank the others.
-    [renderExerciseManageList, renderTidyCard, renderTrackerManageList, renderWaterManagePanel, renderFoodManagePanel].forEach((fn) => {
+    [renderExerciseManageList, renderImportCard, renderTidyCard, renderTrackerManageList, renderWaterManagePanel, renderFoodManagePanel].forEach((fn) => {
       try { fn(); } catch (e) { console.error('Manage section failed:', fn.name, e); }
     });
   }
@@ -5683,6 +5777,12 @@
     document.getElementById('profileHeightFieldCm').hidden = state.settings.lengthUnit !== 'cm';
     document.getElementById('profileHeightFieldFtIn').hidden = state.settings.lengthUnit === 'cm';
     document.querySelectorAll('#profileSexSegmented button').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.sexChoice === (state.profile.sex || ''))));
+    const hv = document.getElementById('profileHeightVal');
+    if (!state.profile.heightCm) hv.textContent = 'Not set';
+    else if (state.settings.lengthUnit === 'cm') hv.textContent = `${round(state.profile.heightCm, 1)} cm`;
+    else { const { ft, inch } = cmToFtIn(state.profile.heightCm); hv.textContent = `${ft} ft ${inch} in`; }
+    document.getElementById('profileAgeVal').textContent = state.profile.age != null ? String(state.profile.age) : 'Not set';
+    document.getElementById('profileSexVal').textContent = state.profile.sex === 'male' ? 'Male' : state.profile.sex === 'female' ? 'Female' : 'Not set';
 
     document.querySelectorAll('#dashboardChartScaleSegmented button').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.scaleChoice === state.settings.chartScale)));
     document.querySelectorAll('#insightsWindowSegmented button').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.windowChoice === String(state.settings.insightsWindowDays))));
@@ -5767,52 +5867,59 @@
   // interest off removes its step.
   let setupStepIndex = 0;
   let setupAnswers = {
-    // What this install tracks (see renderSetupStepInterests). Lifting, Running,
-    // Habits, Body weight and Water start on; Sleep and Food start off. Lifting also
-    // decides whether the daily bodyweight exercises are seeded.
+    // What this install tracks (see renderSetupStepInterests). Lifting, Cardio,
+    // Habits, Body weight and Water start on; Sleep and Food start off. Lifting and Cardio
+    // also decide which exercises are added to the library at the end.
     interests: { lifting: true, running: true, habits: true, bodyweight: true, sleep: false, water: true, food: false },
-    // Starter packs from the catalog; none are ticked by default.
-    packs: {},
     // How the calorie target is set: 'calc' | 'manual' | 'none'.
     calorieMode: 'none', calorieManual: '', calorieGoal: 'maintain', commonFoods: true, macros: null,
     heightFt: '', heightIn: '', heightCm: '',
     weight: '', age: '', sex: '',
-    lifts: {
-      bench: { enabled: true, mode: 'plates', tier: 'intermediate' },
-      squat: { enabled: true, mode: 'plates', tier: 'intermediate' },
-      deadlift: { enabled: true, mode: 'plates', tier: 'intermediate' },
-    },
-    runningGoalType: 'pace',
-    runningDistance: '5',
-    runningPaceMin: '10',
-    runningPaceSec: '0',
-    waterGoal: '',
-    weightGoalEnabled: false,
+    // "Skip" on a card of the About step empties it and locks its fields.
+    skipWeight: false, skipBody: false,
+    // Optional target weight, asked next to the weight when Body is on. '' = none.
     weightGoalValue: '',
-    // On by default, like DEFAULT_SETTINGS.showWeightInsights.
-    insightsEnabled: true,
+    // Habits ticked on the last step (catalog ids), custom ones typed in, and whether the full list is open.
+    habits: {}, habitsAll: false, customHabits: [], habitForm: null,
+    // Lifting goals ticked on the Lifting step: id -> { on, mode: 'fixed'|'standard', tier, text }.
+    // `text` is what the goal box holds once edited; null means the typical goal, untouched.
+    liftGoals: {}, customGoals: [], goalForm: null,
+    // Cardio goals ticked on the Cardio step: id -> { on, type: 'distance'|'pace'|'both', dist, min, sec }
+    // (each null until edited).
+    cardioGoals: {},
+    // Water guide: 'calc' | 'manual', the activity level, and the goal box once edited (null = the guide's number).
+    waterMode: 'calc', waterActivity: 'moderate', waterText: null,
   };
 
   // Recomputed on every render. 'interests' and 'about' always come first; the rest
-  // follow the Interests answers (changeable only at index 0). 'goals' is always
-  // last, since the Insights toggle lives there.
+  // follow the Interests answers (changeable only at index 0). Habits closes the wizard.
   function setupStepSequence() {
+    const i = setupAnswers.interests;
     const seq = ['interests', 'about'];
-    if (setupAnswers.interests.lifting) seq.push('lifting');
-    if (setupAnswers.interests.running) seq.push('running');
-    if (setupPacks().length) seq.push('packs');
-    if (setupAnswers.interests.food) seq.push('food');
-    seq.push('goals');
+    if (i.lifting) seq.push('lifting');
+    if (i.running) seq.push('cardio');
+    if (i.food) seq.push('food');
+    if (i.water) seq.push('water');
+    if (i.habits) seq.push('habits');
     return seq;
   }
   const SETUP_STEP_LEADS = {
     interests: 'Pick only what you will use. Anything left off stays out of sight, and you can turn it on later in Manage.',
-    about: 'Optional. Height, weight, age and sex unlock BMI, strength standards and a calorie estimate. Skip any of it.',
-    lifting: 'Each lift can use a fixed plates goal or a bodyweight-multiple standard.',
-    packs: 'Optional. Start with a ready-made list, or skip and add movements one at a time from the catalog later.',
+    about: 'All optional. Each answer powers one thing, and every one can be skipped.',
+    lifting: 'Every lift is added to your library for you. Tick the ones you want a goal for; each goal can be changed later.',
+    cardio: 'Every cardio activity is added to your library for you. Tick the ones you want a distance or pace goal for.',
     food: 'Set a daily calorie target and choose what to track. All of it can be changed in Manage → Food.',
+    water: 'A guide from your height and weight, or type your own number. You can change it in Manage → Water.',
+    habits: 'Anything you want to check off and keep consistent. Tap to add, or add your own; you can change how often later.',
   };
-  const SETUP_STEP_TITLES = { interests: 'What do you want to track?', about: 'About you', lifting: 'Lifting goals', running: 'Running goal', packs: 'Starter exercises', food: 'Food targets', goals: 'Other goals' };
+  const SETUP_STEP_TITLES = { interests: 'What do you want to track?', about: 'A little about you', lifting: 'Lifting goals', cardio: 'Cardio goals', food: 'Food targets', water: 'Daily water', habits: 'Daily habits' };
+  // The picture beside each step's title.
+  const SETUP_STEP_ICONS = {
+    get interests() { return itemIconSvg('target'); }, get about() { return itemIconSvg('standing'); },
+    get lifting() { return itemIconSvg('dumbbell'); }, get cardio() { return itemIconSvg('sport-shoe'); },
+    get food() { return itemIconSvg('apple'); }, get water() { return itemIconSvg('droplets'); },
+    get habits() { return STATIC_ICONS.habits; },
+  };
 
   // The topbar normally carries its own iOS safe-area padding (a sticky element
   // must). Screens that hide it (setup wizard, recovery screen) use the
@@ -5859,15 +5966,20 @@
     document.getElementById('setupStepLabel').textContent = SETUP_STEP_TITLES[key];
     document.getElementById('setupLead').textContent = SETUP_STEP_LEADS[key] || '';
     document.getElementById('setupBackBtn').hidden = setupStepIndex === 0;
-    document.getElementById('setupNextBtn').textContent = setupStepIndex === seq.length - 1 ? 'Finish setup' : 'Continue';
+    document.getElementById('setupNextBtn').textContent = setupStepIndex === seq.length - 1 ? 'Open Fit Log' : 'Continue';
+    // A step that can be passed over whole gets a quiet second button.
+    const skipBtn = document.getElementById('setupSkipBtn');
+    skipBtn.hidden = !(key === 'about' || key === 'habits');
+    document.getElementById('setupHero').innerHTML = SETUP_STEP_ICONS[key] || '';
+    skipBtn.textContent = key === 'habits' ? 'Skip habits' : 'Not now';
     window.scrollTo(0, 0);
     if (key === 'interests') renderSetupStepInterests();
     else if (key === 'about') renderSetupStepAbout();
     else if (key === 'lifting') renderSetupStepLifting();
-    else if (key === 'running') renderSetupStepRunning();
-    else if (key === 'packs') renderSetupStepPacks();
+    else if (key === 'cardio') renderSetupStepCardio();
     else if (key === 'food') renderSetupStepFood();
-    else renderSetupStepGoals();
+    else if (key === 'water') renderSetupStepWater();
+    else renderSetupStepHabits();
   }
 
   // Independent on/off tiles: any combination is valid, including none. Tapping
@@ -5886,7 +5998,7 @@
     document.getElementById('setupContent').innerHTML = `
       <div class="setup-tiles">
         ${interestTileHtml('lifting', DOMAIN_TAB_ICONS.workout, 'Lifting', i.lifting, 'Sets, reps, weight and personal bests')}
-        ${interestTileHtml('running', STATIC_ICONS.footprints, 'Running', i.running, 'Runs with pace and distance goals')}
+        ${interestTileHtml('running', STATIC_ICONS.footprints, 'Cardio', i.running, 'Running, walking, cycling, with distance and pace goals')}
         ${interestTileHtml('habits', STATIC_ICONS.habits, 'Habits', i.habits, 'Creatine, stretching, daily reps, anything daily')}
         ${interestTileHtml('food', DOMAIN_TAB_ICONS.food, 'Food', i.food, 'Calories and macros, common foods ready')}
         ${interestTileHtml('water', DOMAIN_TAB_ICONS.water, 'Water', i.water, 'Glasses and bottles against a daily goal')}
@@ -5904,147 +6016,431 @@
   }
   const uiIconInfo = () => lucide('<circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/>');
 
+  // US and Metric each set all four display units at once; Settings still lets them be mixed.
+  const SETUP_UNIT_SYSTEMS = {
+    us: { weightUnit: 'lb', distanceUnit: 'mi', lengthUnit: 'in', volumeUnit: 'flOz' },
+    metric: { weightUnit: 'kg', distanceUnit: 'km', lengthUnit: 'cm', volumeUnit: 'mL' },
+  };
+  const setupUnitSystem = () => (state.settings.weightUnit === 'kg' && state.settings.lengthUnit === 'cm' ? 'metric' : 'us');
+
+  // Switching system carries any weight and height already typed across, so nothing is lost.
+  function setSetupUnitSystem(system) {
+    const a = setupAnswers;
+    // The exact stored value is remembered next to the text it produced, so switching back
+    // and forth does not wear 178 lb down to 177.9 through rounding.
+    const w = parseFloat(a.weight);
+    const weightLb = a.weight === a.weightShown && a.weightCanon != null ? a.weightCanon : (w > 0 ? Units.displayToLb(w) : null);
+    const heightKey = `${a.heightCm}|${a.heightFt}|${a.heightIn}`;
+    const heightCm = heightKey === a.heightShown && a.heightCanon != null ? a.heightCanon : heightCmFromSetup();
+    // Goal boxes already edited are carried across in pounds; untouched ones simply follow the new unit.
+    const carryLb = (text) => (parseFloat(text) > 0 ? Units.displayToLb(parseFloat(text)) : null);
+    const lbGoals = SETUP_LIFTS.filter(isWeightGoal).map((d) => [a.liftGoals[d.id], a.liftGoals[d.id] && a.liftGoals[d.id].text != null ? carryLb(a.liftGoals[d.id].text) : null]);
+    const lbCustom = a.customGoals.filter((c) => c.kind === 'weight').map((c) => [c, carryLb(c.text)]);
+    const waterMl = a.waterText != null && parseFloat(a.waterText) > 0 ? Units.displayToMl(parseFloat(a.waterText)) : null;
+    const wGoal = carryLb(a.weightGoalValue);
+    Object.assign(state.settings, SETUP_UNIT_SYSTEMS[system]);
+    lbGoals.forEach(([g, lb]) => { if (g && lb != null) g.text = String(round(Units.lbToDisplay(lb), 1)); });
+    lbCustom.forEach(([c, lb]) => { if (lb != null) c.text = String(round(Units.lbToDisplay(lb), 1)); });
+    if (waterMl != null) a.waterText = String(round(Units.mlToDisplay(waterMl), 0));
+    if (wGoal != null) a.weightGoalValue = String(round(Units.lbToDisplay(wGoal), 1));
+    Object.values(a.cardioGoals).forEach((g) => { g.dist = null; g.min = null; g.sec = null; });
+    if (weightLb != null) a.weight = String(round(Units.lbToDisplay(weightLb), 1));
+    a.heightCm = ''; a.heightFt = ''; a.heightIn = '';
+    if (heightCm != null) {
+      if (system === 'metric') a.heightCm = String(Math.round(heightCm));
+      else { const totalIn = Math.round(Units.cmToDisplay(heightCm)); a.heightFt = String(Math.floor(totalIn / 12)); a.heightIn = String(totalIn % 12); }
+    }
+    a.weightCanon = weightLb; a.weightShown = a.weight;
+    a.heightCanon = heightCm; a.heightShown = `${a.heightCm}|${a.heightFt}|${a.heightIn}`;
+  }
+
   function renderSetupStepAbout() {
+    const a = setupAnswers; const i = a.interests;
+    const system = setupUnitSystem();
     const cm = state.settings.lengthUnit === 'cm';
+    // Only questions for modules that use the answer are shown (see the note below).
+    const showWeight = i.lifting || i.bodyweight || i.food;
+    const showBody = i.lifting || i.food;
+    const why = (text) => `<div class="why">${uiIconInfo()}<span>${text}</span></div>`;
+    const skipLink = (key, skipped) => `<button type="button" class="link-btn" data-skip-card="${key}" aria-pressed="${skipped}">${skipped ? 'Add' : 'Skip'}</button>`;
+    const field = (id, value, suffix, label, extra = '', disabled = false) => `<div class="input-unit"><input type="number" ${extra.includes('placeholder') ? '' : 'placeholder="Not set"'} ${extra} id="${id}" value="${escapeHtml(value)}" aria-label="${label}" ${disabled ? 'disabled' : ''} /><span class="u">${suffix}</span></div>`;
+    const hidden = [!showWeight && 'weight', !showBody && 'height, age and sex'].filter(Boolean);
     document.getElementById('setupContent').innerHTML = `
-      <div class="form-card">
-        ${cm ? `
-        <label class="field"><span class="field-label">Height (cm)</span>
-          <input type="number" step="any" min="50" max="272" id="setupHeightCm" value="${escapeHtml(setupAnswers.heightCm)}" placeholder="Not set" /></label>
-        ` : `
-        <div class="field"><span class="field-label">Height (ft/in)</span>
-          <div class="inline-time-fields">
-            <input type="number" step="1" min="0" max="8" inputmode="numeric" id="setupHeightFt" value="${escapeHtml(setupAnswers.heightFt)}" placeholder="ft" />
-            <input type="number" step="1" min="0" max="11" inputmode="numeric" id="setupHeightIn" value="${escapeHtml(setupAnswers.heightIn)}" placeholder="in" />
-          </div>
+      <div class="card pad setup-card">
+        <div class="setup-card-head"><span class="setup-card-title">${itemIconHtml('ruler', true)}<span class="lbl">Units</span></span></div>
+        <div class="segmented segmented-fill" id="setupUnitSeg" role="radiogroup" aria-label="Units">
+          <button type="button" role="radio" data-system="us" aria-checked="${system === 'us'}">US (lb, mi)</button>
+          <button type="button" role="radio" data-system="metric" aria-checked="${system === 'metric'}">Metric (kg, km)</button>
         </div>
-        `}
-        <label class="field"><span class="field-label">Weight (${Units.weightUnitLabel()})</span>
-          <input type="number" step="any" min="0" id="setupWeight" value="${escapeHtml(setupAnswers.weight)}" placeholder="Not set" /></label>
-        <label class="field"><span class="field-label">Age <span class="muted-text">(for nutrition advice)</span></span>
-          <input type="number" step="1" min="1" max="120" inputmode="numeric" id="setupAge" value="${escapeHtml(setupAnswers.age)}" placeholder="Not set" /></label>
-        <div class="field">
-          <span class="field-label">Sex <span class="muted-text">(for strength/pace benchmarks + nutrition calculator)</span></span>
-          <div class="segmented" id="setupSexSegmented" role="radiogroup" aria-label="Sex">
-            <button type="button" data-sex-choice="" role="radio" aria-checked="${setupAnswers.sex === ''}">Not set</button>
-            <button type="button" data-sex-choice="male" role="radio" aria-checked="${setupAnswers.sex === 'male'}">Male</button>
-            <button type="button" data-sex-choice="female" role="radio" aria-checked="${setupAnswers.sex === 'female'}">Female</button>
-          </div>
+        ${why('Used for every number in the app. Stored in one standard unit underneath, so you can switch later without losing anything.')}
+      </div>
+      ${showWeight ? `<div class="card pad setup-card">
+        <div class="setup-card-head"><span class="setup-card-title">${itemIconHtml('scale', true)}<span class="lbl">Body weight</span></span>${skipLink('weight', a.skipWeight)}</div>
+        ${field('setupWeight', a.skipWeight ? '' : a.weight, Units.weightUnitLabel(), `Body weight in ${Units.weightUnitLabel()}`, 'step="any" min="0" inputmode="decimal"', a.skipWeight)}
+        ${i.bodyweight ? `<span class="lbl">Target weight (optional)</span>
+        ${field('setupWeightGoal', a.skipWeight ? '' : a.weightGoalValue, Units.weightUnitLabel(), `Target weight in ${Units.weightUnitLabel()}`, 'step="any" min="0" inputmode="decimal"', a.skipWeight)}` : ''}
+        ${why('Used for your weight chart’s starting point and for strength standards such as bench press relative to body weight.')}
+      </div>` : ''}
+      ${showBody ? `<div class="card pad setup-card">
+        <div class="setup-card-head"><span class="setup-card-title">${itemIconHtml('standing', true)}<span class="lbl">Height, age and sex</span></span>${skipLink('body', a.skipBody)}</div>
+        <div class="input-pair${cm ? '' : ' is-wide'}">
+          ${cm
+            ? field('setupHeightCm', a.skipBody ? '' : a.heightCm, 'cm', 'Height in centimetres', 'step="any" min="50" max="272" inputmode="decimal"', a.skipBody)
+            : `<div class="input-pair">${field('setupHeightFt', a.skipBody ? '' : a.heightFt, 'ft', 'Height, feet', 'step="1" min="0" max="8" inputmode="numeric" placeholder="0"', a.skipBody)}${field('setupHeightIn', a.skipBody ? '' : a.heightIn, 'in', 'Height, inches', 'step="1" min="0" max="11" inputmode="numeric" placeholder="0"', a.skipBody)}</div>`}
+          ${field('setupAge', a.skipBody ? '' : a.age, 'age', 'Age in years', 'step="1" min="1" max="120" inputmode="numeric" placeholder="–"', a.skipBody)}
         </div>
-      </div>`;
+        <div class="segmented segmented-fill" id="setupSexSegmented" role="radiogroup" aria-label="Sex">
+          <button type="button" data-sex-choice="male" role="radio" aria-checked="${a.sex === 'male'}" ${a.skipBody ? 'disabled' : ''}>Male</button>
+          <button type="button" data-sex-choice="female" role="radio" aria-checked="${a.sex === 'female'}" ${a.skipBody ? 'disabled' : ''}>Female</button>
+          <button type="button" data-sex-choice="" role="radio" aria-checked="${a.sex === ''}" ${a.skipBody ? 'disabled' : ''}>Skip</button>
+        </div>
+        ${why('Used for the suggested calorie target and for strength and pace benchmarks. Skip it and you type your own calorie number instead.')}
+      </div>` : ''}
+      <div class="note-box">${uiIconInfo()}<span>${hidden.length ? `Only questions for the modules you picked are shown. Without ${hidden.length === 2 ? 'Body weight, Food or Lifting' : 'Food or Lifting'}, ${hidden.length === 2 ? 'this screen is just units.' : 'the height, age and sex questions are left out.'}` : 'Only questions for the modules you picked are shown.'}</span></div>`;
+    document.querySelectorAll('#setupUnitSeg button').forEach((b) => {
+      b.addEventListener('click', () => { captureSetupStep(); setSetupUnitSystem(b.dataset.system); renderSetupStepAbout(); });
+    });
     document.querySelectorAll('#setupSexSegmented button').forEach((b) => {
-      b.addEventListener('click', () => { captureSetupStep(); setupAnswers.sex = b.dataset.sexChoice; renderSetupStepAbout(); });
+      b.addEventListener('click', () => { captureSetupStep(); a.sex = b.dataset.sexChoice; renderSetupStepAbout(); });
+    });
+    document.querySelectorAll('[data-skip-card]').forEach((b) => {
+      b.addEventListener('click', () => {
+        captureSetupStep();
+        if (b.dataset.skipCard === 'weight') { a.skipWeight = !a.skipWeight; if (a.skipWeight) a.weight = ''; }
+        else { a.skipBody = !a.skipBody; if (a.skipBody) { a.heightCm = ''; a.heightFt = ''; a.heightIn = ''; a.age = ''; a.sex = ''; } }
+        renderSetupStepAbout();
+      });
     });
   }
+
+  // Wizard last step: the habits catalog, with the five suggested ones up front and the rest
+  // behind "Browse all", then a summary of what Home will show.
+  const REPEAT_LABELS = { daily: 'Daily', 'every-other': 'Every other day', weekly: 'Weekly' };
+  function setupHomePreviewHtml() {
+    const a = setupAnswers; const i = a.interests;
+    const chips = [];
+    const nHabits = Object.keys(a.habits).filter((k) => a.habits[k]).length + a.customHabits.length;
+    if (i.habits) chips.push(`Checklist · ${nHabits} habit${nHabits === 1 ? '' : 's'}`);
+    const nLifts = i.lifting ? setupLiftGoalCount() : 0;
+    if (i.lifting) chips.push(`Training · ${nLifts} goal${nLifts === 1 ? '' : 's'}`);
+    const nCardio = i.running ? setupCardioGoalCount() : 0;
+    if (i.running) chips.push(`Cardio · ${nCardio} goal${nCardio === 1 ? '' : 's'}`);
+    if (i.food) {
+      const kcal = a.calorieMode === 'manual' ? Math.round(parseFloat(a.calorieManual)) : a.calorieMode === 'calc' ? (setupCalcPreview() || {}).calories : null;
+      chips.push(kcal > 0 ? `Nutrition · ${kcal.toLocaleString()} kcal` : 'Nutrition');
+    }
+    if (i.water) chips.push(`Water · ${fmtWaterAmount(setupWaterMl())}`);
+    if (i.bodyweight && a.weightGoalValue !== '') chips.push('Weight goal');
+    const off = [!i.water && 'Water', !i.bodyweight && 'Body', !i.sleep && 'Sleep', !i.running && 'Cardio', !i.food && 'Food'].filter(Boolean);
+    return `<div class="card pad setup-card">
+      <div class="setup-card-head"><span class="tag tag-good">Ready</span><b>Here is what Home will show</b></div>
+      <div class="mini-chips">${chips.map((c) => `<span>${escapeHtml(c)}</span>`).join('')}</div>
+      <div class="muted-text">${off.length ? `${off.join(', ').replace(/, ([^,]*)$/, ' and $1')} ${off.length === 1 ? 'stays' : 'stay'} hidden. ` : ''}Change any of this in Settings, Home screen.</div>
+    </div>`;
+  }
+
+  function renderSetupStepHabits() {
+    const a = setupAnswers;
+    const all = CATALOG.habits;
+    const shown = a.habitsAll ? all : all.filter((h) => h.suggested);
+    const form = a.habitForm;
+    document.getElementById('setupContent').innerHTML = `
+      <div class="card pick-wrap">
+        ${a.customHabits.map((c) => `
+        <div class="pick-row is-static">
+          ${itemIconHtml('standing')}
+          <span class="grow"><span class="pick-name"><span class="t">${escapeHtml(c.name)}</span><span class="tag">${REPEAT_LABELS[c.repeat] || 'Daily'}</span></span><span class="d">Your own habit</span></span>
+          <button type="button" class="btn btn-ghost btn-sm" data-habit-remove="${c.id}" aria-label="Remove ${escapeHtml(c.name)}">Remove</button>
+        </div>`).join('')}
+        ${shown.map((h) => pickRowHtml(`data-habit="${h.id}"`, ITEM_ICONS[h.icon] ? h.icon : 'standing', h.name, escapeHtml(h.note), a.habits[h.id], REPEAT_LABELS[h.repeat] || 'Daily')).join('')}
+        ${a.habitsAll ? '' : `<button type="button" class="pick-row pick-more" id="setupHabitsMore"><span>Browse all ${all.length} habits</span><span aria-hidden="true">›</span></button>`}
+      </div>
+      ${form ? `<div class="card pad setup-card" id="setupHabitForm">
+        <div class="setup-card-head"><span class="lbl">Add your own habit</span></div>
+        <label class="field"><span class="field-label">Name</span><input type="text" id="habitFormName" maxlength="60" placeholder="e.g. Take vitamin D" value="${escapeHtml(form.name)}" /></label>
+        ${setupSegHtml('data-habit-repeat', 'How often', [['daily', 'Daily'], ['every-other', 'Every other day'], ['weekly', 'Weekly']], form.repeat)}
+        ${form.error ? `<p class="setup-error" role="alert">${escapeHtml(form.error)}</p>` : ''}
+        <div class="setup-actions-row"><button type="button" class="btn btn-primary" id="habitFormAdd">Add habit</button><button type="button" class="btn btn-ghost" id="habitFormCancel">Cancel</button></div>
+      </div>` : `<button type="button" class="btn btn-secondary btn-block" id="setupHabitAdd">${uiIcon('plus')} Add your own habit</button>`}
+      <div id="setupHomePreview">${setupHomePreviewHtml()}</div>`;
+    document.querySelectorAll('#setupContent [data-habit]').forEach((b) => b.addEventListener('click', () => {
+      a.habits[b.dataset.habit] = !a.habits[b.dataset.habit];
+      b.setAttribute('aria-pressed', String(!!a.habits[b.dataset.habit]));
+      b.querySelector('.pick-cb').innerHTML = a.habits[b.dataset.habit] ? CHECK_ICON_SVG : '';
+      document.getElementById('setupHomePreview').innerHTML = setupHomePreviewHtml();
+    }));
+    const more = document.getElementById('setupHabitsMore');
+    if (more) more.addEventListener('click', () => { captureSetupStep(); a.habitsAll = true; renderSetupStepHabits(); });
+    document.querySelectorAll('#setupContent [data-habit-remove]').forEach((b) => b.addEventListener('click', () => {
+      captureSetupStep(); a.customHabits = a.customHabits.filter((c) => c.id !== b.dataset.habitRemove); renderSetupStepHabits();
+    }));
+    const add = document.getElementById('setupHabitAdd');
+    if (add) add.addEventListener('click', () => { a.habitForm = { name: '', repeat: 'daily', error: '' }; renderSetupStepHabits(); document.getElementById('habitFormName').focus(); });
+    document.querySelectorAll('#setupContent [data-habit-repeat] button').forEach((b) => b.addEventListener('click', () => {
+      captureSetupStep(); a.habitForm.repeat = b.dataset.choice; renderSetupStepHabits();
+    }));
+    const cancel = document.getElementById('habitFormCancel');
+    if (cancel) cancel.addEventListener('click', () => { a.habitForm = null; renderSetupStepHabits(); });
+    const addBtn = document.getElementById('habitFormAdd');
+    if (addBtn) addBtn.addEventListener('click', () => {
+      captureSetupStep();
+      const name = a.habitForm.name.trim();
+      if (!name) { a.habitForm.error = 'Give the habit a name.'; renderSetupStepHabits(); return; }
+      a.customHabits.push({ id: genId('habit'), name, repeat: a.habitForm.repeat });
+      a.habitForm = null; renderSetupStepHabits();
+    });
+  }
+
+  /* ---- Goal pickers: Lifting, Cardio ----
+     Typical goals offered at setup. Names, icons and kinds come from the catalog movement (`mv`).
+     Weights are pounds, rep goals are a count for the day, and the plank is seconds held. */
+  const SETUP_LIFTS = [
+    { id: 'bench', mv: 'cat_mv_bench_press', lift: 'bench', typical: 225, note: 'two plates a side' },
+    { id: 'squat', mv: 'cat_mv_squat', lift: 'squat', typical: 315, note: 'three plates a side' },
+    { id: 'deadlift', mv: 'cat_mv_deadlift', lift: 'deadlift', typical: 405, note: 'four plates a side' },
+    { id: 'ohp', mv: 'cat_mv_ohp', typical: 135, note: 'one plate a side' },
+    { id: 'pushups', mv: 'cat_mv_pushups', typical: 50, note: 'in a day' },
+    { id: 'pullups', mv: 'cat_mv_pullups', typical: 15, note: 'in a day' },
+    { id: 'bwsquats', mv: 'cat_mv_bw_squats', typical: 50, note: 'in a day' },
+    { id: 'dips', mv: 'cat_mv_dips', typical: 20, note: 'in a day' },
+    { id: 'plank', mv: 'cat_mv_plank', typical: 120, note: 'held at once' },
+  ];
+  // Distance in miles, pace in seconds per mile.
+  const SETUP_CARDIO = [
+    { id: 'running', mv: 'cat_mv_running', dist: 5, pace: 600 },
+    { id: 'walking', mv: 'cat_mv_walking', dist: 3, pace: 900 },
+    { id: 'cycling', mv: 'cat_mv_cycling', dist: 15, pace: 240 },
+    { id: 'hiking', mv: 'cat_mv_hiking', dist: 5, pace: 1200 },
+    { id: 'rowing', mv: 'cat_mv_rowing', dist: 3, pace: 480 },
+    { id: 'swimming', mv: 'cat_mv_swimming', dist: 1, pace: 2400 },
+  ];
+  const setupMv = (def) => MOVEMENTS[def.mv];
+  const isWeightGoal = (def) => setupMv(def).kind === 'weight';
+  const isTimedGoal = (def) => setupMv(def).unit === 'time';
+  const setupLiftDefaultText = (def) => (isWeightGoal(def) ? String(round(Units.lbToDisplay(def.typical), 0)) : String(def.typical));
+  const setupLiftUnit = (def) => (isWeightGoal(def) ? Units.weightUnitLabel() : isTimedGoal(def) ? 'sec' : 'reps');
+  const setupLiftLabel = (def) => (isWeightGoal(def) ? 'Goal weight' : isTimedGoal(def) ? 'Hold goal' : 'Reps in a day');
+  const setupLiftTypicalText = (def) => (isWeightGoal(def) ? fmtWeight(def.typical) : isTimedGoal(def) ? fmtHold(def.typical) : `${def.typical} reps`);
+  const cardioDefaults = (def) => {
+    const s = Math.round(Units.secPerMiToDisplaySecPerUnit(def.pace));
+    return { dist: String(round(Units.miToDisplay(def.dist), 1)), min: String(Math.floor(s / 60)), sec: String(s % 60) };
+  };
+  const newLiftGoal = () => ({ on: true, mode: 'fixed', tier: 'intermediate', text: null });
+  const newCardioGoal = () => ({ on: true, type: 'distance', dist: null, min: null, sec: null });
+
+  // A goal's number in storage units: the typical value when the box was never edited (so kg
+  // and lb users get exactly 225 lb, not 224.9), otherwise what was typed.
+  function setupLiftValue(def, g) {
+    if (g.text == null || g.text === setupLiftDefaultText(def)) return def.typical;
+    const n = parseFloat(g.text);
+    if (!(n > 0)) return def.typical;
+    return isWeightGoal(def) ? Units.displayToLb(n) : Math.round(n);
+  }
+  function setupCustomValue(c) {
+    const n = parseFloat(c.text);
+    if (!(n > 0)) return null;
+    return c.kind === 'weight' ? Units.displayToLb(n) : Math.round(n);
+  }
+  function setupCardioValues(def, g) {
+    const d = cardioDefaults(def);
+    const n = parseFloat(g.dist);
+    const dist = g.dist == null || g.dist === d.dist || !(n > 0) ? def.dist : Units.displayToMi(n);
+    const untouched = (g.min == null || g.min === d.min) && (g.sec == null || g.sec === d.sec);
+    const paceSec = (parseInt(g.min == null ? d.min : g.min, 10) || 0) * 60 + (parseInt(g.sec == null ? d.sec : g.sec, 10) || 0);
+    const pace = untouched ? def.pace : (paceSec > 0 ? Units.displaySecPerUnitToSecPerMi(paceSec) : def.pace);
+    return { distanceGoal: g.type !== 'pace' ? dist : null, paceGoal: g.type !== 'distance' ? pace : null };
+  }
+  // Picks the number of ticked goals, for the summary on the last step.
+  const setupLiftGoalCount = () => SETUP_LIFTS.filter((d) => (setupAnswers.liftGoals[d.id] || {}).on).length + setupAnswers.customGoals.length;
+  const setupCardioGoalCount = () => SETUP_CARDIO.filter((d) => (setupAnswers.cardioGoals[d.id] || {}).on).length;
+
+  // One tappable row of a pick list: icon, name, detail and a tick box. The caller supplies the
+  // data attribute that identifies it.
+  function pickRowHtml(attr, iconKey, name, desc, on, tag) {
+    return `<button type="button" class="pick-row" ${attr} aria-pressed="${!!on}">
+      ${itemIconHtml(iconKey)}
+      <span class="grow"><span class="pick-name"><span class="t">${escapeHtml(name)}</span>${tag ? `<span class="tag">${tag}</span>` : ''}</span><span class="d">${desc}</span></span>
+      <span class="pick-cb" aria-hidden="true">${on ? CHECK_ICON_SVG : ''}</span>
+    </button>`;
+  }
+  const goalInputHtml = (attr, label, unit, value, aria) => `<label class="field"><span class="field-label">${label}</span>
+    <div class="input-unit"><input type="number" step="any" min="0" inputmode="decimal" ${attr} value="${escapeHtml(value)}" aria-label="${escapeHtml(aria)}" /><span class="u">${unit}</span></div></label>`;
+  const setupSegHtml = (attr, label, options, current) => `<div class="segmented segmented-fill" ${attr} role="radiogroup" aria-label="${label}">
+    ${options.map(([v, l]) => `<button type="button" data-choice="${v}" role="radio" aria-checked="${current === v}">${l}</button>`).join('')}</div>`;
 
   // Shown only when the Interests step turned Lifting on.
   function renderSetupStepLifting() {
-    const lifts = setupAnswers.lifts;
-    // A real positive weight, not just a non-empty box: "0" or "abc" would leave the preview empty.
-    const canUseStandards = parseFloat(setupAnswers.weight) > 0 && setupAnswers.sex !== '';
+    const a = setupAnswers;
+    const canUseStandards = parseFloat(a.weight) > 0 && a.sex !== '';
+    const bwLb = canUseStandards ? Units.displayToLb(parseFloat(a.weight)) : null;
+    const panelFor = (def, g) => {
+      let html = '';
+      if (def.lift) {
+        html += setupSegHtml(`data-lift-mode="${def.id}"`, `${setupMv(def).name} goal style`, [['fixed', 'Fixed weight'], ['standard', 'By body weight']], g.mode);
+      }
+      if (def.lift && g.mode === 'standard') {
+        if (!canUseStandards) {
+          html += `<div class="note-box">${uiIconInfo()}<span>Needs your weight and sex from the About you step. Until then this uses the fixed weight.</span></div>`;
+        } else {
+          const rows = standardGoalPreviewRows(def.lift, bwLb, a.sex);
+          html += setupSegHtml(`data-lift-tier="${def.id}"`, `${setupMv(def).name} tier`, ['intermediate', 'advanced', 'elite'].map((t) => [t, t[0].toUpperCase() + t.slice(1)]), g.tier);
+          html += `<div class="standards-preview">${rows.map((r) => `<div class="standards-preview-row${r.tierKey === g.tier ? ' is-selected' : ''}"><span>${r.label}</span><span>${fmtWeight(r.goalLb)}</span></div>`).join('')}</div>`;
+          return html;
+        }
+      }
+      return html + goalInputHtml(`data-goal-input="${def.id}"`, setupLiftLabel(def), setupLiftUnit(def), g.text == null ? setupLiftDefaultText(def) : g.text, `${setupMv(def).name} ${setupLiftLabel(def).toLowerCase()}`);
+    };
+    const rowFor = (def) => {
+      const g = a.liftGoals[def.id];
+      const on = !!(g && g.on);
+      const std = on && def.lift && g.mode === 'standard' && canUseStandards;
+      const desc = on ? `Goal ${escapeHtml(setupLiftTypicalText(Object.assign({}, def, { typical: std ? computeStandardGoal(def.lift, g.tier, bwLb, a.sex) : setupLiftValue(def, g) })))}` : `Typical ${escapeHtml(setupLiftTypicalText(def))}, ${def.note}`;
+      return pickRowHtml(`data-lift-pick="${def.id}"`, setupMv(def).icon, setupMv(def).name, desc, on) + (on ? `<div class="pick-panel">${panelFor(def, g)}</div>` : '');
+    };
+    const customRows = a.customGoals.map((c) => `
+      ${pickRowHtml(`data-custom-pick="${c.id}"`, c.kind === 'weight' ? 'dumbbell' : 'activity', c.name, c.kind === 'weight' ? 'Your own · weight goal' : 'Your own · reps in a day', true, 'Yours')}
+      <div class="pick-panel">
+        ${goalInputHtml(`data-custom-input="${c.id}"`, c.kind === 'weight' ? 'Goal weight' : 'Reps in a day', c.kind === 'weight' ? Units.weightUnitLabel() : 'reps', c.text, `${c.name} goal`)}
+        <button type="button" class="btn btn-ghost btn-sm" data-custom-remove="${c.id}">Remove</button>
+      </div>`).join('');
+    const form = a.goalForm;
     document.getElementById('setupContent').innerHTML = `
-        ${canUseStandards ? '' : '<p class="muted-text">Enter weight and sex on the About you step to unlock bodyweight standards.</p>'}
-        <div class="card form-card">
-          ${['bench', 'squat', 'deadlift'].map((key) => {
-            const lift = lifts[key];
-            const bwLb = canUseStandards ? Units.displayToLb(parseFloat(setupAnswers.weight)) : null;
-            const previewRows = (lift.mode === 'standard' && canUseStandards) ? standardGoalPreviewRows(key, bwLb, setupAnswers.sex) : null;
-            return `
-            <div class="form-card">
-              <div class="setting-row">
-                <span>${LIFT_TYPE_LABELS[key]}</span>
-                ${switchHtml(`data-lift-toggle="${key}"`, `Track ${LIFT_TYPE_LABELS[key]}`, lift.enabled)}
-              </div>
-              ${lift.enabled ? `
-              <div class="segmented" data-lift-mode="${key}" role="radiogroup" aria-label="${LIFT_TYPE_LABELS[key]} goal style">
-                <button type="button" data-mode-choice="plates" role="radio" aria-checked="${lift.mode === 'plates'}">Plates (${PLATE_GOALS[key]} lb)</button>
-                <button type="button" data-mode-choice="standard" role="radio" aria-checked="${lift.mode === 'standard'}" ${canUseStandards ? '' : 'disabled'}>Bodyweight standard</button>
-              </div>
-              ${lift.mode === 'standard' && canUseStandards ? `
-              <div class="segmented" data-lift-tier="${key}" role="radiogroup" aria-label="${LIFT_TYPE_LABELS[key]} tier">
-                ${['intermediate', 'advanced', 'elite'].map((t) => `<button type="button" data-tier-choice="${t}" role="radio" aria-checked="${lift.tier === t}">${t[0].toUpperCase()}${t.slice(1)}</button>`).join('')}
-              </div>
-              <div class="standards-preview">
-                ${previewRows.map((r) => `<div class="standards-preview-row${r.tierKey === lift.tier ? ' is-selected' : ''}"><span>${r.label}</span><span>${fmtWeight(r.goalLb)}</span></div>`).join('')}
-              </div>` : ''}` : ''}
-            </div>`;
-          }).join('')}
-        </div>`;
-    ['bench', 'squat', 'deadlift'].forEach((key) => {
-      const toggleEl = document.querySelector(`[data-lift-toggle="${key}"]`);
-      if (toggleEl) toggleEl.addEventListener('click', () => { lifts[key].enabled = !isOn(toggleEl); renderSetupStepLifting(); });
-      const modeEl = document.querySelector(`[data-lift-mode="${key}"]`);
-      if (modeEl) modeEl.querySelectorAll('button').forEach((b) => b.addEventListener('click', () => { if (!b.disabled) { lifts[key].mode = b.dataset.modeChoice; renderSetupStepLifting(); } }));
-      const tierEl = document.querySelector(`[data-lift-tier="${key}"]`);
-      if (tierEl) tierEl.querySelectorAll('button').forEach((b) => b.addEventListener('click', () => { lifts[key].tier = b.dataset.tierChoice; renderSetupStepLifting(); }));
+      <span class="lbl">Barbell lifts</span>
+      <div class="card pick-wrap">${SETUP_LIFTS.filter(isWeightGoal).map(rowFor).join('')}</div>
+      <span class="lbl">Bodyweight, per day</span>
+      <div class="card pick-wrap">${SETUP_LIFTS.filter((d) => !isWeightGoal(d)).map(rowFor).join('')}</div>
+      ${a.customGoals.length ? `<span class="lbl">Your own</span><div class="card pick-wrap">${customRows}</div>` : ''}
+      ${form ? `<div class="card pad setup-card" id="setupGoalForm">
+        <div class="setup-card-head"><span class="lbl">Add your own goal</span></div>
+        <label class="field"><span class="field-label">Name</span><input type="text" id="goalFormName" maxlength="60" placeholder="e.g. Barbell Row" value="${escapeHtml(form.name)}" /></label>
+        ${setupSegHtml('data-goal-kind', 'Goal type', [['weight', 'Weight'], ['reps', 'Reps in a day']], form.kind)}
+        ${goalInputHtml('id="goalFormValue"', form.kind === 'weight' ? 'Goal weight' : 'Reps in a day', form.kind === 'weight' ? Units.weightUnitLabel() : 'reps', form.value, 'Goal')}
+        ${form.error ? `<p class="setup-error" role="alert">${escapeHtml(form.error)}</p>` : ''}
+        <div class="setup-actions-row"><button type="button" class="btn btn-primary" id="goalFormAdd">Add goal</button><button type="button" class="btn btn-ghost" id="goalFormCancel">Cancel</button></div>
+      </div>` : `<button type="button" class="btn btn-secondary btn-block" id="setupGoalAdd">${uiIcon('plus')} Add your own goal</button>`}
+      <div class="note-box">${uiIconInfo()}<span>${a.liftGoals && setupLiftGoalCount() ? `${setupLiftGoalCount()} goal${setupLiftGoalCount() === 1 ? '' : 's'} will show on Home.` : 'Nothing is ticked, so no goals are set. Your exercises are still all in the Log.'}</span></div>`;
+
+    document.querySelectorAll('#setupContent [data-lift-pick]').forEach((b) => b.addEventListener('click', () => {
+      captureSetupStep();
+      const id = b.dataset.liftPick;
+      if (a.liftGoals[id] && a.liftGoals[id].on) a.liftGoals[id].on = false; else a.liftGoals[id] = Object.assign(newLiftGoal(), a.liftGoals[id] || {}, { on: true });
+      renderSetupStepLifting();
+    }));
+    document.querySelectorAll('#setupContent [data-lift-mode] button').forEach((b) => b.addEventListener('click', () => {
+      captureSetupStep(); a.liftGoals[b.parentElement.dataset.liftMode].mode = b.dataset.choice; renderSetupStepLifting();
+    }));
+    document.querySelectorAll('#setupContent [data-lift-tier] button').forEach((b) => b.addEventListener('click', () => {
+      captureSetupStep(); a.liftGoals[b.parentElement.dataset.liftTier].tier = b.dataset.choice; renderSetupStepLifting();
+    }));
+    document.querySelectorAll('#setupContent [data-custom-remove]').forEach((b) => b.addEventListener('click', () => {
+      captureSetupStep(); a.customGoals = a.customGoals.filter((c) => c.id !== b.dataset.customRemove); renderSetupStepLifting();
+    }));
+    const add = document.getElementById('setupGoalAdd');
+    if (add) add.addEventListener('click', () => { captureSetupStep(); a.goalForm = { name: '', kind: 'weight', value: '', error: '' }; renderSetupStepLifting(); document.getElementById('goalFormName').focus(); });
+    document.querySelectorAll('#setupContent [data-goal-kind] button').forEach((b) => b.addEventListener('click', () => {
+      captureSetupStep(); a.goalForm.kind = b.dataset.choice; renderSetupStepLifting();
+    }));
+    const cancel = document.getElementById('goalFormCancel');
+    if (cancel) cancel.addEventListener('click', () => { a.goalForm = null; renderSetupStepLifting(); });
+    const addBtn = document.getElementById('goalFormAdd');
+    if (addBtn) addBtn.addEventListener('click', () => {
+      captureSetupStep();
+      const f = a.goalForm; const name = f.name.trim(); const n = parseFloat(f.value);
+      if (!name) { f.error = 'Give the goal a name.'; renderSetupStepLifting(); return; }
+      if (!(n > 0)) { f.error = 'Enter a goal above zero.'; renderSetupStepLifting(); return; }
+      a.customGoals.push({ id: genId('goal'), name, kind: f.kind, text: String(f.value) });
+      a.goalForm = null; renderSetupStepLifting();
     });
   }
 
-  // Shown only when the Interests step turned Running on.
-  function renderSetupStepRunning() {
-    const t = setupAnswers.runningGoalType;
+  // Shown only when the Interests step turned Cardio on.
+  function renderSetupStepCardio() {
+    const a = setupAnswers;
+    const rowFor = (def) => {
+      const g = a.cardioGoals[def.id];
+      const on = !!(g && g.on);
+      const mv = setupMv(def);
+      const typical = `${fmtDistance(def.dist)} · ${fmtPace(def.pace)}`;
+      let panel = '';
+      if (on) {
+        const d = cardioDefaults(def);
+        panel = `<div class="pick-panel">
+          ${setupSegHtml(`data-cardio-type="${def.id}"`, `${mv.name} goal type`, [['distance', 'Distance'], ['pace', 'Pace'], ['both', 'Both']], g.type)}
+          ${g.type !== 'pace' ? goalInputHtml(`data-cardio-dist="${def.id}"`, 'Distance goal', Units.distanceUnitLabel(), g.dist == null ? d.dist : g.dist, `${mv.name} distance goal`) : ''}
+          ${g.type !== 'distance' ? `<div class="field"><span class="field-label">Pace goal (min:sec per ${Units.distanceUnitLabel()})</span>
+            <div class="input-pair">
+              <div class="input-unit"><input type="number" step="1" min="0" inputmode="numeric" data-cardio-min="${def.id}" value="${escapeHtml(g.min == null ? d.min : g.min)}" aria-label="${mv.name} pace minutes" /><span class="u">min</span></div>
+              <div class="input-unit"><input type="number" step="1" min="0" max="59" inputmode="numeric" data-cardio-sec="${def.id}" value="${escapeHtml(g.sec == null ? d.sec : g.sec)}" aria-label="${mv.name} pace seconds" /><span class="u">sec</span></div>
+            </div></div>` : ''}
+        </div>`;
+      }
+      const v = on ? setupCardioValues(def, g) : null;
+      const goalText = v ? [v.distanceGoal != null && fmtDistance(v.distanceGoal), v.paceGoal != null && fmtPace(v.paceGoal)].filter(Boolean).join(' · ') : '';
+      return pickRowHtml(`data-cardio-pick="${def.id}"`, mv.icon, mv.name, on ? `Goal ${escapeHtml(goalText)}` : `Typical ${typical}`, on) + panel;
+    };
+    const others = CATALOG.movements.filter((m) => m.kind === 'cardio' && !SETUP_CARDIO.some((d) => d.mv === m.id)).map((m) => m.name);
     document.getElementById('setupContent').innerHTML = `
-      <div class="card form-card">
-        <div class="field">
-          <span class="field-label">Goal by</span>
-          <div class="segmented" id="setupRunGoalType" role="radiogroup" aria-label="Running goal type">
-            <button type="button" data-type-choice="distance" role="radio" aria-checked="${t === 'distance'}">Distance</button>
-            <button type="button" data-type-choice="pace" role="radio" aria-checked="${t === 'pace'}">Pace</button>
-            <button type="button" data-type-choice="both" role="radio" aria-checked="${t === 'both'}">Both</button>
-          </div>
-        </div>
-        ${t !== 'pace' ? `<label class="field"><span class="field-label">Distance goal (${Units.distanceUnitLabel()})</span>
-          <input type="number" step="any" min="0" id="setupRunDistance" value="${escapeHtml(setupAnswers.runningDistance)}" /></label>` : ''}
-        ${t !== 'distance' ? `<label class="field"><span class="field-label">Pace goal (min:sec / ${Units.distanceUnitLabel()})</span>
-          <div class="inline-time-fields">
-            <input type="number" step="1" min="0" inputmode="numeric" id="setupRunPaceMin" value="${escapeHtml(setupAnswers.runningPaceMin)}" placeholder="min" />
-            <input type="number" step="1" min="0" max="59" inputmode="numeric" id="setupRunPaceSec" value="${escapeHtml(setupAnswers.runningPaceSec)}" placeholder="sec" />
-          </div></label>` : ''}
-      </div>`;
-    document.querySelectorAll('#setupRunGoalType button').forEach((b) => b.addEventListener('click', () => {
-      captureSetupStep(); // keep whatever's already typed before the field set changes shape
-      setupAnswers.runningGoalType = b.dataset.typeChoice;
-      renderSetupStepRunning();
+      <div class="card pick-wrap">${SETUP_CARDIO.map(rowFor).join('')}</div>
+      <div class="note-box">${uiIconInfo()}<span>${others.length ? `${others.join(', ').replace(/, ([^,]*)$/, ' and $1')} are in your library too, ready to log without a goal. ` : ''}${setupCardioGoalCount() ? `${setupCardioGoalCount()} goal${setupCardioGoalCount() === 1 ? '' : 's'} will show on Home.` : 'Nothing is ticked, so no cardio goals are set.'}</span></div>`;
+    document.querySelectorAll('#setupContent [data-cardio-pick]').forEach((b) => b.addEventListener('click', () => {
+      captureSetupStep();
+      const id = b.dataset.cardioPick;
+      if (a.cardioGoals[id] && a.cardioGoals[id].on) a.cardioGoals[id].on = false; else a.cardioGoals[id] = Object.assign(newCardioGoal(), a.cardioGoals[id] || {}, { on: true });
+      renderSetupStepCardio();
+    }));
+    document.querySelectorAll('#setupContent [data-cardio-type] button').forEach((b) => b.addEventListener('click', () => {
+      captureSetupStep(); a.cardioGoals[b.parentElement.dataset.cardioType].type = b.dataset.choice; renderSetupStepCardio();
     }));
   }
 
-  // Always the last step, even with Water and Body weight off, since the Insights
-  // toggle lives here. Those two are decided in the Interests step; this asks only for their goals.
-  function renderSetupStepGoals() {
-    const i = setupAnswers.interests;
-    document.getElementById('setupContent').innerHTML = `
-      ${i.water ? `<div class="card form-card">
-        <label class="field"><span class="field-label">Daily water goal (${Units.volumeUnitLabel()})</span>
-          <input type="number" step="any" min="0" id="setupWaterGoal" value="${escapeHtml(setupAnswers.waterGoal || round(Units.mlToDisplay(2000), 0))}" /></label>
-      </div>` : ''}
-      ${i.bodyweight ? `
-      ${setupBoolRowHtml('setupWeightGoalToggle', 'Body weight goal', setupAnswers.weightGoalEnabled)}
-      ${setupAnswers.weightGoalEnabled ? `<div class="card form-card">
-        <label class="field"><span class="field-label">Target weight (${Units.weightUnitLabel()})</span>
-          <input type="number" step="any" min="0" id="setupWeightGoal" value="${escapeHtml(setupAnswers.weightGoalValue)}" /></label>
-      </div>` : ''}` : ''}
-      ${setupBoolRowHtml('setupInsightsToggle', 'Insight calculators (BMI, strength level, pace level)', setupAnswers.insightsEnabled)}
-      <p class="muted-text">General published benchmarks — each can be turned off individually later in Settings → Insights.</p>`;
-    if (i.bodyweight) wireSetupBoolRow('setupWeightGoalToggle', (v) => { captureSetupStep(); setupAnswers.weightGoalEnabled = v; renderSetupStepGoals(); });
-    wireSetupBoolRow('setupInsightsToggle', (v) => { captureSetupStep(); setupAnswers.insightsEnabled = v; renderSetupStepGoals(); });
+  // Shown when Water is on. Mirrors Food: a guide from height and weight, or a number of your own.
+  function setupWaterGuide() {
+    const w = parseFloat(setupAnswers.weight); const h = heightCmFromSetup();
+    if (!(w > 0) || !h) return null;
+    return S.waterTarget(Units.displayToLb(w), h, setupAnswers.waterActivity);
   }
-
-  // Packs offered at setup: Strength and Bodyweight & home go with Lifting, Cardio
-  // only with Running.
-  function setupPacks() {
-    const i = setupAnswers.interests;
-    return CATALOG.packs.filter((pk) => (pk.id === 'running' ? i.running : i.lifting));
+  // Water in the chosen volume unit, with litres alongside for US units.
+  function fmtWaterParts(ml) {
+    return { main: `${round(Units.mlToDisplay(ml), 0).toLocaleString()} ${Units.volumeUnitLabel()}`, alt: state.settings.volumeUnit === 'mL' ? '' : `${round(ml / 1000, 1)} L` };
   }
-
-  function renderSetupStepPacks() {
-    const picked = setupAnswers.packs;
+  function fmtWaterAmount(ml) { const p = fmtWaterParts(ml); return p.alt ? `${p.main} · ${p.alt}` : p.main; }
+  function setupWaterMl() {
+    const a = setupAnswers; const guide = a.waterMode === 'calc' ? setupWaterGuide() : null;
+    const base = guide ? guide.ml : S.DEFAULT_WATER_GOAL_ML;
+    const dflt = String(round(Units.mlToDisplay(base), 0));
+    if (a.waterText == null || a.waterText === dflt) return base;
+    const n = parseFloat(a.waterText);
+    return n > 0 ? Units.displayToMl(n) : base;
+  }
+  function renderSetupStepWater() {
+    const a = setupAnswers; const guide = a.waterMode === 'calc' ? setupWaterGuide() : null;
+    const base = guide ? guide.ml : S.DEFAULT_WATER_GOAL_ML;
+    const text = a.waterText == null ? String(round(Units.mlToDisplay(base), 0)) : a.waterText;
+    const levels = Object.entries(S.WATER_ACTIVITY);
     document.getElementById('setupContent').innerHTML = `
-      <div class="card card-list">${setupPacks().map((pk) => `
-        <div class="setting-row"><span>${escapeHtml(pk.name)}<span class="muted-text">${escapeHtml(pk.description || '')}</span></span>${switchHtml(`data-pack="${pk.id}"`, pk.name, !!picked[pk.id])}</div>`).join('')}
+      <div class="card pad setup-card">
+        <div class="setup-card-head"><span class="setup-card-title">${itemIconHtml('droplets', true)}<span class="lbl">How to set your goal</span></span></div>
+        <div class="segmented segmented-fill" id="setupWaterModeSeg" role="radiogroup" aria-label="Water goal">
+          <button type="button" role="radio" data-mode="calc" aria-checked="${a.waterMode === 'calc'}">Calculator</button>
+          <button type="button" role="radio" data-mode="manual" aria-checked="${a.waterMode === 'manual'}">Manual</button>
+        </div>
+        ${a.waterMode === 'calc' ? `
+          <span class="lbl">Activity</span>
+          <div class="segmented segmented-fill" id="setupWaterActivitySeg" role="radiogroup" aria-label="Activity level">
+            ${levels.map(([k, l]) => `<button type="button" role="radio" data-level="${k}" aria-checked="${a.waterActivity === k}">${l.label}</button>`).join('')}
+          </div>
+          <div class="muted-text">${escapeHtml(S.WATER_ACTIVITY[a.waterActivity].hint)}</div>
+          ${guide ? `<div class="setup-big"><b>${escapeHtml(fmtWaterParts(guide.ml).main)}</b><span class="muted-text">${fmtWaterParts(guide.ml).alt ? `(${fmtWaterParts(guide.ml).alt}) ` : ''}a day</span></div>
+            <div class="why">${uiIconInfo()}<span>Worked out from your body surface area (${guide.bsa} m²) plus ${S.WATER_ACTIVITY[a.waterActivity].addMl ? `${S.WATER_ACTIVITY[a.waterActivity].addMl} mL for activity` : 'nothing extra for activity'}. A starting point: heat, thirst and what you eat all matter.</span></div>`
+            : `<div class="note-box">${uiIconInfo()}<span>Needs your height and weight from the About you step. Until then it starts at ${escapeHtml(fmtWaterAmount(S.DEFAULT_WATER_GOAL_ML))}.</span></div>`}` : `
+          <div class="why">${uiIconInfo()}<span>Starts at ${escapeHtml(fmtWaterAmount(S.DEFAULT_WATER_GOAL_ML))}, a common rule of thumb. Type any number you like.</span></div>`}
+        ${goalInputHtml('id="setupWaterGoal"', a.waterMode === 'calc' && guide ? 'Your goal (adjust if you like)' : 'Daily goal', Units.volumeUnitLabel(), text, 'Daily water goal')}
       </div>`;
-    document.querySelectorAll('#setupContent [data-pack]').forEach((btn) => btn.addEventListener('click', () => {
-      picked[btn.dataset.pack] = !picked[btn.dataset.pack];
-      btn.setAttribute('aria-checked', String(!!picked[btn.dataset.pack]));
+    document.querySelectorAll('#setupWaterModeSeg button').forEach((b) => b.addEventListener('click', () => {
+      captureSetupStep(); a.waterMode = b.dataset.mode; a.waterText = null; renderSetupStepWater();
+    }));
+    document.querySelectorAll('#setupWaterActivitySeg button').forEach((b) => b.addEventListener('click', () => {
+      captureSetupStep(); a.waterActivity = b.dataset.level; a.waterText = null; renderSetupStepWater();
     }));
   }
 
@@ -6062,12 +6458,13 @@
     const preview = m === 'calc' ? setupCalcPreview() : null;
     document.getElementById('setupContent').innerHTML = `
       ${starters.length ? `<div class="card pad setup-card">
-        <div class="setting-row"><span><b>Save common foods</b><span class="muted-text">${starters.length} everyday foods ready to tap</span></span>${switchHtml('id="setupCommonFoods"', 'Save common foods', a.commonFoods)}</div>
+        <div class="setup-card-head"><span class="setup-card-title">${itemIconHtml('apple', true)}<span class="lbl">Save common foods</span></span>${switchHtml('id="setupCommonFoods"', 'Save common foods', a.commonFoods)}</div>
+        <span class="muted-text">${starters.length} everyday foods ready to tap. One tap logs a typical serving.</span>
         <div class="mini-chips">${starters.slice(0, 8).map((f) => `<span>${escapeHtml(f.name.split(',')[0])}</span>`).join('')}<span>+${starters.length - 8} more</span></div>
         <div class="note-box">${uiIconInfo()}<span>Typical values for one serving, all editable. Brand and restaurant items are not included. Turn this off to start with an empty list.</span></div>
       </div>` : ''}
       <div class="card pad setup-card">
-        <span class="lbl">Daily calorie target</span>
+        <div class="setup-card-head"><span class="setup-card-title">${itemIconHtml('flame', true)}<span class="lbl">Daily calorie target</span></span></div>
         <div class="segmented segmented-fill" id="setupCalorieSeg" role="radiogroup" aria-label="Calorie target">
           <button type="button" role="radio" data-mode="calc" aria-checked="${m === 'calc'}">Calculator</button>
           <button type="button" role="radio" data-mode="manual" aria-checked="${m === 'manual'}">Manual</button>
@@ -6086,7 +6483,7 @@
         ${m === 'none' ? '<div class="note-box">' + uiIconInfo() + '<span>No ring or target on Home. You see plain totals for the day.</span></div>' : ''}
       </div>
       <div class="card pad setup-card">
-        <span class="lbl">Nutrients to track</span>
+        <div class="setup-card-head"><span class="setup-card-title">${itemIconHtml('utensils', true)}<span class="lbl">Nutrients to track</span></span></div>
         <div class="chip-picker" id="setupMacroChips" role="group" aria-label="Nutrients to track">
           <button type="button" class="pick-chip is-on is-fixed" disabled>${CHECK_ICON_SVG}Calories</button>
           ${['protein', 'carbs', 'fat', 'sugar', 'sodium', 'caffeine'].map((k) => `<button type="button" class="pick-chip${a.macros[k] ? ' is-on' : ''}" data-macro="${k}" aria-pressed="${!!a.macros[k]}">${a.macros[k] ? CHECK_ICON_SVG : ''}${MACRO_LABELS[k]}</button>`).join('')}
@@ -6114,28 +6511,71 @@
       if (ftEl) setupAnswers.heightFt = ftEl.value;
       const inEl = document.getElementById('setupHeightIn');
       if (inEl) setupAnswers.heightIn = inEl.value;
-      setupAnswers.weight = document.getElementById('setupWeight').value;
-      setupAnswers.age = document.getElementById('setupAge').value;
-    } else if (key === 'running') {
-      const distEl = document.getElementById('setupRunDistance');
-      if (distEl) setupAnswers.runningDistance = distEl.value;
-      const minEl = document.getElementById('setupRunPaceMin');
-      if (minEl) setupAnswers.runningPaceMin = minEl.value;
-      const secEl = document.getElementById('setupRunPaceSec');
-      if (secEl) setupAnswers.runningPaceSec = secEl.value;
+      const weightEl = document.getElementById('setupWeight');
+      if (weightEl) setupAnswers.weight = weightEl.value;
+      const ageEl = document.getElementById('setupAge');
+      if (ageEl) setupAnswers.age = ageEl.value;
+      const goalEl = document.getElementById('setupWeightGoal');
+      if (goalEl) setupAnswers.weightGoalValue = goalEl.value;
+    } else if (key === 'lifting') {
+      document.querySelectorAll('#setupContent [data-goal-input]').forEach((el) => {
+        const g = setupAnswers.liftGoals[el.dataset.goalInput]; if (g) g.text = el.value;
+      });
+      document.querySelectorAll('#setupContent [data-custom-input]').forEach((el) => {
+        const c = setupAnswers.customGoals.find((x) => x.id === el.dataset.customInput); if (c) c.text = el.value;
+      });
+      const f = setupAnswers.goalForm;
+      if (f) {
+        const nameEl = document.getElementById('goalFormName'); if (nameEl) f.name = nameEl.value;
+        const valEl = document.getElementById('goalFormValue'); if (valEl) f.value = valEl.value;
+      }
+    } else if (key === 'cardio') {
+      ['dist', 'min', 'sec'].forEach((k) => document.querySelectorAll(`#setupContent [data-cardio-${k}]`).forEach((el) => {
+        const g = setupAnswers.cardioGoals[el.dataset[`cardio${k[0].toUpperCase()}${k.slice(1)}`]]; if (g) g[k] = el.value;
+      }));
+    } else if (key === 'water') {
+      const waterEl = document.getElementById('setupWaterGoal');
+      if (waterEl) setupAnswers.waterText = waterEl.value;
+    } else if (key === 'habits') {
+      const f = setupAnswers.habitForm;
+      const nameEl = document.getElementById('habitFormName');
+      if (f && nameEl) f.name = nameEl.value;
     } else if (key === 'food') {
       const calEl = document.getElementById('setupCalories');
       if (calEl) setupAnswers.calorieManual = calEl.value;
-    } else if (key === 'goals') {
-      const waterEl = document.getElementById('setupWaterGoal');
-      if (waterEl) setupAnswers.waterGoal = waterEl.value;
-      const goalEl = document.getElementById('setupWeightGoal');
-      if (goalEl) setupAnswers.weightGoalValue = goalEl.value;
     }
+  }
+
+  // A goal or habit typed into an open "Add your own" form but never confirmed is added when the
+  // person moves on, so Continue never throws it away.
+  function commitOpenSetupForms() {
+    const a = setupAnswers;
+    if (a.goalForm && a.goalForm.name.trim() && parseFloat(a.goalForm.value) > 0) {
+      a.customGoals.push({ id: genId('goal'), name: a.goalForm.name.trim(), kind: a.goalForm.kind, text: String(a.goalForm.value) });
+    }
+    if (a.habitForm && a.habitForm.name.trim()) a.customHabits.push({ id: genId('habit'), name: a.habitForm.name.trim(), repeat: a.habitForm.repeat });
+    a.goalForm = null; a.habitForm = null;
   }
 
   function goSetupNext() {
     captureSetupStep();
+    commitOpenSetupForms();
+    const seq = setupStepSequence();
+    if (setupStepIndex === seq.length - 1) { finishSetup(); return; }
+    setupStepIndex++;
+    renderSetupStep();
+  }
+  // "Not now" on About clears its answers; "Skip habits" clears the ticks. Either way the
+  // wizard moves on (or finishes, for habits).
+  function skipSetupStep() {
+    const key = setupStepSequence()[setupStepIndex];
+    const a = setupAnswers;
+    if (key === 'about') {
+      a.weight = ''; a.age = ''; a.sex = ''; a.heightCm = ''; a.heightFt = ''; a.heightIn = '';
+      a.skipWeight = false; a.skipBody = false;
+    } else if (key === 'habits') {
+      a.habits = {}; a.customHabits = []; a.habitForm = null;
+    }
     const seq = setupStepSequence();
     if (setupStepIndex === seq.length - 1) { finishSetup(); return; }
     setupStepIndex++;
@@ -6169,51 +6609,44 @@
     const sex = setupAnswers.sex || null;
     const i = setupAnswers.interests;
 
+    // Goals ticked on the Lifting and Cardio steps become the "goal" and "daily" exercises. Every
+    // other catalog movement for a ticked interest is added after state.exercises is set (below),
+    // so the whole library is there from the start.
     const exercises = [];
+    const linkedTo = (mv) => ({ catalogId: mv.id, group: mv.group, ...(mv.defaultEquipment && { equipment: mv.defaultEquipment }), ...(ITEM_ICONS[mv.icon] && { icon: mv.icon }) });
     if (i.lifting) {
-      ['bench', 'squat', 'deadlift'].forEach((key) => {
-        const lift = setupAnswers.lifts[key];
-        if (!lift.enabled) return;
-        const usingStandard = lift.mode === 'standard' && weightLb && sex;
-        const goal = usingStandard ? computeStandardGoal(key, lift.tier, weightLb, sex) : PLATE_GOALS[key];
-        exercises.push({
-          id: `ex_${key}`, name: LIFT_TYPE_LABELS[key], kind: 'weight', bodyRegion: key === 'bench' ? 'upper' : 'lower', section: 'goal',
-          goal, liftType: key, goalMode: usingStandard ? 'standard' : 'fixed', goalTier: usingStandard ? lift.tier : null,
-          archived: false, createdAt: now,
-          catalogId: key === 'bench' ? 'cat_mv_bench_press' : `cat_mv_${key}`, equipment: 'barbell',
-        });
+      SETUP_LIFTS.forEach((def) => {
+        const g = setupAnswers.liftGoals[def.id]; if (!g || !g.on) return;
+        const mv = setupMv(def);
+        if (isWeightGoal(def)) {
+          const usingStandard = def.lift && g.mode === 'standard' && weightLb && sex;
+          exercises.push({
+            id: def.lift ? `ex_${def.lift}` : genId('ex'), name: mv.name, kind: 'weight', bodyRegion: guessBodyRegion(mv.name), section: 'goal',
+            goal: usingStandard ? computeStandardGoal(def.lift, g.tier, weightLb, sex) : setupLiftValue(def, g),
+            liftType: def.lift || null, goalMode: usingStandard ? 'standard' : 'fixed', goalTier: usingStandard ? g.tier : null,
+            archived: false, createdAt: now, ...linkedTo(mv),
+          });
+        } else {
+          exercises.push({
+            id: genId('ex'), name: mv.name, kind: 'reps', section: 'daily', goal: setupLiftValue(def, g), goalMode: 'fixed', goalTier: null,
+            archived: false, createdAt: now, ...(mv.unit && { unit: mv.unit }), ...linkedTo(mv),
+          });
+        }
       });
-      // The daily bodyweight exercises follow the Lifting interest.
-      exercises.push(
-        { id: 'ex_pushups', name: 'Push-ups', kind: 'reps', section: 'daily', goal: 50, archived: false, createdAt: now },
-        { id: 'ex_bwsquats', name: 'Bodyweight Squats', kind: 'reps', section: 'daily', goal: 50, archived: false, createdAt: now },
-        { id: 'ex_pullups', name: 'Pull-ups', kind: 'reps', section: 'daily', goal: 15, archived: false, createdAt: now },
-      );
+      setupAnswers.customGoals.forEach((c) => {
+        const goal = setupCustomValue(c); if (goal == null) return;
+        exercises.push(c.kind === 'weight'
+          ? { id: genId('ex'), name: c.name, kind: 'weight', bodyRegion: guessBodyRegion(c.name), section: 'goal', goal, liftType: null, goalMode: 'fixed', goalTier: null, archived: false, createdAt: now }
+          : { id: genId('ex'), name: c.name, kind: 'reps', section: 'daily', goal, goalMode: 'fixed', goalTier: null, archived: false, createdAt: now });
+      });
     }
     if (i.running) {
-      const t = setupAnswers.runningGoalType;
-      const distanceGoal = t !== 'pace' ? Units.displayToMi(parseFloat(setupAnswers.runningDistance) || 5) : null;
-      const paceSec = (parseInt(setupAnswers.runningPaceMin, 10) || 0) * 60 + (parseInt(setupAnswers.runningPaceSec, 10) || 0);
-      const paceGoal = t !== 'distance' && paceSec > 0 ? Units.displaySecPerUnitToSecPerMi(paceSec) : null;
-      exercises.push({ id: 'ex_running', name: 'Running', kind: 'cardio', section: 'goal', distanceGoal, paceGoal, goal: null, archived: false, createdAt: now });
-    }
-
-    {
-      setupPacks().filter((pk) => setupAnswers.packs[pk.id]).forEach((pk) => {
-        CATALOG.movements.filter((mv) => mv.packs.includes(pk.id)).forEach((mv) => {
-          const eq = mv.equipment.length ? mv.defaultEquipment : null;
-          const have = exercises.find((e) => e.liftType && e.liftType === mv.liftType && mv.liftType) || exercises.find((e) => normName(e.name) === normName(mv.name)) || exercises.find((e) => e.catalogId === mv.id && (e.equipment || null) === eq);
-          if (have) { if (!have.catalogId) { have.catalogId = mv.id; if (eq) have.equipment = eq; } return; }
-          const ex = { id: genId('ex'), name: mv.name, kind: mv.kind, section: 'accessory', group: mv.group, goal: null, goalMode: 'fixed', goalTier: null, archived: false, createdAt: now, catalogId: mv.id };
-          if (eq) ex.equipment = eq;
-          if (mv.kind === 'weight') { ex.bodyRegion = guessBodyRegion(mv.name); ex.liftType = mv.liftType || null; }
-          if (mv.kind === 'cardio') { ex.distanceGoal = null; ex.paceGoal = null; }
-          if (mv.unit) ex.unit = mv.unit;
-          if (ITEM_ICONS[mv.icon]) ex.icon = mv.icon;
-          exercises.push(ex);
-        });
+      SETUP_CARDIO.forEach((def) => {
+        const g = setupAnswers.cardioGoals[def.id]; if (!g || !g.on) return;
+        const mv = setupMv(def);
+        const v = setupCardioValues(def, g);
+        exercises.push({ id: genId('ex'), name: mv.name, kind: 'cardio', section: 'goal', distanceGoal: v.distanceGoal, paceGoal: v.paceGoal, goal: null, goalMode: 'fixed', goalTier: null, archived: false, createdAt: now, ...linkedTo(mv) });
       });
-      state.settings.catalogPacksSeen = setupPacks().filter((pk) => setupAnswers.packs[pk.id]).map((pk) => pk.id);
     }
 
     const trackers = defaultTrackers();
@@ -6227,7 +6660,7 @@
       // Seeded even if the Body weight interest is off: BMI and strength standards
       // read state.measurements regardless of the tracker's archived flag.
       measurements.push({ id: genId('meas'), trackerId: 'trk_weight', date: todayISO(), value: weightLb, note: null });
-      if (i.bodyweight && setupAnswers.weightGoalEnabled && setupAnswers.weightGoalValue !== '') {
+      if (i.bodyweight && parseFloat(setupAnswers.weightGoalValue) > 0) {
         const targetLb = Units.displayToLb(parseFloat(setupAnswers.weightGoalValue));
         if (!Number.isNaN(targetLb)) {
           const weightTracker = trackers.find((tr) => tr.id === 'trk_weight');
@@ -6241,11 +6674,7 @@
     // Water off reuses the same "zero cups" shape the always-present cup UI
     // already treats as off, rather than a separate flag.
     const water = i.water ? defaultWater() : { goalMl: null, cups: [] };
-    if (i.water) {
-      water.goalMl = null;
-      const rawGoal = parseFloat(setupAnswers.waterGoal);
-      water.goalMl = (!Number.isNaN(rawGoal) && rawGoal > 0) ? Units.displayToMl(rawGoal) : defaultWater().goalMl;
-    }
+    if (i.water) water.goalMl = Math.round(setupWaterMl());
 
     const rawAge = parseInt(setupAnswers.age, 10);
     state.profile.age = (!Number.isNaN(rawAge) && rawAge >= MIN_AGE && rawAge <= MAX_AGE) ? rawAge : null;
@@ -6253,13 +6682,23 @@
     state.profile.sex = sex;
     state.exercises = exercises;
     state.entries = [];
+    // Habits ticked on the last step: ordinary exercises of kind 'habit', same as Add from catalog.
+    if (i.habits) {
+      CATALOG.habits.filter((h) => setupAnswers.habits[h.id]).forEach(addCatalogHabit);
+      setupAnswers.customHabits.forEach((c) => state.exercises.push({
+        id: genId('ex'), name: c.name, kind: 'habit', section: 'daily', group: 'other', goal: 1, repeat: c.repeat,
+        goalMode: 'fixed', goalTier: null, archived: false, createdAt: now,
+      }));
+    }
+    // The exercise library: every movement for a ticked interest, on its usual equipment. Goals
+    // chosen above are already in the list and are linked, not duplicated.
+    if (i.lifting) CATALOG.movements.filter((m) => m.kind !== 'cardio').forEach((m) => addCatalogMovement(m, m.defaultEquipment ? [m.defaultEquipment] : []));
+    if (i.running) CATALOG.movements.filter((m) => m.kind === 'cardio').forEach((m) => addCatalogMovement(m, []));
+    state.settings.catalogPacksSeen = CATALOG.packs.filter((pk) => (pk.id === 'running' ? i.running : i.lifting)).map((pk) => pk.id);
     state.trackers = trackers;
     state.measurements = measurements;
     state.water = water;
     state.waterEntries = [];
-    state.settings.showWeightInsights = setupAnswers.insightsEnabled;
-    state.settings.showStrengthLevel = setupAnswers.insightsEnabled;
-    state.settings.showPaceLevel = setupAnswers.insightsEnabled;
     // Starting domain switches come from the interests: Lifting, Running and Habits
     // each have their own, Body covers Body weight and Sleep, Water and Food map 1:1.
     state.settings.trackWorkout = i.lifting;
@@ -6360,6 +6799,7 @@
   function wireEvents() {
     document.getElementById('setupNextBtn').addEventListener('click', goSetupNext);
     document.getElementById('setupBackBtn').addEventListener('click', goSetupBack);
+    document.getElementById('setupSkipBtn').addEventListener('click', skipSetupStep);
 
     document.getElementById('tabbar').addEventListener('click', (ev) => {
       const btn = ev.target.closest('.tab');
@@ -6444,8 +6884,10 @@
     Object.entries(settingSwitches).forEach(([id, key]) => {
       document.getElementById(id).addEventListener('click', () => {
         state.settings[key] = !state.settings[key];
+        const added = state.settings[key] ? autoImportFor(key) : '';
         if (!save()) return;
         renderAll();
+        if (added) toast(added);
       });
     });
 
@@ -6521,6 +6963,24 @@
       renderAll();
     });
 
+    const profilePanels = { height: 'profilePanelHeight', age: 'profilePanelAge', sex: 'profilePanelSex' };
+    const closeProfilePanels = () => {
+      Object.values(profilePanels).forEach((id) => { document.getElementById(id).hidden = true; });
+      document.querySelectorAll('[data-profile-row]').forEach((r) => r.setAttribute('aria-expanded', 'false'));
+      document.getElementById('profileSaveRow').hidden = true;
+    };
+    document.getElementById('profileList').addEventListener('click', (ev) => {
+      const row = ev.target.closest('[data-profile-row]'); if (!row) return;
+      const key = row.dataset.profileRow;
+      const panel = document.getElementById(profilePanels[key]);
+      const opening = panel.hidden;
+      closeProfilePanels();
+      if (opening) {
+        panel.hidden = false;
+        row.setAttribute('aria-expanded', 'true');
+        document.getElementById('profileSaveRow').hidden = key === 'sex';
+      }
+    });
     document.getElementById('profileSexSegmented').addEventListener('click', (ev) => {
       const btn = ev.target.closest('button'); if (!btn) return;
       state.profile.sex = btn.dataset.sexChoice || null;
@@ -6564,6 +7024,7 @@
       state.profile.age = age;
       if (!save()) return;
       toast('Profile saved');
+      closeProfilePanels();
       // renderAll() refreshes the calculator preview in Manage -> Food. Do not
       // re-apply into macroGoals here: only "Apply to daily goals" does that, so a
       // Profile edit never overwrites goals.

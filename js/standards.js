@@ -114,6 +114,33 @@
   const DV_OVER_FLAGS = ['sodium', 'caffeine'];
   const DEFAULT_WATER_GOAL_ML = 2000; // app assumption; see REFERENCES
 
+  /* ---- Water guide (setup) ---------------------------------------------- */
+
+  // Drinking-water guide from body size. Body surface area (Mosteller: sqrt(cm x kg / 3600))
+  // times ML_PER_M2 gives a baseline; an activity level then adds to it. 1,500 ml per m2
+  // reproduces the NASEM beverage figures at the reference adults (about 3.0 L for a
+  // 1.77 m, 70 kg man and 2.2 L for a 1.63 m, 57 kg woman), so one sex-free formula covers both.
+  // The activity add-ons are app assumptions (sweat losses run about 0.5 to 1 L per hour of
+  // hard exercise). The result is rounded to 50 ml and kept between 1,000 and 5,000 ml.
+  const ML_PER_M2 = 1500;
+  const WATER_ACTIVITY = {
+    low:      { label: 'Light',    hint: 'Mostly sitting, little exercise.',   addMl: 0 },
+    moderate: { label: 'Moderate', hint: 'A few workouts a week.',             addMl: 350 },
+    high:     { label: 'Heavy',    hint: 'Most days, or very sweaty sessions.', addMl: 700 },
+  };
+  const WATER_MIN_ML = 1000;
+  const WATER_MAX_ML = 5000;
+  function bodySurfaceArea(weightLb, heightCm) {
+    return Math.sqrt((heightCm * weightLb * LB_PER_KG) / 3600);
+  }
+  function waterTarget(weightLb, heightCm, activity) {
+    const level = WATER_ACTIVITY[activity] || WATER_ACTIVITY.low;
+    const bsa = bodySurfaceArea(weightLb, heightCm);
+    const raw = bsa * ML_PER_M2 + level.addMl;
+    const ml = Math.min(WATER_MAX_ML, Math.max(WATER_MIN_ML, Math.round(raw / 50) * 50));
+    return { ml, bsa: Math.round(bsa * 100) / 100 };
+  }
+
   /* ---- Streak ----------------------------------------------------------- */
 
   const STREAK_RULE = 'A day counts when you log anything in a section you track: a workout or habit, food, water or a body entry.';
@@ -158,9 +185,9 @@
       alt: { label: 'FDA caffeine guidance', url: 'https://www.fda.gov/consumers/consumer-updates/spilling-beans-how-much-caffeine-too-much' },
       caveat: 'General values, not personalized.' },
     { id: 'water', title: 'Water goal', kind: 'assumption',
-      summary: 'New installs start at 2,000 ml (about 68 fl oz) a day. Change it in Manage > Water.',
+      summary: 'The setup guide takes your body surface area (Mosteller: square root of height in cm times weight in kg, divided by 3,600) times 1,500 ml, then adds 0, 350 or 700 ml for the activity level you pick, rounded to 50 ml. Anyone who skips the guide starts at 2,000 ml (about 68 fl oz) a day. Change it any time in Manage > Water.',
       source: { label: 'NASEM Dietary Reference Intakes for water', url: 'https://doi.org/10.17226/10925' },
-      caveat: 'The 2,000 ml starting point is the app\'s own. Total water needs include food and vary with size, heat and activity.' },
+      caveat: 'The 1,500 ml per m2 scale matches the NASEM beverage figures for reference adults; the activity add-ons and the 2,000 ml default are the app\'s own. Total water needs include food and vary with heat, health and pregnancy.' },
   ];
 
   const S = {
@@ -173,6 +200,7 @@
     SLEEP, sleepCategory,
     ACTIVITY_LEVELS, GOAL_ADJUST, CALORIE_FLOOR, restingEnergy, nutritionTargets,
     DAILY_VALUES, DV_OVER_FLAGS, DEFAULT_WATER_GOAL_ML,
+    ML_PER_M2, WATER_ACTIVITY, WATER_MIN_ML, WATER_MAX_ML, bodySurfaceArea, waterTarget,
     STREAK_RULE, REFERENCES,
   };
   Object.freeze(S);
