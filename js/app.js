@@ -34,7 +34,11 @@
   const STORAGE_KEY = 'liftlog.v1';
 
   const { SCHEMA_VERSION, HOME_SECTION_DEFAULTS, guessBodyRegion } = window.FitMigrations;
-  const runMigrations = (data) => window.FitMigrations.runMigrations(data, { defaultTrackers, defaultWater });
+  // Fresh copies every time, so nothing is shared with DEFAULT_SETTINGS.
+  const makeDefaultSettings = () => JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
+  const upgradeData = (raw) => window.FitMigrations.upgrade(raw, {
+    defaultSettings: makeDefaultSettings, defaultProfile, defaultTrackers, defaultWater, defaultFood,
+  });
 
   /* ============================== Defaults ============================== */
 
@@ -118,7 +122,7 @@
     const now = new Date().toISOString();
     return {
       version: SCHEMA_VERSION,
-      settings: Object.assign({}, DEFAULT_SETTINGS, { catalogPacksSeen: [] }),
+      settings: makeDefaultSettings(),
       profile: defaultProfile(),
       exercises: [
         { id: 'ex_bench', name: 'Bench Press', kind: 'weight', bodyRegion: 'upper', section: 'goal', goal: PLATE_GOALS.bench, liftType: 'bench', goalMode: 'fixed', goalTier: null, archived: false, createdAt: now },
@@ -161,9 +165,12 @@
         return;
       }
       const parsed = JSON.parse(raw);
-      if (!parsed || !Array.isArray(parsed.exercises) || !Array.isArray(parsed.entries)) throw new Error('bad shape');
-      parsed.settings = Object.assign({}, DEFAULT_SETTINGS, parsed.settings || {});
-      state = runMigrations(parsed);
+      // Recognisable as Fit Log data (missing sections are filled in by upgradeData()); anything
+      // else goes to the recovery screen instead of being silently replaced.
+      const looksLikeData = parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+        && (Array.isArray(parsed.exercises) || Array.isArray(parsed.entries) || typeof parsed.version === 'number');
+      if (!looksLikeData) throw new Error('bad shape');
+      state = upgradeData(parsed);
       save(); // persist the migrated shape once, so this doesn't re-run every load
     } catch (e) {
       // Saved data exists but could not be parsed or migrated. Do not overwrite it
@@ -196,7 +203,7 @@
   /* ============================== Unit helpers ============================== */
 
   const {
-    LB_PER_KG, KM_PER_MI, CM_PER_IN, ML_PER_FLOZ, MIN_AGE, MAX_AGE, MIN_HEIGHT_CM, MAX_HEIGHT_CM,
+    LB_PER_KG, MIN_AGE, MAX_AGE, MIN_HEIGHT_CM, MAX_HEIGHT_CM,
     Units, round, cmToFtIn, fmtWeight, fmtReps, isTimed, fmtHold, fmtCount, fmtDistance, fmtSecShort,
     fmtPace, fmtLength, fmtVolume, fmtDuration, localDateISO, todayISO, fmtDateShort,
   } = window.FitUnits.create(() => state.settings);
@@ -209,7 +216,6 @@
   const F = window.FitFeatures;
   const habitsTracked = () => F.habitsTracked(state.settings);
   const cardioTracked = () => F.cardioTracked(state.settings);
-  const isHabitLike = F.isHabitLike;
   function activeExercises() { return state.exercises.filter((e) => F.exerciseTracked(state.settings, e)); }
   function exerciseById(id) { return state.exercises.find((e) => e.id === id); }
   function entriesFor(exId) { return state.entries.filter((e) => e.exerciseId === exId); }
@@ -734,7 +740,6 @@
   // Sleep is a per-night reading, so it is summarised over recent nights
   // (sleepInsights()) rather than trended like weight.
   const SLEEP_TRACKER_ID = 'trk_sleep';
-  const sleepHoursCategory = (hours) => S.sleepCategory(hours).label;
 
   // `window`: last 7 calendar nights, labelled once 3+ are logged. `recent`:
   // last 7 logged nights. The maths is in js/calc.js.
@@ -829,11 +834,6 @@
 
   // Every tracked macro in MACRO_KEYS order: what the log form and totals render.
   function trackedMacroKeys() { return MACRO_KEYS.filter(macroTracked); }
-
-  // Fields that currently have a daily goal turned on, in MACRO_KEYS order.
-  function macroGoalKeys() {
-    return MACRO_KEYS.filter((k) => macroGoalInfo(k).enabled && macroGoalInfo(k).goal != null);
-  }
 
   // ---- Nutrition calculator (Manage -> Food) ----
   // Estimates daily calories and protein from Profile, body weight, activity
@@ -994,8 +994,17 @@
   let exitWarningArmed = false;
   let exitWarningTimer = null;
 
+  let suppressTimer = null;
   function navPop() {
+    // A back() is already in flight (history.state does not change until it lands), so a
+    // second request in the same tick, e.g. confirmDialog closing and then its callback
+    // closing again, would step back twice and land on Dashboard. Ignore it.
+    if (suppressNextPopHandling) return;
     suppressNextPopHandling = true;
+    // Safety net: if the browser never fires popstate (nothing to go back to), don't leave
+    // the flag set and swallow the user's next real Back press.
+    clearTimeout(suppressTimer);
+    suppressTimer = setTimeout(() => { suppressNextPopHandling = false; }, 600);
     history.back();
   }
   function navPushModal() {
@@ -1019,7 +1028,7 @@
   }
 
   window.addEventListener('popstate', () => {
-    if (suppressNextPopHandling) { suppressNextPopHandling = false; return; }
+    if (suppressNextPopHandling) { suppressNextPopHandling = false; clearTimeout(suppressTimer); return; }
     handlingPopState = true;
     try {
       if (!modalRoot().hidden) { closeModal(); return; }
@@ -1037,6 +1046,23 @@
     } finally {
       handlingPopState = false;
     }
+  });
+
+  // Arrow keys move between the options of a role="radiogroup" and select the one reached, as
+  // native radio buttons do. Every segmented control and chip row in the app is built this way.
+  document.addEventListener('keydown', (ev) => {
+    if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(ev.key)) return;
+    const radio = ev.target.closest && ev.target.closest('[role="radio"]');
+    const group = radio && radio.closest('[role="radiogroup"]');
+    if (!group) return;
+    const items = Array.from(group.querySelectorAll('[role="radio"]:not([disabled])')).filter((el) => el.offsetParent !== null);
+    const at = items.indexOf(radio);
+    if (at < 0 || items.length < 2) return;
+    const step = ev.key === 'ArrowLeft' || ev.key === 'ArrowUp' ? -1 : 1;
+    const next = items[(at + step + items.length) % items.length];
+    ev.preventDefault();
+    next.focus();
+    next.click();
   });
 
   // Escape closes; Tab and Shift+Tab stay inside the sheet.
@@ -1062,6 +1088,10 @@
     sheet.classList.toggle('is-detail-sheet', tall);
     sheet.classList.toggle('is-split-sheet', split);
     sheet.innerHTML = `<div class="modal-handle"></div>${html}`;
+    // Icon-only close buttons need a name for screen readers, and a bare <button> would
+    // default to type=submit. Done here once instead of on every template.
+    sheet.querySelectorAll('.modal-close:not([aria-label])').forEach((b) => b.setAttribute('aria-label', 'Close'));
+    sheet.querySelectorAll('button:not([type])').forEach((b) => { b.type = 'button'; });
     // Name the dialog by its <h2> title.
     const heading = sheet.querySelector('h2');
     if (heading) { heading.id = 'modalTitle'; sheet.setAttribute('aria-labelledby', 'modalTitle'); }
@@ -1126,6 +1156,7 @@
     handle.addEventListener('pointercancel', endDrag);
   }
 
+  // The dialog closes itself before running onConfirm: callbacks must not call closeModal().
   function confirmDialog(title, body, confirmLabel, onConfirm, danger) {
     openModal(`
       <div class="modal-title-row"><h2>${escapeHtml(title)}</h2><button class="modal-close" data-action="close-modal">${CLOSE_ICON_SVG}</button></div>
@@ -1177,6 +1208,27 @@
     el.querySelectorAll('.chip-option').forEach((b) => { b.classList.remove('is-active'); b.setAttribute('aria-checked', 'false'); });
   }
 
+  // The same ceilings the backup validator enforces. The forms apply them too, so anything the
+  // app lets you save can also be exported and imported back (a 99999999 fl oz typo would
+  // otherwise make your own backup unimportable).
+  const LIMITS = window.FitBackup.LIMITS;
+  const tooBigWater = (ml) => ml > LIMITS.waterMl;
+  // Reads a date input; a blank one falls back, an impossible or far-future one is refused
+  // (the backup validator would reject it on import). Returns null after showing the reason.
+  function readDate(id, fallback) {
+    const v = document.getElementById(id).value || fallback;
+    if (!window.FitBackup.validDate(v, todayISO())) { toast('Pick a valid date, no more than a day or two ahead.'); return null; }
+    return v;
+  }
+  // A tracker value in storage units (lb, cm, hours) that makes no sense, or null when fine.
+  function measurementError(tracker, canon) {
+    if (!tracker || Number.isNaN(canon)) return null;
+    if (tracker.kind === 'sleep' && (canon < 0 || canon > 24)) return 'Sleep must be between 0 and 24 hours.';
+    if (tracker.unitKind === 'weight' && (canon <= 0 || canon > LIMITS.weightLb)) return 'That weight is out of range. Check the number and unit.';
+    if (tracker.unitKind === 'length' && (canon <= 0 || canon > 1000)) return 'That length is out of range. Check the number and unit.';
+    return null;
+  }
+  const WATER_TOO_BIG = 'That amount is too large to be right. Check the number and unit.';
   function escapeHtml(s) {
     return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   }
@@ -1186,6 +1238,17 @@
   // Column labels show only above the first set row. Later rows keep them in the
   // markup, hidden by CSS (`.set-row:not(:first-child) .field-label`), so screen
   // readers still announce them.
+  /* Pre-filled number fields show a rounded display value (135 lb -> 61.23 kg). Saving an
+     untouched field must not turn that rounded number back into a slightly different stored
+     value (61.23 kg -> 134.99 lb), so such fields carry the stored canonical value in
+     data-canon and fieldCanon() returns it while the field still equals its initial value. */
+  const canonAttr = (canon) => (canon == null ? '' : ` data-canon="${canon}"`);
+  function fieldCanon(el, toCanon) {
+    const v = parseFloat(el.value);
+    if (Number.isNaN(v)) return v;
+    if (el.dataset.canon !== undefined && el.value === el.defaultValue) return Number(el.dataset.canon);
+    return toCanon(v);
+  }
   const setRowKind = (ex) => (isTimed(ex) ? 'timed' : ex.kind);
   function setRowHtml(kind, idx, set) {
     set = set || {};
@@ -1195,7 +1258,7 @@
       return `
         <div class="set-row set-row-3" data-set-idx="${idx}" data-primary="${set.primary ? '1' : '0'}">
           <label class="field"><span class="field-label">Weight (${Units.weightUnitLabel()})</span>
-            <input type="number" step="any" inputmode="decimal" class="set-weight" value="${w}" placeholder="0" /></label>
+            <input type="number" step="any" inputmode="decimal" class="set-weight" value="${w}"${canonAttr(set.weight)} placeholder="0" /></label>
           <label class="field"><span class="field-label">Reps</span>
             <input type="number" step="1" min="1" inputmode="numeric" class="set-reps" value="${set.reps ?? ''}" placeholder="0" /></label>
           <label class="field"><span class="field-label">RPE</span>
@@ -1211,7 +1274,7 @@
         <label class="field"><span class="field-label">${timed ? 'Time (sec)' : 'Reps'}</span>
           <input type="number" step="1" min="1" inputmode="numeric" class="set-reps" value="${set.reps ?? ''}" placeholder="0" /></label>
         <label class="field"><span class="field-label">Added wt (${Units.weightUnitLabel()})</span>
-          <input type="number" step="any" inputmode="decimal" class="set-addedweight" value="${aw}" placeholder="opt." /></label>
+          <input type="number" step="any" inputmode="decimal" class="set-addedweight" value="${aw}"${canonAttr(set.addedWeight || null)} placeholder="opt." /></label>
         <label class="field"><span class="field-label">RPE</span>
           <input type="number" step="0.5" min="1" max="10" inputmode="decimal" class="set-rpe" value="${set.rpe ?? ''}" placeholder="opt." /></label>
         <button type="button" class="set-row-remove" data-action="remove-set" aria-label="Remove set">${CLOSE_ICON_SVG}</button>
@@ -1227,7 +1290,7 @@
     return `
       <div class="set-row" data-cardio="1">
         <label class="field"><span class="field-label">Distance (${Units.distanceUnitLabel()})</span>
-          <input type="number" step="any" inputmode="decimal" id="cardioDistance" value="${dist}" placeholder="0" /></label>
+          <input type="number" step="any" inputmode="decimal" id="cardioDistance" value="${dist}"${canonAttr(entry.distance)} placeholder="0" /></label>
         <div class="field"><span class="field-label">Time</span>
           <div class="inline-time-fields">
             <input type="number" step="1" min="0" inputmode="numeric" id="cardioMin" value="${mins}" placeholder="min" />
@@ -1362,6 +1425,8 @@
       const secV = parseFloat(container.querySelector('#cardioSec').value);
       const rpeV = parseFloat(container.querySelector('#cardioRpe').value);
       if (!Number.isNaN(distV) && distV < 0) return { error: 'Distance can’t be negative.' };
+      if (!Number.isNaN(distV) && Units.displayToMi(distV) > LIMITS.distanceMi) return { error: 'That distance is too large to be right. Check the number and unit.' };
+      if (!Number.isNaN(minV) && minV * 60 > LIMITS.durationSec) return { error: 'That time is too long to be right.' };
       if ((!Number.isNaN(minV) && minV < 0) || (!Number.isNaN(secV) && secV < 0)) return { error: 'Time can’t be negative.' };
       if (!Number.isNaN(secV) && secV >= 60) return { error: 'Seconds must be less than 60 — carry the rest over into minutes.' };
       if (invalidRpe(rpeV)) return { error: `RPE must be between ${RPE_MIN} and ${RPE_MAX}.` };
@@ -1371,7 +1436,7 @@
       const hasTime = minPart > 0 || secPart > 0;
       if (!hasDist && !hasTime) return null;
       return {
-        distance: hasDist ? Units.displayToMi(distV) : null,
+        distance: hasDist ? fieldCanon(container.querySelector('#cardioDistance'), Units.displayToMi) : null,
         duration: hasTime ? minPart * 60 + secPart : null,
         rpe: Number.isNaN(rpeV) ? null : rpeV,
       };
@@ -1392,9 +1457,11 @@
         // Also reject values that make no sense: zero or negative weight, a fractional
         // or non-positive rep count, or an RPE outside 1-10.
         if (w <= 0) return { error: 'Weight must be greater than zero.' };
+        if (Units.displayToLb(w) > LIMITS.weightLb) return { error: 'That weight is too large to be right. Check the number and unit.' };
         if (r <= 0 || !Number.isInteger(r)) return { error: 'Reps must be a whole number greater than zero.' };
+        if (r > LIMITS.reps) return { error: 'That rep count is too large to be right.' };
         if (invalidRpe(rpe)) return { error: `RPE must be between ${RPE_MIN} and ${RPE_MAX}.` };
-        sets.push({ weight: Units.displayToLb(w), reps: r, primary: row.dataset.primary === '1' || undefined, rpe: Number.isNaN(rpe) ? null : rpe });
+        sets.push({ weight: fieldCanon(row.querySelector('.set-weight'), Units.displayToLb), reps: r, primary: row.dataset.primary === '1' || undefined, rpe: Number.isNaN(rpe) ? null : rpe });
       } else {
         const r = parseFloat(row.querySelector('.set-reps').value);
         const aw = parseFloat(row.querySelector('.set-addedweight').value);
@@ -1402,8 +1469,10 @@
         if (Number.isNaN(r)) continue;
         if (r <= 0 || !Number.isInteger(r)) return { error: 'Reps must be a whole number greater than zero.' };
         if (!Number.isNaN(aw) && aw < 0) return { error: 'Added weight can’t be negative.' };
+        if (r > (exercise.unit === 'time' ? LIMITS.holdSeconds : LIMITS.reps)) return { error: 'That value is too large to be right.' };
+        if (!Number.isNaN(aw) && Units.displayToLb(aw) > LIMITS.weightLb) return { error: 'That added weight is too large to be right.' };
         if (invalidRpe(rpe)) return { error: `RPE must be between ${RPE_MIN} and ${RPE_MAX}.` };
-        sets.push({ reps: r, addedWeight: Number.isNaN(aw) ? 0 : Units.displayToLb(aw), rpe: Number.isNaN(rpe) ? null : rpe });
+        sets.push({ reps: r, addedWeight: Number.isNaN(aw) ? 0 : fieldCanon(row.querySelector('.set-addedweight'), Units.displayToLb), rpe: Number.isNaN(rpe) ? null : rpe });
       }
     }
     return sets.length ? { sets } : null;
@@ -1753,6 +1822,7 @@
   // Water is one tap (pick a cup), so it can be logged from the dashboard as well as Log.
   function logWaterAmount(amountMl, cupId) {
     if (!amountMl || amountMl <= 0) { toast('Enter an amount greater than zero.'); return; }
+    if (tooBigWater(amountMl)) { toast(WATER_TOO_BIG); return; }
     state.waterEntries.push({ id: genId('wtr'), date: todayISO(), amountMl, cupId: cupId || null });
     if (!save()) return;
     toast('Water logged');
@@ -2006,7 +2076,7 @@
         <button type="button" class="btn btn-primary btn-block" id="homeAddFoodBtn">${uiIcon('plus')}Add food</button>
       </div>`;
     wireOpenable(document.getElementById('foodGlance'), openFoodDetail);
-    wrap.querySelectorAll('[data-quick-food]').forEach((b) => b.addEventListener('click', () => logSavedFood(b.dataset.quickFood, 1)));
+    wrap.querySelectorAll('[data-quick-food]').forEach((b) => b.addEventListener('click', () => logSavedFood(b.dataset.quickFood, 1, todayISO())));
     document.getElementById('homeAddFoodBtn').addEventListener('click', () => openLogCategory('food'));
   }
 
@@ -2451,16 +2521,24 @@
     update();
     requestAnimationFrame(update);
   }
+  // One shared resize listener refreshes every chip row; rows removed from the page (a closed
+  // sheet, a re-rendered panel) are dropped instead of accumulating listeners.
+  const fScrollEls = new Set();
+  window.addEventListener('resize', () => {
+    fScrollEls.forEach((el) => { if (el.isConnected) refreshFScroll(el); else fScrollEls.delete(el); });
+  });
   function wireFScroll(chipsEl) {
     const wrap = chipsEl.closest('.f-scroll');
     if (!wrap) return;
     chipsEl.addEventListener('scroll', () => refreshFScroll(chipsEl), { passive: true });
-    window.addEventListener('resize', () => refreshFScroll(chipsEl));
+    fScrollEls.add(chipsEl);
     const more = wrap.querySelector('.f-more');
     if (more) more.addEventListener('click', () => chipsEl.scrollBy({ left: Math.max(120, chipsEl.clientWidth * 0.7), behavior: 'smooth' }));
   }
+  /* Keyboard activation for role="button" rows. Only fires when the row itself has focus, so
+     nested real buttons (favourite star, etc.) keep their native Enter/Space behaviour. */
   function onEnterOrSpace(handler) {
-    return (ev) => { if ((ev.key === 'Enter' || ev.key === ' ') && ev.target === ev.currentTarget.closest('[data-pick]')) { ev.preventDefault(); handler(ev); } };
+    return (ev) => { if ((ev.key === 'Enter' || ev.key === ' ') && ev.target.hasAttribute('data-pick')) { ev.preventDefault(); handler(ev); } };
   }
 
   /* ============================== Catalog & equipment variants ==============================
@@ -2596,9 +2674,14 @@
     const undo = { at: new Date().toISOString(), renamed: [], merged: [] };
     items.forEach((c) => {
       const ex = c.ex;
-      if (c.merge) {
-        const target = c.merge;
-        const rec = { ex: JSON.parse(JSON.stringify(ex)), targetId: target.id, targetGoal: { goal: target.goal, goalMode: target.goalMode, goalTier: target.goalTier }, moved: [] };
+      // Looked up again here: an earlier row in this same batch may just have become the
+      // variant this one maps to (two old exercises for one movement), and two records must
+      // never end up with the same movement and equipment.
+      const target = c.merge || variantRecord(c.mv.id, c.equipment);
+      if (target && target.id !== ex.id) {
+        const rec = { ex: JSON.parse(JSON.stringify(ex)), targetId: target.id, targetGoal: { goal: target.goal, goalMode: target.goalMode, goalTier: target.goalTier }, targetArchived: !!target.archived, moved: [] };
+        // Merging into a hidden (archived) variant would make the user's entries vanish.
+        target.archived = false;
         state.entries.forEach((e) => { if (e.exerciseId === ex.id) { rec.moved.push(e.id); e.exerciseId = target.id; } });
         if (target.goal == null && ex.goal != null) { target.goal = ex.goal; target.goalMode = ex.goalMode; target.goalTier = ex.goalTier; }
         state.exercises = state.exercises.filter((x) => x.id !== ex.id);
@@ -2625,7 +2708,7 @@
       const moved = new Set(m.moved);
       state.entries.forEach((e) => { if (moved.has(e.id)) e.exerciseId = m.ex.id; });
       const target = state.exercises.find((x) => x.id === m.targetId);
-      if (target) Object.assign(target, m.targetGoal);
+      if (target) { Object.assign(target, m.targetGoal); target.archived = !!m.targetArchived; }
     });
     state.settings.tidyUndo = null;
     state.settings.tidyDismissed = false;
@@ -3219,7 +3302,6 @@
   const BACK_CHEVRON_ICON_SVG = '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>';
 
   // Leading "+" on the Add exercise / tracker / cup buttons (Lucide `plus`).
-  const PLUS_ICON_SVG = '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>';
 
   // The day-streak flame (see renderSummary); Lucide `flame`.
   const FLAME_ICON_SVG = '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3q1 4 4 6.5t3 5.5a1 1 0 0 1-14 0 5 5 0 0 1 1-3 1 1 0 0 0 5 0c0-2-1.5-3-1.5-5q0-2 2.5-4"/></svg>';
@@ -3422,7 +3504,8 @@
     document.getElementById('logMeasurementDate').value = document.getElementById('logMeasurementDate').value || todayISO();
     const tracker = trackerById(select.value);
     const isSleep = tracker && tracker.kind === 'sleep';
-    document.getElementById('logMeasurementValueLabel').textContent = tracker ? (isSleep ? 'Hours slept' : `Value (${trackerUnitLabel(tracker)})`) : 'Value';
+    // innerHTML on purpose: trackerUnitLabel() already escapes, so textContent would show "&amp;".
+    document.getElementById('logMeasurementValueLabel').innerHTML = tracker ? (isSleep ? 'Hours slept' : `Value (${trackerUnitLabel(tracker)})`) : 'Value';
     document.getElementById('logSleepQualityField').hidden = !isSleep;
   }
 
@@ -3432,7 +3515,10 @@
     if (!tracker) { toast('Add a tracker first.'); return; }
     const raw = parseFloat(document.getElementById('logMeasurementValue').value);
     if (Number.isNaN(raw)) { toast('Enter a value.'); return; }
-    const date = document.getElementById('logMeasurementDate').value || todayISO();
+    const date = readDate('logMeasurementDate', todayISO());
+    if (!date) return;
+    const valueError = measurementError(tracker, trackerCanonicalFromDisplay(tracker, raw));
+    if (valueError) { toast(valueError); return; }
     const note = document.getElementById('logMeasurementNote').value.trim();
     const quality = tracker.kind === 'sleep' ? clampQuality(document.getElementById('logSleepQuality').dataset.value) : undefined;
     // A goal with no baseline (e.g. an older tracker with no history to backfill)
@@ -3473,10 +3559,9 @@
     document.getElementById('logFoodDate').value = document.getElementById('logFoodDate').value || todayISO();
     const wrap = document.getElementById('logFoodDynamicFields');
     wrap.innerHTML = trackedMacroKeys().map((k) => {
-      const req = false; // no single field is forced: any one value is enough
       return `
-      <label class="field"><span class="field-label">${MACRO_LABELS[k]}${MACRO_UNITS[k] ? ` (${MACRO_UNITS[k]})` : ''} ${req ? '<span class="req-mark">*</span>' : '<span class="muted-text">(optional)</span>'}</span>
-        <input type="number" step="any" min="0" id="logFood_${k}" placeholder="e.g. ${MACRO_PLACEHOLDERS[k]}" ${req ? 'required' : ''} /></label>`;
+      <label class="field"><span class="field-label">${MACRO_LABELS[k]}${MACRO_UNITS[k] ? ` (${MACRO_UNITS[k]})` : ''} <span class="muted-text">(optional)</span></span>
+        <input type="number" step="any" min="0" id="logFood_${k}" placeholder="e.g. ${MACRO_PLACEHOLDERS[k]}" /></label>`;
     }).join('');
   }
 
@@ -3489,7 +3574,8 @@
       values[k] = (!Number.isNaN(raw) && raw >= 0) ? raw : null;
     });
     if (!anyMacro(values)) { toast('Enter at least one value to log a food entry.'); return; }
-    const date = document.getElementById('logFoodDate').value || todayISO();
+    const date = readDate('logFoodDate', todayISO());
+    if (!date) return;
     const note = document.getElementById('logFoodNote').value.trim();
     state.food.entries.push({ id: genId('food'), date, ...values, note: note || null });
     if (!save()) return;
@@ -3627,7 +3713,7 @@
       <div class="form-card">
         <label class="field"><span class="field-label">Date</span><input type="date" id="editWaterDate" value="${e.date}" /></label>
         <label class="field"><span class="field-label">Amount (${Units.volumeUnitLabel()})</span>
-          <input type="number" step="any" min="0" id="editWaterAmount" value="${round(Units.mlToDisplay(e.amountMl), 1)}" /></label>
+          <input type="number" step="any" min="0" id="editWaterAmount" value="${round(Units.mlToDisplay(e.amountMl), 1)}"${canonAttr(e.amountMl)} /></label>
         <div class="btn-row"><button class="btn btn-primary btn-block" id="saveWaterEntryBtn">Save changes</button></div>
         <button class="btn btn-danger btn-block" id="deleteWaterEntryBtn">Delete entry</button>
       </div>
@@ -3635,8 +3721,12 @@
     document.getElementById('saveWaterEntryBtn').addEventListener('click', () => {
       const raw = parseFloat(document.getElementById('editWaterAmount').value);
       if (Number.isNaN(raw) || raw <= 0) { toast('Enter an amount greater than zero.'); return; }
-      e.date = document.getElementById('editWaterDate').value || e.date;
-      e.amountMl = Units.displayToMl(raw);
+      const newMl = fieldCanon(document.getElementById('editWaterAmount'), Units.displayToMl);
+      if (tooBigWater(newMl)) { toast(WATER_TOO_BIG); return; }
+      const newDate = readDate('editWaterDate', e.date);
+      if (!newDate) return;
+      e.date = newDate;
+      e.amountMl = newMl;
       if (!save()) return;
       closeModal();
       toast('Entry updated');
@@ -3692,10 +3782,9 @@
       <div class="form-card">
         <label class="field"><span class="field-label">Date</span><input type="date" id="editFoodDate" value="${e.date}" /></label>
         ${trackedMacroKeys().map((k) => {
-          const req = false; // no single field is forced: any one value is enough
           return `
-        <label class="field"><span class="field-label">${MACRO_LABELS[k]}${MACRO_UNITS[k] ? ` (${MACRO_UNITS[k]})` : ''} ${req ? '<span class="req-mark">*</span>' : '<span class="muted-text">(optional)</span>'}</span>
-          <input type="number" step="any" min="0" id="editFood_${k}" value="${e[k] != null ? e[k] : ''}" ${req ? 'required' : ''} /></label>`;
+        <label class="field"><span class="field-label">${MACRO_LABELS[k]}${MACRO_UNITS[k] ? ` (${MACRO_UNITS[k]})` : ''} <span class="muted-text">(optional)</span></span>
+          <input type="number" step="any" min="0" id="editFood_${k}" value="${e[k] != null ? e[k] : ''}" /></label>`;
         }).join('')}
         <label class="field"><span class="field-label">Note</span><input type="text" id="editFoodNote" value="${e.note ? escapeHtml(e.note) : ''}" maxlength="200" /></label>
         ${offerSaveAsFood ? `<button type="button" class="btn btn-secondary btn-block" id="saveAsSavedFoodBtn">Save as a saved food</button>` : ''}
@@ -3711,7 +3800,9 @@
       const values = {};
       trackedMacroKeys().forEach((k) => { values[k] = readMacro(`editFood_${k}`); });
       if (!anyMacro(values)) { toast('Enter at least one value to save this entry.'); return; }
-      e.date = document.getElementById('editFoodDate').value || e.date;
+      const newDate = readDate('editFoodDate', e.date);
+      if (!newDate) return;
+      e.date = newDate;
       Object.assign(e, values);
       e.note = document.getElementById('editFoodNote').value.trim() || null;
       if (!save()) return;
@@ -3776,10 +3867,9 @@
           ${switchHtml('id="savedFoodFavorite"', 'Favorite', selectedFavorite)}
         </div></div>
         ${trackedMacroKeys().map((k) => {
-          const req = false; // no single field is forced: any one value is enough
           return `
-        <label class="field"><span class="field-label">${MACRO_LABELS[k]}${MACRO_UNITS[k] ? ` (${MACRO_UNITS[k]})` : ''} ${req ? '<span class="req-mark">*</span>' : '<span class="muted-text">(optional)</span>'}</span>
-          <input type="number" step="any" min="0" id="savedFood_${k}" value="${seed && seed[k] != null ? seed[k] : ''}" ${req ? 'required' : ''} /></label>`;
+        <label class="field"><span class="field-label">${MACRO_LABELS[k]}${MACRO_UNITS[k] ? ` (${MACRO_UNITS[k]})` : ''} <span class="muted-text">(optional)</span></span>
+          <input type="number" step="any" min="0" id="savedFood_${k}" value="${seed && seed[k] != null ? seed[k] : ''}" /></label>`;
         }).join('')}
         <button type="button" class="btn btn-primary btn-block" id="saveSavedFoodBtn">${editing ? 'Save changes' : 'Save food'}</button>
         ${editing ? `<button type="button" class="btn-text-danger" id="deleteSavedFoodBtn">Delete saved food</button>` : ''}
@@ -3832,7 +3922,6 @@
         confirmDialog('Delete this saved food?', 'This can’t be undone. Food entries already logged from it aren’t affected.', 'Delete', () => {
           state.food.savedFoods = state.food.savedFoods.filter((f) => f.id !== foodId);
           if (!save()) return;
-          closeModal();
           toast('Saved food deleted');
           renderManage();
           renderLogView();
@@ -3990,12 +4079,14 @@
     if (logBtn) logBtn.addEventListener('click', () => logSavedFood(expandedSavedFoodId, savedFoodQty));
   }
 
-  function logSavedFood(foodId, qty) {
+  // `date` is given by one-tap quick-add (always today); the expanded row's Log button omits it
+  // and uses that row's date picker.
+  function logSavedFood(foodId, qty, date) {
     const food = savedFoodById(foodId);
     if (!food) return;
     const values = scaledSavedFoodValues(food, qty);
     const dateEl = document.getElementById('savedFoodDate');
-    const date = (dateEl && dateEl.value) || savedFoodDate || todayISO();
+    date = date || (dateEl && dateEl.value) || savedFoodDate || todayISO();
     state.food.entries.push({ id: genId('food'), date, ...values, note: food.name, savedFoodId: food.id });
     if (!save()) return;
     toast(`${food.name} logged`);
@@ -4035,7 +4126,7 @@
       const star = ev.target.closest('[data-fav]');
       if (star) { ev.stopPropagation(); toggleSavedFoodFavorite(star.dataset.fav); return; }
       const quick = ev.target.closest('[data-quick-add]');
-      if (quick) { ev.stopPropagation(); logSavedFood(quick.dataset.quickAdd, 1); return; }
+      if (quick) { ev.stopPropagation(); logSavedFood(quick.dataset.quickAdd, 1, todayISO()); return; }
       const row = ev.target.closest('.saved-food-log-row');
       if (!row) return;
       const id = row.dataset.savedFoodId;
@@ -4142,7 +4233,8 @@
     const fields = readDynamicFields(document.getElementById('logDynamicFields'), ex);
     if (fields && fields.error) { toast(fields.error); return; }
     if (!fields) { toast('Enter at least one value before saving.'); return; }
-    const date = document.getElementById('logDate').value || todayISO();
+    const date = readDate('logDate', todayISO());
+    if (!date) return;
     const note = document.getElementById('logNote').value.trim();
     const entry = Object.assign({ id: genId('en'), exerciseId: ex.id, date, note: note || null }, fields);
     state.entries.push(entry);
@@ -4345,7 +4437,9 @@
       const fields = readDynamicFields(document.getElementById('editEntryFields'), ex);
       if (fields && fields.error) { toast(fields.error); return; }
       if (!fields) { toast('Enter at least one value.'); return; }
-      entry.date = document.getElementById('editEntryDate').value || entry.date;
+      const newDate = readDate('editEntryDate', entry.date);
+      if (!newDate) return;
+      entry.date = newDate;
       entry.note = document.getElementById('editEntryNote').value.trim() || null;
       Object.assign(entry, fields);
       if (!save()) return;
@@ -4744,7 +4838,7 @@
     function weightGoalFieldHtml() {
       const fixedVal = ex && ex.goal ? round(Units.lbToDisplay(ex.goal), 1) : '';
       if (!selectedLiftType || !LIFT_STANDARDS[selectedLiftType]) {
-        return `<label class="field"><span class="field-label">Goal weight (${Units.weightUnitLabel()})</span><input type="number" step="any" id="goalInput" value="${fixedVal}" placeholder="e.g. 225" /></label>`;
+        return `<label class="field"><span class="field-label">Goal weight (${Units.weightUnitLabel()})</span><input type="number" step="any" id="goalInput" value="${fixedVal}"${canonAttr(ex && ex.goal)} placeholder="e.g. 225" /></label>`;
       }
       const bw = currentBodyWeightLb();
       const sex = state.profile.sex;
@@ -4772,7 +4866,7 @@
           <p class="muted-text field-hint">This goal updates automatically whenever your logged body weight changes.</p>
         ` : `
           <label class="field"><span class="field-label">Goal weight (${Units.weightUnitLabel()})</span>
-            <input type="number" step="any" id="goalInput" value="${fixedVal}" placeholder="e.g. 225" /></label>
+            <input type="number" step="any" id="goalInput" value="${fixedVal}"${canonAttr(ex && ex.goal)} placeholder="e.g. 225" /></label>
         `}`;
     }
 
@@ -4824,14 +4918,15 @@
       } else {
         // Cardio has optional distance and pace goals, either or both: one run yields both.
         const distVal = ex && ex.distanceGoal ? round(Units.miToDisplay(ex.distanceGoal), 2) : '';
-        const secPerUnit = ex && ex.paceGoal ? Units.secPerMiToDisplaySecPerUnit(ex.paceGoal) : null;
+        // Round the total first: rounding only the seconds could produce 60 (5:59.7 -> 5:60).
+        const secPerUnit = ex && ex.paceGoal ? Math.round(Units.secPerMiToDisplaySecPerUnit(ex.paceGoal)) : null;
         const mins = secPerUnit != null ? Math.floor(secPerUnit / 60) : '';
-        const secs = secPerUnit != null ? Math.round(secPerUnit % 60) : '';
+        const secs = secPerUnit != null ? secPerUnit % 60 : '';
         wrap.innerHTML = `
           <label class="field"><span class="field-label">Distance goal (${Units.distanceUnitLabel()}) <span class="muted-text">(optional)</span></span>
-            <input type="number" step="any" id="goalDistanceInput" value="${distVal}" placeholder="e.g. 5" /></label>
+            <input type="number" step="any" id="goalDistanceInput" value="${distVal}"${canonAttr(ex && ex.distanceGoal)} placeholder="e.g. 5" /></label>
           <div class="field"><span class="field-label">Pace goal (min:sec per ${Units.distanceUnitLabel()}) <span class="muted-text">(optional)</span></span>
-            <div class="inline-time-fields"><input type="number" step="1" min="0" id="goalPaceMin" value="${mins}" placeholder="min" /><input type="number" step="1" min="0" max="59" id="goalPaceSec" value="${secs}" placeholder="sec" /></div></div>
+            <div class="inline-time-fields"><input type="number" step="1" min="0" id="goalPaceMin" value="${mins}"${canonAttr(ex && ex.paceGoal)} placeholder="min" /><input type="number" step="1" min="0" max="59" id="goalPaceSec" value="${secs}" placeholder="sec" /></div></div>
           <p class="field-hint muted-text">Leave either blank to skip that goal — one logged run updates progress toward both.</p>`;
       }
     }
@@ -4857,24 +4952,32 @@
       let goal = null;
       let distanceGoal = null;
       let paceGoal = null;
+      let standardPending = false;
       const usingStandardGoal = selectedKind === 'weight' && selectedLiftType && LIFT_STANDARDS[selectedLiftType] && selectedGoalMode === 'standard';
       if (usingStandardGoal) {
         goal = computeStandardGoal(selectedLiftType, selectedGoalTier, currentBodyWeightLb(), state.profile.sex);
-        if (goal == null) { toast('Log your body weight and set your sex in Settings → Profile first.'); return; }
+        // No body weight or sex yet: save anyway. The goal stays empty and fills in by itself
+        // (recomputeStandardGoals) once both exist. Refusing to save left the user stuck.
+        standardPending = goal == null;
       } else if (selectedKind === 'habit') {
         goal = selectedTimes;
       } else if (selectedKind === 'weight' || selectedKind === 'reps') {
         const raw = parseFloat(document.getElementById('goalInput').value);
         if (!Number.isNaN(raw) && raw > 0) {
-          goal = selectedKind === 'weight' ? Units.displayToLb(raw) : raw;
+          goal = selectedKind === 'weight' ? fieldCanon(document.getElementById('goalInput'), Units.displayToLb) : raw;
         }
       } else {
         // Cardio: read both optional goals independently; either, neither or both may be set.
         const rawDist = parseFloat(document.getElementById('goalDistanceInput').value);
-        if (!Number.isNaN(rawDist) && rawDist > 0) distanceGoal = Units.displayToMi(rawDist);
+        if (!Number.isNaN(rawDist) && rawDist > 0) distanceGoal = fieldCanon(document.getElementById('goalDistanceInput'), Units.displayToMi);
         const m = parseFloat(document.getElementById('goalPaceMin').value) || 0;
         const s = parseFloat(document.getElementById('goalPaceSec').value) || 0;
-        if (m > 0 || s > 0) paceGoal = Units.displaySecPerUnitToSecPerMi(m * 60 + s);
+        if (m > 0 || s > 0) {
+          const minEl = document.getElementById('goalPaceMin');
+          const secEl = document.getElementById('goalPaceSec');
+          const untouched = minEl.dataset.canon !== undefined && minEl.value === minEl.defaultValue && secEl.value === secEl.defaultValue;
+          paceGoal = untouched ? Number(minEl.dataset.canon) : Units.displaySecPerUnitToSecPerMi(m * 60 + s);
+        }
       }
       if (editing) {
         ex.name = name;
@@ -4912,7 +5015,7 @@
       }
       if (!save()) return;
       closeModal();
-      toast(editing ? 'Exercise updated' : 'Exercise added');
+      toast(standardPending ? 'Saved. The goal appears once you log your body weight and set your sex in Settings.' : (editing ? 'Exercise updated' : 'Exercise added'));
       renderAll();
     });
 
@@ -4935,7 +5038,7 @@
           state.exercises = state.exercises.filter((e) => e.id !== exId);
           state.entries = state.entries.filter((e) => e.exerciseId !== exId);
           if (!save()) return;
-          closeModal(); toast('Exercise deleted'); renderAll();
+          toast('Exercise deleted'); renderAll();
         }, true);
       });
     }
@@ -4975,7 +5078,7 @@
       <div class="form-card">
         <label class="field"><span class="field-label">Date</span><input type="date" id="editMeasurementDate" value="${m.date}" /></label>
         <label class="field"><span class="field-label">${isSleep ? 'Hours slept' : `Value${tracker ? ` (${trackerUnitLabel(tracker)})` : ''}`}</span>
-          <input type="number" step="any" id="editMeasurementValue" value="${tracker ? trackerDisplayFromCanonical(tracker, m.value) : m.value}" /></label>
+          <input type="number" step="any" id="editMeasurementValue" value="${tracker ? trackerDisplayFromCanonical(tracker, m.value) : m.value}"${canonAttr(m.value)} /></label>
         ${isSleep ? `<div class="field"><span class="field-label">Sleep quality <span class="muted-text">(optional — tap again to clear)</span></span>
           ${qualityChipsHtml('editMeasurementQuality', m.quality != null ? m.quality : null)}</div>` : ''}
         <label class="field"><span class="field-label">Note</span><input type="text" id="editMeasurementNote" value="${m.note ? escapeHtml(m.note) : ''}" maxlength="200" /></label>
@@ -4987,8 +5090,13 @@
     document.getElementById('saveMeasurementBtn').addEventListener('click', () => {
       const raw = parseFloat(document.getElementById('editMeasurementValue').value);
       if (Number.isNaN(raw)) { toast('Enter a value.'); return; }
-      m.date = document.getElementById('editMeasurementDate').value || m.date;
-      m.value = tracker ? trackerCanonicalFromDisplay(tracker, raw) : raw;
+      const newDate = readDate('editMeasurementDate', m.date);
+      if (!newDate) return;
+      const newValue = tracker ? fieldCanon(document.getElementById('editMeasurementValue'), (v) => trackerCanonicalFromDisplay(tracker, v)) : raw;
+      const valueError = measurementError(tracker, newValue);
+      if (valueError) { toast(valueError); return; }
+      m.date = newDate;
+      m.value = newValue;
       if (isSleep) m.quality = clampQuality(document.getElementById('editMeasurementQuality').dataset.value);
       m.note = document.getElementById('editMeasurementNote').value.trim() || null;
       if (m.trackerId === BODY_WEIGHT_TRACKER_ID) recomputeStandardGoals();
@@ -5171,11 +5279,20 @@
       const wrap = document.getElementById('trkGoalFieldWrap');
       document.getElementById('trkUnitLabelField').hidden = selectedUnitKind !== 'count';
       const unitLabel = selectedUnitKind === 'count'
-        ? (document.getElementById('trkUnitLabelInput').value.trim() || '')
+        ? escapeHtml(document.getElementById('trkUnitLabelInput').value.trim())
         : unitLabelForKind(selectedUnitKind, selectedRatingMax);
-      const v = tracker && tracker.goal != null ? trackerDisplayFromCanonical(tracker, tracker.goal) : '';
+      // Only a goal in the tracker's own unit kind can be shown; after switching kind the
+      // old number would be meaningless. Typing in the unit-label box re-renders this field,
+      // so keep whatever the user has typed while the kind is unchanged.
+      const stored = tracker && tracker.unitKind === selectedUnitKind && tracker.goal != null ? tracker.goal : null;
+      const prev = document.getElementById('trkGoalInput');
+      const keepTyped = !!prev && wrap.dataset.kind === selectedUnitKind;
+      const untouched = !prev || prev.value === prev.defaultValue;
+      const v = keepTyped ? prev.value : (stored != null ? trackerDisplayFromCanonical(tracker, stored) : '');
+      const canon = stored != null && (!keepTyped || untouched) ? stored : null;
+      wrap.dataset.kind = selectedUnitKind;
       wrap.innerHTML = `<label class="field"><span class="field-label">Goal ${unitLabel ? `(${unitLabel})` : ''} <span class="muted-text">(optional)</span></span>
-        <input type="number" step="any" id="trkGoalInput" value="${v}" placeholder="Leave blank to just track" /></label>`;
+        <input type="number" step="any" id="trkGoalInput" value="${v}"${canonAttr(canon)} placeholder="Leave blank to just track" /></label>`;
     }
 
     function setUnitKindUI(k) {
@@ -5210,7 +5327,7 @@
       const rawGoal = parseFloat(document.getElementById('trkGoalInput').value);
       const hasGoal = !Number.isNaN(rawGoal) && document.getElementById('trkGoalInput').value !== '';
       const fields = { unitKind: selectedUnitKind, unitLabel, ratingMax: selectedUnitKind === 'rating' ? selectedRatingMax : null, direction: selectedDirection, showOnDashboard: selectedShowOnDashboard, ...(iconField.value() && { icon: iconField.value() }) };
-      const canonicalGoal = hasGoal ? trackerCanonicalFromDisplay(Object.assign({}, tracker, fields), rawGoal) : null;
+      const canonicalGoal = hasGoal ? fieldCanon(document.getElementById('trkGoalInput'), (v) => trackerCanonicalFromDisplay(Object.assign({}, tracker, fields), v)) : null;
       if (editing) {
         // A baseline is where progress toward THIS goal starts. A new goal number or
         // direction can leave the old baseline on the wrong side of the goal, so
@@ -5253,7 +5370,7 @@
           state.trackers = state.trackers.filter((t) => t.id !== trackerId);
           state.measurements = state.measurements.filter((m) => m.trackerId !== trackerId);
           if (!save()) return;
-          closeModal(); toast('Tracker deleted'); renderAll();
+          toast('Tracker deleted'); renderAll();
         }, true);
       });
     }
@@ -5283,7 +5400,7 @@
       <div class="form-card">
         ${nameIconHtml({ iconId: 'cupIcon', inputId: 'cupName', value: cup && cup.name, placeholder: 'e.g. Water bottle', maxlength: 40 })}
         <label class="field"><span class="field-label">Amount (${Units.volumeUnitLabel()})</span>
-          <input type="number" step="any" min="0" id="cupAmount" value="${cup ? round(Units.mlToDisplay(cup.amountMl), 1) : ''}" placeholder="e.g. 16" /></label>
+          <input type="number" step="any" min="0" id="cupAmount" value="${cup ? round(Units.mlToDisplay(cup.amountMl), 1) : ''}"${canonAttr(cup && cup.amountMl)} placeholder="e.g. 16" /></label>
         <button type="button" class="btn btn-primary btn-block" id="saveCupBtn">${editing ? 'Save changes' : 'Add cup'}</button>
         ${editing ? `<button type="button" class="btn-text-danger" id="deleteCupBtn">Delete cup</button>` : ''}
       </div>
@@ -5294,7 +5411,8 @@
       const raw = parseFloat(document.getElementById('cupAmount').value);
       if (!name) { toast('Give it a name.'); return; }
       if (Number.isNaN(raw) || raw <= 0) { toast('Enter an amount greater than zero.'); return; }
-      const amountMl = Units.displayToMl(raw);
+      const amountMl = fieldCanon(document.getElementById('cupAmount'), Units.displayToMl);
+      if (tooBigWater(amountMl)) { toast(WATER_TOO_BIG); return; }
       if (editing) {
         cup.name = name;
         cup.amountMl = amountMl;
@@ -5314,7 +5432,6 @@
         confirmDialog('Delete this cup?', 'This can’t be undone. Past water entries already logged aren’t affected.', 'Delete', () => {
           state.water.cups = state.water.cups.filter((c) => c.id !== cupId);
           if (!save()) return;
-          closeModal();
           toast('Cup deleted');
           renderManage();
           renderDashboard();
@@ -5513,7 +5630,11 @@
     // Same re-render-clobbers-an-unsaved-field guard as the Profile height
     // field above.
     if (document.activeElement !== document.getElementById('waterGoalInput')) {
-      document.getElementById('waterGoalInput').value = state.water.goalMl ? round(Units.mlToDisplay(state.water.goalMl), 1) : '';
+      const goalInput = document.getElementById('waterGoalInput');
+      goalInput.value = state.water.goalMl ? round(Units.mlToDisplay(state.water.goalMl), 1) : '';
+      // See fieldCanon(): saving the untouched field must keep the stored millilitres.
+      goalInput.defaultValue = goalInput.value;
+      if (state.water.goalMl) goalInput.dataset.canon = state.water.goalMl; else delete goalInput.dataset.canon;
     }
     const wrap = document.getElementById('cupManageList');
     wrap.innerHTML = state.water.cups.map(cupRowHtml).join('') || '<p class="muted-text">No cups yet.</p>';
@@ -5603,32 +5724,27 @@
     document.body.appendChild(a);
     a.click();
     a.remove();
-    URL.revokeObjectURL(url);
+    // Revoking immediately can cancel the download in Safari; give it a moment.
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
     toast('Backup downloaded');
   }
 
+  // A real backup is well under a few MB; refuse absurd files before parsing them.
+  const MAX_IMPORT_BYTES = 25 * 1024 * 1024;
   function importBackup(file) {
+    if (file && file.size > MAX_IMPORT_BYTES) { toast('Can’t import: that file is too large to be a Fit Log backup.'); return; }
     const reader = new FileReader();
     reader.onload = () => {
       try {
         const parsed = JSON.parse(reader.result);
-        // Imported data is untrusted: check its shape in full before runMigrations() or state see it.
+        // Imported data is untrusted: check its shape in full before upgradeData() or state see it.
         const shapeError = validateBackupShape(parsed);
         if (shapeError) { toast(`Can't import: ${shapeError}`); return; }
         confirmDialog('Replace all data?', 'Importing will overwrite everything currently in the app with this backup file.', 'Import', () => {
           // Kept so a failed write below can restore the in-memory state.
           const previousState = state;
-          parsed.settings = Object.assign({}, DEFAULT_SETTINGS, parsed.settings || {});
-          // Object.assign is shallow, so a backup with a partial `macroGoals` would replace
-          // the defaults wholesale. Migrations only backfill older versions and
-          // validateBackupShape does not require every key, so backfill per key here.
-          parsed.settings.macroGoals = Object.assign({}, DEFAULT_SETTINGS.macroGoals, parsed.settings.macroGoals || {});
-          MACRO_KEYS.forEach((k) => {
-            if (!isPlainObject(parsed.settings.macroGoals[k])) parsed.settings.macroGoals[k] = DEFAULT_SETTINGS.macroGoals[k];
-          });
-          parsed.settings.nutritionCalc = Object.assign({}, DEFAULT_SETTINGS.nutritionCalc, parsed.settings.nutritionCalc || {});
-          // Same migration pipeline as load(): older backups are upgraded (additively), not rejected.
-          state = runMigrations(parsed);
+          // Same pipeline as load(): older backups are upgraded additively, not rejected.
+          state = upgradeData(parsed);
           if (!save()) { state = previousState; return; }
           applyTheme();
           renderAll();
@@ -5824,7 +5940,8 @@
   // Shown only when the Interests step turned Lifting on.
   function renderSetupStepLifting() {
     const lifts = setupAnswers.lifts;
-    const canUseStandards = setupAnswers.weight !== '' && setupAnswers.sex !== '';
+    // A real positive weight, not just a non-empty box: "0" or "abc" would leave the preview empty.
+    const canUseStandards = parseFloat(setupAnswers.weight) > 0 && setupAnswers.sex !== '';
     document.getElementById('setupContent').innerHTML = `
         ${canUseStandards ? '' : '<p class="muted-text">Enter weight and sex on the About you step to unlock bodyweight standards.</p>'}
         <div class="card form-card">
@@ -6044,6 +6161,7 @@
   // Builds the real starting `state` from the wizard answers, like a tailored
   // defaultData(). Runs once, right before the first save.
   function finishSetup() {
+    needsSetup = false; // the wizard is done; cross-window sync (wireLiveSync) may now apply
     const now = new Date().toISOString();
     const heightCm = heightCmFromSetup();
     const rawWeight = parseFloat(setupAnswers.weight);
@@ -6313,7 +6431,9 @@
     // not here, because MACRO_KEYS can grow.
     document.getElementById('saveWaterGoalBtn').addEventListener('click', () => {
       const raw = parseFloat(document.getElementById('waterGoalInput').value);
-      state.water.goalMl = (!Number.isNaN(raw) && raw > 0) ? Units.displayToMl(raw) : null;
+      const goalMl = (!Number.isNaN(raw) && raw > 0) ? fieldCanon(document.getElementById('waterGoalInput'), Units.displayToMl) : null;
+      if (goalMl != null && tooBigWater(goalMl)) { toast(WATER_TOO_BIG); return; }
+      state.water.goalMl = goalMl;
       if (!save()) return;
       toast('Water goal saved');
       renderManage();
@@ -6523,6 +6643,8 @@
     history.replaceState({ nav: 'base' }, '');
     history.pushState({ nav: 'exit-guard' }, '');
     hydrateStaticIcons();
+    // Bare buttons outside a <form> default to type=submit; make that explicit.
+    document.querySelectorAll('button:not([type])').forEach((b) => { if (!b.closest('form')) b.type = 'button'; });
     load();
     // wireEvents() only attaches listeners and reads no state, so it is safe in
     // recovery mode; the recovery screen's confirm dialog needs it.
@@ -6533,7 +6655,47 @@
     document.getElementById('logMeasurementDate').value = todayISO();
     if (needsSetup) startSetupWizard();
     else renderAll();
+    wireLiveSync();
     registerServiceWorker();
+  }
+
+  /* ===== Staying current: other tabs and midnight ==============================
+     1. Two tabs (or a tab and the installed app) share one localStorage key. Each keeps its
+        own in-memory copy and rewrites the whole key on every save, so the later save would
+        silently erase the other tab's changes. The `storage` event tells this tab when
+        another one saved; it adopts that data instead of overwriting it.
+     2. A tab left open past midnight keeps showing yesterday as "today". When the date
+        changes, any date the user hasn't deliberately moved is advanced. */
+  function wireLiveSync() {
+    window.addEventListener('storage', (ev) => {
+      if (ev.key !== STORAGE_KEY || !ev.newValue || needsRecovery || needsSetup) return;
+      let incoming;
+      try { incoming = upgradeData(JSON.parse(ev.newValue)); } catch (e) { return; }
+      state = incoming;
+      // Open sheets hold references into the old state, so close them rather than let a save
+      // write stale objects back.
+      if (!modalRoot().hidden) closeModal();
+      renderAll();
+      toast('Updated from another window.');
+    });
+
+    let lastSeenDay = todayISO();
+    const checkNewDay = () => {
+      const today = todayISO();
+      if (today === lastSeenDay || needsRecovery || needsSetup) return;
+      const wasMonth = calendarMonth.getFullYear() === Number(lastSeenDay.slice(0, 4)) && calendarMonth.getMonth() + 1 === Number(lastSeenDay.slice(5, 7));
+      ['logDate', 'logMeasurementDate', 'logFoodDate', 'savedFoodDate'].forEach((id) => {
+        const el = document.getElementById(id);
+        if (el && el.value === lastSeenDay) el.value = today;
+      });
+      if (historySelectedDate === lastSeenDay) historySelectedDate = today;
+      if (wasMonth) { calendarMonth = new Date(Number(today.slice(0, 4)), Number(today.slice(5, 7)) - 1, 1); }
+      lastSeenDay = today;
+      renderAll();
+    };
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) checkNewDay(); });
+    window.addEventListener('pageshow', checkNewDay);
+    setInterval(checkNewDay, 60000);
   }
 
   // Registers the service worker, checks for updates when the app returns to the

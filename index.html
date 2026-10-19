@@ -454,7 +454,7 @@
 
     <!-- SETTINGS (reached via the gear icon in the header, not a bottom tab) -->
     <section id="view-settings" class="view" data-view="settings" hidden>
-      <div class="modal-title-row"><h2>Settings</h2><button class="modal-close" data-action="close-settings"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button></div>
+      <div class="modal-title-row"><h2>Settings</h2><button type="button" class="modal-close" aria-label="Close" data-action="close-settings"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button></div>
 
       <div class="section-head"><h2>Appearance</h2></div>
       <div class="card card-list">
@@ -473,18 +473,18 @@
         <p class="muted-text">Used only by the optional insight calculators below (BMI, strength level, pace level, nutrition calculator) — never required, and nothing here is used anywhere else in the app.</p>
         <div class="field" id="profileHeightFieldCm">
           <span class="field-label">Height (cm)</span>
-          <input type="number" step="any" min="50" max="272" id="profileHeightCm" placeholder="Not set" />
+          <input type="number" step="any" min="50" max="272" id="profileHeightCm" aria-label="Height in centimetres" placeholder="Not set" />
         </div>
         <div class="field" id="profileHeightFieldFtIn">
           <span class="field-label">Height (ft/in)</span>
           <div class="inline-time-fields">
-            <input type="number" step="1" min="0" max="8" inputmode="numeric" id="profileHeightFt" placeholder="ft" />
-            <input type="number" step="1" min="0" max="11" inputmode="numeric" id="profileHeightIn" placeholder="in" />
+            <input type="number" step="1" min="0" max="8" inputmode="numeric" id="profileHeightFt" aria-label="Height, feet" placeholder="ft" />
+            <input type="number" step="1" min="0" max="11" inputmode="numeric" id="profileHeightIn" aria-label="Height, inches" placeholder="in" />
           </div>
         </div>
         <div class="field" id="profileAgeField">
           <span class="field-label">Age <span class="muted-text">(optional — for nutrition advice)</span></span>
-          <input type="number" step="1" min="1" max="120" inputmode="numeric" id="profileAge" placeholder="Not set" />
+          <input type="number" step="1" min="1" max="120" inputmode="numeric" id="profileAge" aria-label="Age in years" placeholder="Not set" />
         </div>
         <div class="field">
           <span class="field-label">Sex <span class="muted-text">(for strength/pace benchmarks + nutrition calculator)</span></span>

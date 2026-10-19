@@ -73,7 +73,9 @@
     function fmtWeight(lb) {
       if (lb == null || Number.isNaN(lb)) return '—';
       const v = Units.lbToDisplay(lb);
-      return `${round(v, v < 10 ? 1 : 0)} ${Units.weightUnitLabel()}`;
+      // One decimal, trailing .0 dropped: 62.5 kg stays 62.5 (whole-number rounding made it
+      // read 63), and 135 lb stays 135.
+      return `${round(v, 1)} ${Units.weightUnitLabel()}`;
     }
     function fmtReps(n) {
       if (n == null || Number.isNaN(n)) return '—';

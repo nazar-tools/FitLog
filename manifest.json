@@ -1,5 +1,8 @@
 {
+  "id": "./index.html",
   "name": "Fit Log",
+  "lang": "en",
+  "categories": ["health", "fitness", "lifestyle"],
   "short_name": "Fit Log",
   "description": "Personal strength, running, and bodyweight goal tracker",
   "start_url": "./index.html",

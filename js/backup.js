@@ -18,13 +18,21 @@
   const DIRECTIONS = new Set(['up', 'down']);
   const SEXES = new Set(['male', 'female']);
   const ISO = /^\d{4}-\d{2}-\d{2}$/;
+  // Ids are written into HTML attributes (data-exercise-id="...") by the app, so an id from an
+  // untrusted file may only contain characters that are inert there. The app's own ids
+  // (ex_squat, meas_lx2k3a9f...) all fit. Names are escaped when shown, so they are not limited
+  // here beyond a sane length.
+  const SAFE_ID = /^[\w.:-]{1,80}$/;
+  const MAX_NAME = 200;
 
   // Generous sanity ceilings: they exist to catch typos and corruption (a
   // 5,000,000 lb squat), not to second-guess a real lifter.
   const LIMITS = {
     weightLb: 3000, reps: 5000, holdSeconds: 86400, distanceMi: 1000, durationSec: 7 * 86400,
     waterMl: 20000, foodCalories: 20000, foodGrams: 5000, foodMg: 100000,
-    heightCm: [50, 260], age: [5, 120],
+    // The same bounds the Profile form and setup wizard enforce (js/units.js), so a backup the
+    // app wrote can never be refused by its own validator.
+    heightCm: [50, 272], age: [1, 120],
   };
 
   const isObj = (v) => v != null && typeof v === 'object' && !Array.isArray(v);
@@ -32,6 +40,8 @@
   const numOrNull = (v) => v == null || isNum(v);
   const inRange = (v, lo, hi) => isNum(v) && v >= lo && v <= hi;
   const optRange = (v, lo, hi) => v == null || inRange(v, lo, hi);
+  const badId = (v) => typeof v !== 'string' || !SAFE_ID.test(v);
+  const badName = (v) => typeof v !== 'string' || v.length > MAX_NAME;
 
   function validDate(str, todayIso) {
     if (typeof str !== 'string' || !ISO.test(str)) return false;
@@ -79,7 +89,7 @@
     if (!Array.isArray(parsed.exercises)) return 'Missing or invalid exercise list.';
     const exById = new Map();
     for (const ex of parsed.exercises) {
-      if (!isObj(ex) || typeof ex.id !== 'string' || typeof ex.name !== 'string') return 'One of the exercises is malformed.';
+      if (!isObj(ex) || badId(ex.id) || badName(ex.name)) return 'One of the exercises is malformed.';
       if (ex.kind != null && !EX_KINDS.has(ex.kind)) return `Unknown exercise type “${ex.kind}”.`;
       if (!numOrNull(ex.goal) || !numOrNull(ex.distanceGoal) || !numOrNull(ex.paceGoal)) return `"${ex.name}" has an invalid goal value.`;
       if ((ex.goal != null && ex.goal < 0) || (ex.distanceGoal != null && ex.distanceGoal < 0) || (ex.paceGoal != null && ex.paceGoal < 0)) return `"${ex.name}" has a negative goal.`;
@@ -89,9 +99,9 @@
 
     /* ---- entries and every set ---- */
     if (!Array.isArray(parsed.entries)) return 'Missing or invalid entry list.';
-    if (dupId(parsed.entries.filter((e) => isObj(e) && typeof e.id === 'string'))) return 'Two logged entries share the same id.';
+    if (dupId(parsed.entries.filter((e) => isObj(e) && !badId(e.id)))) return 'Two logged entries share the same id.';
     for (const en of parsed.entries) {
-      if (!isObj(en) || typeof en.id !== 'string' || typeof en.exerciseId !== 'string') return 'One of the logged entries is malformed.';
+      if (!isObj(en) || badId(en.id) || badId(en.exerciseId)) return 'One of the logged entries is malformed.';
       const ex = exById.get(en.exerciseId);
       if (!ex) return 'A logged entry belongs to an exercise that isn’t in this backup.';
       const where = `${ex.name} on ${en.date}`;
@@ -117,7 +127,7 @@
     if (parsed.trackers != null) {
       if (!Array.isArray(parsed.trackers)) return 'Invalid tracker list.';
       for (const t of parsed.trackers) {
-        if (!isObj(t) || typeof t.id !== 'string' || typeof t.name !== 'string') return 'One of the trackers is malformed.';
+        if (!isObj(t) || badId(t.id) || badName(t.name)) return 'One of the trackers is malformed.';
         if (t.kind != null && !TRACKER_KINDS.has(t.kind)) return `Unknown tracker type “${t.kind}”.`;
         if (t.direction != null && !DIRECTIONS.has(t.direction)) return `Tracker "${t.name}" has an invalid direction.`;
         if (!numOrNull(t.goal) || !numOrNull(t.baseline)) return `Tracker "${t.name}" has an invalid goal value.`;
@@ -128,7 +138,7 @@
     if (parsed.measurements != null) {
       if (!Array.isArray(parsed.measurements)) return 'Invalid tracker-entry list.';
       for (const m of parsed.measurements) {
-        if (!isObj(m) || typeof m.id !== 'string' || typeof m.trackerId !== 'string') return 'One of the tracker entries is malformed.';
+        if (!isObj(m) || badId(m.id) || badId(m.trackerId)) return 'One of the tracker entries is malformed.';
         const t = trackerById.get(m.trackerId);
         // Pre-v5 backups still carry the old height/sleep trackers; migrations handle those.
         if (!t && parsed.trackers != null && (parsed.version || 0) >= 6) return 'A tracker entry belongs to a tracker that isn’t in this backup.';
@@ -139,7 +149,7 @@
           if (m.quality != null && !(Number.isInteger(m.quality) && m.quality >= 1 && m.quality <= 5)) return `A sleep entry on ${m.date} has a quality outside 1 to 5.`;
         }
       }
-      if (dupId(parsed.measurements.filter((m) => isObj(m) && typeof m.id === 'string'))) return 'Two tracker entries share the same id.';
+      if (dupId(parsed.measurements.filter((m) => isObj(m) && !badId(m.id)))) return 'Two tracker entries share the same id.';
     }
 
     /* ---- water ---- */
@@ -148,13 +158,13 @@
       if (parsed.water.goalMl != null && (parsed.water.goalMl < 0 || parsed.water.goalMl > LIMITS.waterMl)) return 'The water goal is out of range.';
       if (parsed.water.cups != null) {
         if (!Array.isArray(parsed.water.cups)) return 'Invalid water cup list.';
-        for (const c of parsed.water.cups) { if (!isObj(c) || typeof c.id !== 'string' || !inRange(c.amountMl, 0.0001, LIMITS.waterMl)) return 'One of the water cups is malformed.'; }
+        for (const c of parsed.water.cups) { if (!isObj(c) || badId(c.id) || !inRange(c.amountMl, 0.0001, LIMITS.waterMl)) return 'One of the water cups is malformed.'; }
       }
     }
     if (parsed.waterEntries != null) {
       if (!Array.isArray(parsed.waterEntries)) return 'Invalid water-entry list.';
       for (const w of parsed.waterEntries) {
-        if (!isObj(w) || !inRange(w.amountMl, 0.0001, LIMITS.waterMl) || !validDate(w.date, todayIso)) return 'One of the water entries is malformed.';
+        if (!isObj(w) || (w.id != null && badId(w.id)) || !inRange(w.amountMl, 0.0001, LIMITS.waterMl) || !validDate(w.date, todayIso)) return 'One of the water entries is malformed.';
       }
     }
 
@@ -173,7 +183,7 @@
       if (parsed.food.entries != null) {
         if (!Array.isArray(parsed.food.entries)) return 'Invalid food-entry list.';
         for (const f of parsed.food.entries) {
-          if (!isObj(f) || typeof f.id !== 'string') return 'One of the food entries is malformed.';
+          if (!isObj(f) || badId(f.id)) return 'One of the food entries is malformed.';
           if (!validDate(f.date, todayIso)) return 'One of the food entries has an invalid date.';
           for (const k of macroKeys) { if (!optRange(f[k], 0, macroLimit(k))) return `A food entry on ${f.date} has an invalid ${k} value.`; }
         }
@@ -181,7 +191,7 @@
       if (parsed.food.savedFoods != null) {
         if (!Array.isArray(parsed.food.savedFoods)) return 'Invalid saved-foods list.';
         for (const f of parsed.food.savedFoods) {
-          if (!isObj(f) || typeof f.id !== 'string' || typeof f.name !== 'string') return 'One of the saved foods is malformed.';
+          if (!isObj(f) || badId(f.id) || badName(f.name)) return 'One of the saved foods is malformed.';
           for (const k of macroKeys) { if (!optRange(f[k], 0, macroLimit(k))) return `Saved food "${f.name}" has an invalid ${k} value.`; }
         }
       }

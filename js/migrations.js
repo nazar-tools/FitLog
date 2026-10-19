@@ -278,6 +278,7 @@
     // other settings object here — only had keys for the fields that
     // existed when it was created.
     9: (data, deps) => {
+      if (!data.settings.macroGoals) data.settings.macroGoals = {};
       ['sugar', 'sodium', 'caffeine'].forEach((k) => {
         if (!data.settings.macroGoals[k]) data.settings.macroGoals[k] = { enabled: false, goal: null };
       });
@@ -330,6 +331,11 @@
     // existing installs; guidance starts off like every other insight).
     11: (data, deps) => {
       const usedExtraKeys = new Set();
+      if (!data.food) data.food = { entries: [] };
+      if (!data.settings.macroGoals) data.settings.macroGoals = {};
+      ['protein', 'carbs', 'fat', 'sugar', 'sodium', 'caffeine'].forEach((k) => {
+        if (!data.settings.macroGoals[k]) data.settings.macroGoals[k] = { enabled: false, goal: null };
+      });
       (data.food.entries || []).forEach((e) => {
         ['sugar', 'sodium', 'caffeine'].forEach((k) => { if (e[k] != null) usedExtraKeys.add(k); });
       });
@@ -406,7 +412,58 @@
     return data;
   }
 
-  const api = { SCHEMA_VERSION, HOME_SECTION_DEFAULTS, MIGRATIONS, runMigrations, guessBodyRegion };
+  const isObj = (v) => v != null && typeof v === 'object' && !Array.isArray(v);
+  const UNSAFE_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
+  /** Copies `saved` over a fresh copy of `defaults`, one level of nesting at a
+   *  time, so a partial saved object (say macroGoals with only calories) keeps
+   *  the default for everything it omits. Never copies prototype-polluting keys
+   *  and never shares an object with `defaults`. */
+  function mergeSettings(defaults, saved) {
+    const out = {};
+    Object.keys(defaults).forEach((k) => {
+      out[k] = isObj(defaults[k]) ? mergeSettings(defaults[k], {}) : Array.isArray(defaults[k]) ? defaults[k].slice() : defaults[k];
+    });
+    if (!isObj(saved)) return out;
+    Object.keys(saved).forEach((k) => {
+      if (UNSAFE_KEYS.has(k)) return;
+      const v = saved[k];
+      if (isObj(out[k]) && isObj(v)) out[k] = mergeSettings(out[k], v);
+      else if (isObj(v)) out[k] = mergeSettings({}, v);
+      else out[k] = Array.isArray(v) ? v.slice() : v;
+    });
+    return out;
+  }
+
+  /** Makes sure every top-level section exists after migrations, so a file that
+   *  is missing one (a hand-edited or partial backup) cannot crash the app.
+   *  `deps` = { defaultSettings, defaultProfile, defaultTrackers, defaultWater, defaultFood }. */
+  function normalize(data, deps) {
+    data.settings = mergeSettings(deps.defaultSettings(), data.settings);
+    data.profile = Object.assign(deps.defaultProfile(), isObj(data.profile) ? data.profile : {});
+    if (!Array.isArray(data.exercises)) data.exercises = [];
+    if (!Array.isArray(data.entries)) data.entries = [];
+    if (!Array.isArray(data.trackers)) data.trackers = deps.defaultTrackers();
+    if (!Array.isArray(data.measurements)) data.measurements = [];
+    if (!isObj(data.water) || !Array.isArray(data.water.cups)) data.water = Object.assign(deps.defaultWater(), isObj(data.water) ? { goalMl: data.water.goalMl } : {});
+    if (!Array.isArray(data.waterEntries)) data.waterEntries = [];
+    const food = isObj(data.food) ? data.food : {};
+    data.food = Object.assign({}, food, {
+      entries: Array.isArray(food.entries) ? food.entries : [],
+      savedFoods: Array.isArray(food.savedFoods) ? food.savedFoods : [],
+    });
+    return data;
+  }
+
+  /** The one entry point for loading saved or imported data: migrate the raw
+   *  object (so migrations see exactly what the file contained), then fill in
+   *  defaults for anything still missing. */
+  function upgrade(raw, deps) {
+    if (!isObj(raw.settings)) raw.settings = {};
+    return normalize(runMigrations(raw, deps), deps);
+  }
+
+  const api = { SCHEMA_VERSION, HOME_SECTION_DEFAULTS, MIGRATIONS, runMigrations, mergeSettings, normalize, upgrade, guessBodyRegion };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.FitMigrations = api;
 })(typeof window !== 'undefined' ? window : globalThis);

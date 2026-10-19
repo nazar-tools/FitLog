@@ -14,14 +14,16 @@
   --surface-2:       #f2f1ed;   /* a slightly recessed surface (badges, track backgrounds) */
   --text-primary:    #0b0b0b;   /* headings, primary numbers */
   --text-secondary:  #52514e;   /* supporting/secondary text */
-  --muted:           #898781;   /* least prominent text (timestamps, hints) */
+  --muted:           #6f6e69;   /* least prominent text (timestamps, hints); 4.5:1 or better on every surface */
   --gridline:        #e1e0d9;   /* hairline dividers between rows */
   --baseline:        #c3c2b7;   /* chart axis lines, goal reference line */
   --border:          rgba(11,11,11,0.10); /* the subtle 1px border every card uses */
 
-  --accent:          #2a78d6;   /* THE app color — meter fill, buttons, links, active tab */
+  --accent:          #2570cc;   /* THE app color — meter fill, links, active tab */
+  --accent-fill:     #2570cc;   /* behind white text (buttons, selected day); 4.5:1 or better with --on-accent */
   --accent-track:    #b7d3f6;   /* the unfilled part of a progress meter (a lighter step of --accent) */
   --accent-strong:   #184f95;   /* a darker step of --accent: text and icons sitting on --accent-soft */
+  --on-accent-track: #184f95;   /* text on --accent-track (selected segments and chips) */
   --accent-soft:     #dbe9fb;   /* a quiet tint of --accent: selected chips, icon tiles, info notes */
   --good:            #2f9a5c;   /* "goal reached" green */
   --good-bg:         #e3f3ea;   /* unused background tint for --good, kept for future use */
@@ -67,14 +69,16 @@
     --surface-2:       #232322;
     --text-primary:    #ffffff;
     --text-secondary:  #c3c2b7;
-    --muted:           #898781;
+    --muted:           #9a988f;
     --gridline:        #2c2c2a;
     --baseline:        #383835;
     --border:          rgba(255,255,255,0.10);
 
     --accent:          #3987e5;
+    --accent-fill:     #2c72cc;
     --accent-track:    #184f95;
     --accent-strong:   #86b6ef;
+    --on-accent-track: #ffffff;
     --accent-soft:     #17365c;
     --good:            #4dba7f;
     --good-bg:         rgba(77,186,127,0.16);
@@ -95,14 +99,16 @@
   --surface-2:       #232322;
   --text-primary:    #ffffff;
   --text-secondary:  #c3c2b7;
-  --muted:           #898781;
+  --muted:           #9a988f;
   --gridline:        #2c2c2a;
   --baseline:        #383835;
   --border:          rgba(255,255,255,0.10);
 
   --accent:          #3987e5;
+  --accent-fill:     #2c72cc;
   --accent-track:    #184f95;
   --accent-strong:   #86b6ef;
+  --on-accent-track: #ffffff;
   --accent-soft:     #17365c;
   --good:            #4dba7f;
   --good-bg:         rgba(77,186,127,0.16);
@@ -130,6 +136,8 @@ body {
   color: var(--text-primary);
   font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
   -webkit-tap-highlight-color: transparent;
+  /* A long unbroken name or note (a pasted URL, say) wraps instead of pushing the page wider. */
+  overflow-wrap: anywhere;
 }
 h1, h2, h3 { margin: 0; font-weight: 600; }
 p { margin: 0; }
@@ -236,7 +244,7 @@ button { font-family: inherit; }
 }
 .domain-tab .icon { width: 20px; height: 20px; }
 .domain-tab span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
-.domain-tab[aria-checked="true"] { background: var(--accent-track); border-color: var(--accent); color: var(--accent); }
+.domain-tab[aria-checked="true"] { background: var(--accent-track); border-color: var(--accent); color: var(--on-accent-track); }
 
 /* Setup wizard interest tiles: fixed 3-column grid; each tile toggles on its own,
    so state is aria-pressed rather than aria-checked. */
@@ -244,7 +252,7 @@ button { font-family: inherit; }
 .interest-tile { padding: var(--sp-16) var(--sp-4); }
 .interest-tile .icon { width: 24px; height: 24px; }
 .interest-tile .name { font-size: var(--fs-xs); font-weight: 600; }
-.interest-tile[aria-pressed="true"] { background: var(--accent-track); border-color: var(--accent); color: var(--accent); }
+.interest-tile[aria-pressed="true"] { background: var(--accent-track); border-color: var(--accent); color: var(--on-accent-track); }
 
 /* ============ Toggled-off / not-tracked state ============
    Dimmed only; the element stays tappable so it can be switched back on. */
@@ -280,7 +288,7 @@ button { font-family: inherit; }
 .streak-week { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: var(--sp-4); margin-top: var(--sp-12); text-align: center; }
 .streak-day { display: flex; flex-direction: column; align-items: center; gap: var(--sp-6); font-size: var(--fs-xs); color: var(--text-secondary); }
 .streak-dot { display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 50%; border: 1px solid var(--gridline); color: var(--muted); }
-.streak-dot.on { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.streak-dot.on { background: var(--accent-fill); border-color: var(--accent-fill); color: var(--on-accent); }
 .streak-dot .icon { width: 14px; height: 14px; }
 
 /* ============ Home: glance rows ============
@@ -348,7 +356,7 @@ button { font-family: inherit; }
 .icon-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: var(--sp-8); }
 .icon-cell { display: flex; align-items: center; justify-content: center; height: 52px; color: var(--text-primary); background: var(--surface-1); border: 1px solid var(--border); border-radius: var(--radius-md); cursor: pointer; }
 .icon-cell .icon { width: 22px; height: 22px; }
-.icon-cell[aria-checked="true"] { color: var(--accent); background: var(--accent-track); border: 2px solid var(--accent); }
+.icon-cell[aria-checked="true"] { color: var(--on-accent-track); background: var(--accent-track); border: 2px solid var(--accent); }
 
 /* ============ Habit (Log screen) ============ */
 .habit-panel { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-12); padding: var(--sp-8) 0 var(--sp-12); }
@@ -471,7 +479,7 @@ button { font-family: inherit; }
    each tier's threshold. */
 .tier-bar { display: flex; gap: var(--sp-4); margin-top: var(--sp-8); }
 /* One selected state for every pill and segment: accent fill, light text. */
-.chip-option.is-active, .variant-chip.is-active, .tier-seg.is-current { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.chip-option.is-active, .variant-chip.is-active, .tier-seg.is-current { background: var(--accent-fill); border-color: var(--accent-fill); color: var(--on-accent); }
 .tier-seg {
   flex: 1; text-align: center; padding: var(--sp-6) var(--sp-2); border-radius: var(--radius-sm);
   background: var(--surface-2); color: var(--text-secondary);
@@ -552,7 +560,6 @@ button { font-family: inherit; }
 .field-label { font-size: var(--fs-sm); color: var(--text-secondary); font-weight: 500; }
 /* Required-field marker — currently just Calories in the food log/edit
    forms (see handleLogFoodSubmit). */
-.req-mark { color: var(--critical); font-weight: 700; }
 /* A short explainer line under a field's control, e.g. the Section picker's
    "shown as a full progress card..." text. */
 .field-hint { margin-top: var(--sp-2); }
@@ -627,7 +634,7 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 1p
   font-weight: 600;
   cursor: pointer;
 }
-.btn-primary { background: var(--accent); color: var(--on-accent); }
+.btn-primary { background: var(--accent-fill); color: var(--on-accent); }
 .btn-secondary { background: var(--surface-2); color: var(--text-primary); border: 1px solid var(--border); }
 .btn-danger { background: var(--critical-bg); color: var(--critical); }
 .btn-block { width: 100%; }
@@ -673,7 +680,7 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 1p
    switcher can list 7); buttons keep their natural width. */
 .segmented { flex-shrink: 0; display: inline-flex; gap: 1px; max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; background: var(--border) padding-box; border: 1px solid var(--border); border-radius: var(--radius-sm); }
 .segmented button { flex: none; border: none; border-radius: 0; background: var(--surface-2); color: var(--text-primary); min-width: 52px; padding: var(--sp-8) var(--sp-16); font-size: var(--fs-md); font-weight: 600; cursor: pointer; white-space: nowrap; }
-.segmented button[aria-checked="true"] { background: var(--accent-track); color: var(--accent); }
+.segmented button[aria-checked="true"] { background: var(--accent-track); color: var(--on-accent-track); }
 /* Many choices: one bar that wraps into rows of three. */
 .segmented.segmented-grid, .field > .segmented.segmented-grid { display: grid; grid-template-columns: repeat(3, 1fr); }
 .segmented-grid button:last-child:nth-child(3n+1) { grid-column: span 3; }
@@ -775,7 +782,7 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 1p
 }
 .calendar-day:disabled { visibility: hidden; cursor: default; }
 .calendar-day.is-today { background: var(--surface-2); font-weight: 700; }
-.calendar-day.is-selected { background: var(--accent); color: var(--on-accent); font-weight: 700; }
+.calendar-day.is-selected { background: var(--accent-fill); color: var(--on-accent); font-weight: 700; }
 .calendar-day.is-selected.is-today { box-shadow: inset 0 0 0 2px var(--surface-1); }
 .calendar-day-dots { display: flex; gap: var(--sp-2); height: 5px; }
 .cal-dot { width: 5px; height: 5px; border-radius: 999px; display: inline-block; }
@@ -822,7 +829,7 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 1p
 /* Center Log button: a filled accent circle raised above the bar; the
    border matches the bar so it cuts the top line cleanly. */
 .tab-log { position: relative; overflow: visible; padding-top: calc(var(--sp-12) + var(--sp-24)); }
-.tab-log-badge { display: flex; align-items: center; justify-content: center; position: absolute; top: calc(var(--sp-20) * -1); left: 50%; transform: translateX(-50%); width: 52px; height: 52px; border-radius: 50%; background: var(--accent); color: var(--on-accent); border: 4px solid var(--surface-1); }
+.tab-log-badge { display: flex; align-items: center; justify-content: center; position: absolute; top: calc(var(--sp-20) * -1); left: 50%; transform: translateX(-50%); width: 52px; height: 52px; border-radius: 50%; background: var(--accent-fill); color: var(--on-accent); border: 4px solid var(--surface-1); }
 .tab-log .icon { width: 24px; height: 24px; }
 
 /* ============ Modal ============ */
@@ -930,9 +937,9 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 1p
   border: 1px solid var(--border); background: var(--surface-2); color: var(--text-primary);
   white-space: nowrap; cursor: pointer;
 }
-.f-chip[aria-checked="true"], .f-chip.on { background: var(--accent-track); color: var(--accent); }
+.f-chip[aria-checked="true"], .f-chip.on { background: var(--accent-track); color: var(--on-accent-track); }
 .f-chip .n { font-weight: 400; color: var(--text-secondary); }
-.f-chip[aria-checked="true"] .n, .f-chip.on .n { color: var(--accent); opacity: .8; }
+.f-chip[aria-checked="true"] .n, .f-chip.on .n { color: var(--on-accent-track); opacity: .8; }
 .f-chips { display: flex; gap: var(--sp-8); overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
 .f-chips::-webkit-scrollbar { display: none; }
 .f-chips.wrap { flex-wrap: wrap; overflow: visible; }
@@ -1015,7 +1022,7 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 1p
 .log-head .entry-row-sub { white-space: normal; }
 .row-switch { cursor: pointer; }
 .row-switch .icon { width: 18px; height: 18px; color: var(--muted); flex: none; }
-.card-list > .row-switch { width: 100%; border: 0; background: none; font: inherit; color: inherit; text-align: left; }
+button.row-switch { width: 100%; border: 0; background: none; font: inherit; color: inherit; text-align: left; }
 
 .segmented-fill { display: flex; }
 .segmented-fill button { flex: 1 1 0; min-width: 0; }
@@ -1030,7 +1037,7 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 1p
   display: inline-flex; align-items: center; justify-content: center; color: var(--on-accent);
 }
 .cat-check svg { width: 16px; height: 16px; }
-.cat-check.is-on { background: var(--accent); border-color: var(--accent); }
+.cat-check.is-on { background: var(--accent-fill); border-color: var(--accent-fill); }
 .cat-check.is-disabled.is-on { background: var(--muted); border-color: var(--muted); }
 
 .cat-variants .field-hint { flex: 1 0 100%; margin: var(--sp-2) 0 0; }
@@ -1041,10 +1048,10 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 1p
 }
 .cat-packs { display: flex; flex-direction: column; gap: var(--sp-8); margin: var(--sp-4) 0 var(--sp-8); }
 .cat-packs .btn { align-self: flex-start; }
-.chip-option.is-active.is-added { background: var(--accent-soft); color: var(--accent); border-color: transparent; }
+.chip-option.is-active.is-added { background: var(--accent-soft); color: var(--accent-strong); border-color: transparent; }
 
 /* ---------- Home sections ---------- */
-.tag { display: inline-block; font-size: var(--fs-xs); font-weight: 700; padding: var(--sp-2) var(--sp-8); border-radius: 999px; background: var(--accent-soft); color: var(--accent); }
+.tag { display: inline-block; font-size: var(--fs-xs); font-weight: 700; padding: var(--sp-2) var(--sp-8); border-radius: 999px; background: var(--accent-soft); color: var(--accent-strong); }
 .tag-good { background: var(--good-bg); color: var(--good); }
 .link-btn { background: none; border: 0; padding: var(--sp-4) 0; font: inherit; font-size: var(--fs-sm); font-weight: 700; color: var(--accent); cursor: pointer; }
 .head-actions .icon-btn-sm { width: 32px; height: 32px; }
@@ -1146,7 +1153,7 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 1p
 .today-bar .meter-fill { background: var(--accent); }
 #foodTodayBar .meter-fill { background: var(--dot-food); }
 .today-bar .meter-fill.is-over { background: var(--warning); }
-.add-btn { flex: none; width: 44px; height: 44px; border-radius: 50%; border: 0; background: var(--accent); color: var(--on-accent); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; }
+.add-btn { flex: none; width: 44px; height: 44px; border-radius: 50%; border: 0; background: var(--accent-fill); color: var(--on-accent); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; }
 .add-btn svg { width: 20px; height: 20px; }
 .add-btn:active { transform: scale(.94); }
 .saved-food-log-row .entry-row-sub { white-space: normal; }
@@ -1188,7 +1195,7 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 1p
 .setup-tile-desc { font-size: var(--fs-xs); color: var(--text-secondary); line-height: 1.3; }
 .setup-tile-check { position: absolute; top: 10px; right: 10px; width: 22px; height: 22px; border-radius: 50%; border: 1.5px solid var(--border); display: inline-flex; align-items: center; justify-content: center; color: var(--on-accent); }
 .setup-tile-check svg { width: 14px; height: 14px; }
-.setup-tile.is-on .setup-tile-check { background: var(--accent); border-color: var(--accent); }
+.setup-tile.is-on .setup-tile-check { background: var(--accent-fill); border-color: var(--accent-fill); }
 .note-box { display: flex; gap: var(--sp-8); align-items: flex-start; padding: var(--sp-12) var(--sp-16); border-radius: var(--radius-md); background: var(--surface-2); color: var(--text-secondary); font-size: var(--fs-sm); line-height: 1.4; }
 .note-box svg { flex: none; width: 18px; height: 18px; margin-top: 1px; }
 .setup-actions { display: flex; flex-direction: column; gap: var(--sp-6); margin-top: auto; padding-top: var(--sp-6); }
@@ -1203,7 +1210,7 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 1p
 .setup-big b { font-size: var(--fs-3xl); font-weight: 800; font-variant-numeric: tabular-nums; }
 .pick-chip { display: inline-flex; align-items: center; gap: var(--sp-6); padding: var(--sp-8) var(--sp-16); min-height: 40px; border-radius: 999px; border: 1.5px solid var(--border); background: var(--surface-1); color: var(--text-primary); font: inherit; font-size: var(--fs-md); font-weight: 600; cursor: pointer; }
 .pick-chip svg { width: 15px; height: 15px; }
-.pick-chip.is-on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+.pick-chip.is-on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-strong); }
 .pick-chip.is-fixed { opacity: .8; cursor: default; }
 
 .last-time { display: flex; flex-direction: column; gap: var(--sp-6); padding: var(--sp-12) var(--sp-16); border-radius: var(--radius-md); background: var(--surface-2); }
