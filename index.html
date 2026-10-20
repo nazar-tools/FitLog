@@ -144,6 +144,9 @@
         <p>Every domain is turned off. Turn one back on in Manage to start logging.</p>
       </div>
 
+      <!-- Log -> Daily: habits and daily rep targets (rendered by renderLogDailyPanel). -->
+      <div id="logDailyPanel" class="daily-panel" hidden></div>
+
       <!-- Log -> Workout. Nothing chosen yet (or "Switch exercise" tapped):
            the searchable picker below, same pattern as Log -> Food. Once an
            exercise is chosen the form leads, with the list collapsed to the
@@ -328,10 +331,6 @@
             <span class="setting-row-label"><span class="setting-icon" data-icon="footprints"></span><span>Running &amp; cardio</span></span>
             <button type="button" class="switch" id="trackCardioSwitch" role="switch" aria-checked="false" aria-label="Track running and cardio"><span class="switch-track"><span class="switch-thumb"></span></span></button>
           </div>
-          <div class="setting-row">
-            <span class="setting-row-label"><span class="setting-icon" data-icon="habits"></span><span>Habits &amp; daily reps</span></span>
-            <button type="button" class="switch" id="trackHabitsSwitch" role="switch" aria-checked="false" aria-label="Track habits and daily reps"><span class="switch-track"><span class="switch-thumb"></span></span></button>
-          </div>
         </div>
         <p class="muted-text" id="trackWorkoutOffHint" hidden>Workout is off — hidden from the dashboard, Log, and History. Nothing already logged is lost; turn it back on to see it again.</p>
 
@@ -345,6 +344,25 @@
           <label class="search"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg><input type="search" id="exManageSearch" placeholder="Search exercises" aria-label="Search exercises" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="search" /></label>
           <div class="f-scroll pg"><div class="f-chips" id="exManageChips" role="radiogroup"></div><button type="button" class="f-more" aria-label="See more filters"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg></button></div>
           <div id="exerciseManageList" class="org-list"></div>
+        </div>
+      </div>
+
+      <div id="manageDailyPanel" hidden>
+        <div class="card card-list">
+          <div class="setting-row">
+            <span class="setting-row-label"><span class="setting-icon" data-icon="daily"></span><span>Track this</span></span>
+            <button type="button" class="switch" id="trackHabitsSwitch" role="switch" aria-checked="false" aria-label="Track daily habits and reps"><span class="switch-track"><span class="switch-thumb"></span></span></button>
+          </div>
+        </div>
+        <p class="muted-text" id="trackDailyOffHint" hidden>Daily is off — hidden from the dashboard, Log, and History. Nothing already logged is lost; turn it back on to see it again.</p>
+
+        <div id="dailyTrackedFields">
+          <div class="section-head">
+            <h2>Habits &amp; reps</h2>
+            <div class="head-actions"><button class="btn btn-secondary btn-sm" data-action="open-catalog" data-cat-tab-open="habits">From catalog</button><button class="btn btn-secondary btn-sm btn-icon-label" data-action="add-daily"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg><span>Add</span></button></div>
+          </div>
+          <p class="muted-text">Things you do every day. A habit is checked off (once or a few times a day); a daily rep target, like push-ups, adds up toward a number.</p>
+          <div id="dailyManageList" class="org-list"></div>
         </div>
       </div>
 
@@ -506,7 +524,7 @@
         </div>
         <div class="profile-edit profile-save" id="profileSaveRow" hidden><button class="btn btn-secondary btn-sm" id="saveProfileBtn">Save profile</button></div>
       </div>
-      <p class="muted-text profile-note">Used only by the optional insight calculators (BMI, strength and pace level, nutrition). Never required.</p>
+      <p class="muted-text profile-note">Used only by the optional insight calculators (BMI, strength and running level, nutrition). Never required.</p>
 
       <div class="section-head"><h2>Units</h2></div>
       <div class="card card-list">
@@ -587,12 +605,12 @@
           <button type="button" class="switch" id="showWeightInsightsSwitch" role="switch" aria-checked="false" aria-label="Body weight insights"><span class="switch-track"><span class="switch-thumb"></span></span></button>
         </div>
         <div class="setting-row">
-          <span class="setting-row-label"><span class="setting-icon" data-icon="trophy"></span><span>Strength level <span class="muted-text">(lifts vs. bodyweight)</span></span></span>
+          <span class="setting-row-label"><span class="setting-icon" data-icon="trophy"></span><span>Strength level <span class="muted-text">(lifts and bodyweight moves)</span></span></span>
           <button type="button" class="switch" id="showStrengthLevelSwitch" role="switch" aria-checked="false" aria-label="Strength level"><span class="switch-track"><span class="switch-thumb"></span></span></button>
         </div>
         <div class="setting-row">
-          <span class="setting-row-label"><span class="setting-icon" data-icon="footprints"></span><span>Pace level <span class="muted-text">(runs)</span></span></span>
-          <button type="button" class="switch" id="showPaceLevelSwitch" role="switch" aria-checked="false" aria-label="Pace level"><span class="switch-track"><span class="switch-thumb"></span></span></button>
+          <span class="setting-row-label"><span class="setting-icon" data-icon="footprints"></span><span>Running level <span class="muted-text">(runs vs. 5K tiers)</span></span></span>
+          <button type="button" class="switch" id="showPaceLevelSwitch" role="switch" aria-checked="false" aria-label="Running level"><span class="switch-track"><span class="switch-thumb"></span></span></button>
         </div>
         <div class="setting-row">
           <span class="setting-row-label"><span class="setting-icon" data-icon="moon"></span><span>Sleep insights <span class="muted-text">(last 7 nights)</span></span></span>
@@ -602,7 +620,7 @@
           <span class="setting-row-label"><span class="setting-icon" data-icon="apple"></span><span>Macro guidance <span class="muted-text">(%DV for Fat, Sugar, Sodium, etc.)</span></span></span>
           <button type="button" class="switch" id="showMacroGuidanceSwitch" role="switch" aria-checked="false" aria-label="Macro guidance"><span class="switch-track"><span class="switch-thumb"></span></span></button>
         </div>
-        <p class="muted-text field-hint">Strength and pace levels use published benchmarks, split by sex (set in Profile above).</p>
+        <p class="muted-text field-hint">Strength and running levels use Strength Level and Running Level benchmarks, split by sex (and age, for running) set in Profile above.</p>
       </div>
 
       <div class="section-head"><h2>Backup</h2></div>
@@ -613,6 +631,13 @@
           <button class="btn btn-secondary btn-icon-label" id="importBtn"><span data-icon="upload"></span>Import backup</button>
         </div>
         <input type="file" id="importFile" accept="application/json" hidden />
+      </div>
+
+      <div class="section-head"><h2>Erase data</h2></div>
+      <div class="card danger-zone">
+        <div class="danger-title"><span data-icon="triangle-alert"></span><span>This can&rsquo;t be reversed</span></div>
+        <p class="muted-text">Deletes everything Fit Log has saved on this device: exercises, entries, measurements, water, food, habits, your profile and your settings. The app then restarts from the setup guide. Export a backup first if you might want any of it back.</p>
+        <button type="button" class="btn btn-danger-solid btn-block btn-icon-label" id="eraseAllBtn"><span data-icon="trash"></span>Erase all data</button>
       </div>
 
       <div class="section-head"><h2>About</h2></div>
@@ -662,6 +687,7 @@
 <script src="js/units.js"></script>
 <script src="js/calc.js"></script>
 <script src="js/features.js"></script>
+<script src="js/strength-data.js"></script>
 <script src="js/standards.js"></script>
 <script src="js/backup.js"></script>
 <script src="js/migrations.js"></script>

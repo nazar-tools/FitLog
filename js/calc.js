@@ -80,7 +80,75 @@
     return best;
   }
 
-  const api = { localDateISO, activityDays, computeStreak, sleepInsights, bestEstimatedOneRM };
+  /** Most reps in one set done at body weight (sets with added weight are left to
+   *  bestAddedOneRM), with that set. Null when none. */
+  function bestReps(entries) {
+    let best = null;
+    entries.forEach((entry) => {
+      (entry.sets || []).forEach((st) => {
+        if (!(st.reps >= 1) || st.addedWeight > 0) return;
+        if (!best || st.reps > best.reps) best = { reps: st.reps };
+      });
+    });
+    return best;
+  }
+
+  /** Best estimated 1RM of the weight added to the body, over sets of 1 to
+   *  S.ONE_RM_MAX_REPS reps with added weight. The whole load (body weight + added)
+   *  goes through Epley, then the body weight is taken off again. Null without a
+   *  body weight or a weighted set. */
+  function bestAddedOneRM(entries, bodyweightLb, S) {
+    if (!(bodyweightLb > 0)) return null;
+    let best = null;
+    entries.forEach((entry) => {
+      (entry.sets || []).forEach((st) => {
+        if (!(st.addedWeight > 0)) return;
+        const est = S.estimateOneRM(bodyweightLb + st.addedWeight, st.reps);
+        if (!est) return;
+        const added = est.value - bodyweightLb;
+        if (!best || added > best.added) best = { added, addedWeight: st.addedWeight, reps: st.reps, method: est.method };
+      });
+    });
+    return best;
+  }
+
+  /** An exercise's strength level against Strength Level's tables (S.STRENGTH).
+   *  `key` names the standard, `entries` are the exercise's entries, `who` is
+   *  { sex, bodyweightLb }. Returns { missing: 'sex' | 'bodyweight' } when the
+   *  tables cannot be read yet, null when there is no such standard, otherwise
+   *  the standard's label and `results`: one per way of measuring it ('1rm'
+   *  estimated one-rep max, 'reps' best set at body weight, 'added' one-rep max of
+   *  the weight added to the body), each with its value, the five thresholds and
+   *  the tier reached (0 = Untrained .. 5 = Elite). `best` is the index of the
+   *  result with the highest tier, or -1 when nothing is logged yet. */
+  function strengthLevel(key, entries, who, S) {
+    const std = S.STRENGTH[key];
+    if (!std) return null;
+    if (!(who.sex === 'male' || who.sex === 'female')) return { missing: 'sex' };
+    if (!(who.bodyweightLb > 0)) return { missing: 'bodyweight' };
+    const results = [];
+    const add = (mode, found, value, detail) => {
+      const thresholds = S.strengthThresholds(key, who.sex, who.bodyweightLb, mode === 'added' ? 'added' : undefined);
+      if (!thresholds) return;
+      results.push({ mode, value: found ? value : null, detail: found ? detail : null, thresholds, tier: found ? S.tierIndex(value, thresholds) : 0 });
+    };
+    if (std.metric === '1rm') {
+      const b = bestEstimatedOneRM(entries, S);
+      add('1rm', !!b, b && b.oneRM, b);
+    } else {
+      const r = bestReps(entries);
+      add('reps', !!r, r && r.reps, r);
+      if (std.added) {
+        const a = bestAddedOneRM(entries, who.bodyweightLb, S);
+        add('added', !!a, a && a.added, a);
+      }
+    }
+    let best = -1;
+    results.forEach((r, i) => { if (r.value != null && (best < 0 || r.tier > results[best].tier)) best = i; });
+    return { key, label: std.label, group: std.group, load: std.load, metric: std.metric, results, best };
+  }
+
+  const api = { localDateISO, activityDays, computeStreak, sleepInsights, bestEstimatedOneRM, bestReps, bestAddedOneRM, strengthLevel };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.FitCalc = api;
 })(typeof window !== 'undefined' ? window : globalThis);

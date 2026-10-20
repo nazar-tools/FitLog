@@ -9,7 +9,7 @@
   const cardioTracked = (s) => s.trackCardio !== false;
   const habitsTracked = (s) => s.trackHabits !== false;
 
-  /** A habit, or a daily rep target: things that live in the Home checklist. */
+  /** A habit, or a daily rep target: things that live in the Daily area and the Home checklist. */
   const isHabitLike = (ex) => ex.kind === 'habit' || (ex.section || 'goal') === 'daily';
 
   /** Whether an exercise is visible: habits follow Habits, cardio follows
@@ -21,21 +21,20 @@
     return liftingTracked(s);
   }
 
-  /** The four top-level areas: workout, measurements, water, food. */
+  /** The five top-level areas: workout, daily (habits and daily reps),
+   *  measurements, water, food. Workout follows Lifting or Running & cardio. */
   function domainTracked(s, id) {
-    if (id === 'workout') return !!(s.trackWorkout || cardioTracked(s) || habitsTracked(s));
+    if (id === 'workout') return !!(s.trackWorkout || cardioTracked(s));
+    if (id === 'daily') return habitsTracked(s);
     if (id === 'measurements') return !!s.trackMeasurements;
     if (id === 'water') return !!s.trackWater;
     return !!s.trackFood;
   }
 
-  /** With only Habits on, the Workout area is called Habits. */
-  const habitsOnly = (s) => !s.trackWorkout && !cardioTracked(s) && habitsTracked(s);
-
   /** Home blocks default to on; a stored `false` hides one. */
   const homeSectionOn = (s, key) => !s.homeSections || s.homeSections[key] !== false;
 
-  const api = { liftingTracked, cardioTracked, habitsTracked, isHabitLike, exerciseTracked, domainTracked, habitsOnly, homeSectionOn };
+  const api = { liftingTracked, cardioTracked, habitsTracked, isHabitLike, exerciseTracked, domainTracked, homeSectionOn };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.FitFeatures = api;
 })(typeof window !== 'undefined' ? window : globalThis);

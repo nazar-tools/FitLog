@@ -9,7 +9,7 @@
      js/migrations.js  schema version and migrations (additive only)
      js/units.js       unit conversion and number formatting
      js/calc.js        streak, sleep and estimated-1RM calculators
-     js/features.js    feature on/off rules (Lifting, Running & cardio, Habits)
+     js/features.js    feature on/off rules (Lifting, Running & cardio, Daily habits and reps)
      js/standards.js   reference tables and nutrition maths
      js/icons.js       ITEM_ICONS data
      js/catalog.js, js/backup.js, js/charts.js
@@ -81,7 +81,7 @@
     // Daily-value guidance in the Food detail modal.
     showMacroGuidance: true,
     // Master "Track this" switches. trackWorkout is the Lifting switch; the Workout
-    // area stays on while Lifting, Running & cardio or Habits is on (js/features.js).
+    // area stays on while Lifting or Running & cardio is on, and Daily follows trackHabits (js/features.js).
     // An off area is hidden from Log, History and Home. Manage always shows it so it
     // can be turned back on.
     trackWorkout: true,
@@ -89,7 +89,8 @@
     trackMeasurements: true,
     trackWater: true,
     trackFood: true,
-    // Habits and daily-rep targets (Home checklist), independent of Lifting.
+    // The Daily area: habits and daily-rep targets (Log, History, Manage and the Home
+    // checklist), independent of Lifting. Stored as trackHabits so saved data keeps working.
     trackHabits: true,
     // Running and cardio exercises, separate from lifting (trackWorkout).
     trackCardio: true,
@@ -220,6 +221,9 @@
   function exerciseById(id) { return state.exercises.find((e) => e.id === id); }
   function entriesFor(exId) { return state.entries.filter((e) => e.exerciseId === exId); }
   function sectionOf(ex) { return ex.section || 'goal'; }
+  // Habits and daily reps live in the Daily area (Log, History, Manage); everything else is Workout.
+  const isDailyEx = (ex) => !!ex && F.isHabitLike(ex);
+  const isDailyEntry = (en) => isDailyEx(exerciseById(en.exerciseId));
   const SECTION_LABELS = { goal: 'Goals', daily: 'Daily targets', accessory: 'Other exercises' };
 
   // A habit has no weight or reps: it is done `goal` times a day and logged with
@@ -243,6 +247,7 @@
     toast(`${ex.name} done`);
     if (document.getElementById('logExercise').value === ex.id) renderLogForm();
     if (document.getElementById('habitDoneBtn')) renderHabitDetail(ex);
+    if (logCategory === 'daily') renderLogDailyPanel();
     renderRecentEntries(); renderDashboard(); renderHistory();
   }
   function habitPanelHtml(ex) {
@@ -337,7 +342,7 @@
   function progressPct(exercise, metric) {
     const goal = exercise.kind === 'cardio' ? cardioGoalFor(exercise, metric || defaultCardioMetric(exercise)) : exercise.goal;
     // A bodyweight-standard goal is a tier calibrated to estimated 1RM (as in
-    // strengthLevelInfo), so measure it against that. A fixed goal uses the
+    // FitCalc.strengthLevel), so measure it against that. A fixed goal uses the
     // heaviest set.
     const useOneRM = exercise.kind === 'weight' && exercise.goalMode === 'standard';
     const b = useOneRM ? (bestEstimatedOneRM(exercise) || {}).oneRM ?? null : best(exercise, metric);
@@ -621,42 +626,70 @@
   }
 
   /* ============================== Insights & standards ==============================
-     Optional calculators (BMI, weight trend, strength and pace level), on by
+     Optional calculators (BMI, weight trend, strength and running level), on by
      default and switched in Settings -> Insights. Each says what is missing
      instead of guessing. Tables and sources: js/standards.js. General guidance only. */
 
   // Thresholds, formulas and sources live in js/standards.js (FitStandards).
   const S = window.FitStandards;
   const INSIGHT_TIER_LABELS = S.TIER_LABELS;
-  const LIFT_STANDARDS = S.LIFT_STANDARDS;
-  const LIFT_TYPE_LABELS = { bench: 'Bench Press', squat: 'Squat', deadlift: 'Deadlift' };
-
   // Fixed "plates" goals: 2/3/4 plates a side plus a 45 lb bar. Used by the
   // setup wizard and defaultData().
   const PLATE_GOALS = { bench: 225, squat: 315, deadlift: 405 };
-  // Wizard tier name -> LIFT_STANDARDS column. Beginner and Novice are left out
-  // as too low to be goals.
+  // Wizard tier name -> index in S.strengthThresholds() (Beginner, Novice,
+  // Intermediate, Advanced, Elite). Beginner and Novice are left out as too low
+  // to be goals.
   const TIER_TO_INDEX = { intermediate: 2, advanced: 3, elite: 4 };
-  // All tiers in LIFT_STANDARDS order, for the Beginner..Elite preview.
   const ALL_TIER_KEYS = ['beginner', 'novice', 'intermediate', 'advanced', 'elite'];
 
-  // Goal in lb for a bodyweight-standard tier, rounded to 5 lb. Shared by the
-  // setup wizard and the exercise form.
-  function computeStandardGoal(liftType, tier, bodyweightLb, sex) {
-    if (!bodyweightLb || !sex || !LIFT_STANDARDS[liftType] || TIER_TO_INDEX[tier] === undefined) return null;
-    const mult = LIFT_STANDARDS[liftType][sex][TIER_TO_INDEX[tier]];
-    return Math.round((bodyweightLb * mult) / 5) * 5;
+  // The Strength Level table an exercise is rated against: the one chosen in its
+  // form (stored as `liftType`, which holds a key of S.STRENGTH; the older values
+  // bench, squat and deadlift are keys too), else an automatic match: the library's
+  // table for its movement and equipment, or a table whose name is the exercise's
+  // own name (Pull-ups, Push-ups). Habits, timed holds and cardio have no table, and
+  // a table only applies to the right kind (1RM tables to weight, rep tables to reps).
+  let standardsByName = null;
+  function autoStandardKey(ex) {
+    let key = ex.catalogId ? S.standardKeyFor(ex.catalogId, ex.equipment) : null;
+    if (!key && !ex.catalogId) {
+      if (!standardsByName) {
+        standardsByName = {};
+        S.STRENGTH_KEYS.forEach((k) => { const n = normName(S.STRENGTH[k].label); if (!standardsByName[n]) standardsByName[n] = k; });
+      }
+      key = standardsByName[normName(ex.name)] || null;
+    }
+    return key;
+  }
+  function standardKeyFits(ex, key) {
+    const std = key && S.STRENGTH[key];
+    return !!std && !isTimed(ex) && (ex.kind === 'weight') === (std.metric === '1rm') && (ex.kind === 'weight' || ex.kind === 'reps');
+  }
+  function exStandardKey(ex) {
+    if (!ex) return null;
+    if (standardKeyFits(ex, ex.liftType)) return ex.liftType;
+    const auto = autoStandardKey(ex);
+    return standardKeyFits(ex, auto) ? auto : null;
   }
 
-  // Every tier's goal for this lift, bodyweight and sex. Null until bodyweight
+  // Goal in lb for a bodyweight-standard tier, rounded to 5 lb. Shared by the
+  // setup wizard and the exercise form. Weight standards only.
+  function computeStandardGoal(key, tier, bodyweightLb, sex) {
+    const std = S.STRENGTH[key];
+    if (!std || std.metric !== '1rm' || TIER_TO_INDEX[tier] === undefined) return null;
+    const t = S.strengthThresholds(key, sex, bodyweightLb);
+    return t ? Math.round(t[TIER_TO_INDEX[tier]] / 5) * 5 : null;
+  }
+
+  // Every tier's goal for this standard, bodyweight and sex. Null until bodyweight
   // and sex are known.
-  function standardGoalPreviewRows(liftType, bodyweightLb, sex) {
-    if (!bodyweightLb || !sex || !LIFT_STANDARDS[liftType]) return null;
-    const table = LIFT_STANDARDS[liftType][sex];
-    return ALL_TIER_KEYS.map((key, i) => ({
-      tierKey: key,
-      label: key[0].toUpperCase() + key.slice(1),
-      goalLb: Math.round((bodyweightLb * table[i]) / 5) * 5,
+  function standardGoalPreviewRows(key, bodyweightLb, sex) {
+    const std = S.STRENGTH[key];
+    const t = std && std.metric === '1rm' && S.strengthThresholds(key, sex, bodyweightLb);
+    if (!t) return null;
+    return ALL_TIER_KEYS.map((tierKey, i) => ({
+      tierKey,
+      label: tierKey[0].toUpperCase() + tierKey.slice(1),
+      goalLb: Math.round(t[i] / 5) * 5,
     }));
   }
 
@@ -667,26 +700,13 @@
     const bw = currentBodyWeightLb();
     const sex = state.profile.sex;
     state.exercises.forEach((ex) => {
-      if (ex.kind !== 'weight' || ex.goalMode !== 'standard' || !ex.liftType || !ex.goalTier) return;
+      if (ex.kind !== 'weight' || ex.goalMode !== 'standard' || !ex.goalTier) return;
+      const key = exStandardKey(ex);
+      if (!key) return;
       // A null result (bodyweight or sex missing) is assigned on purpose so the goal
       // does not keep a stale value.
-      ex.goal = computeStandardGoal(ex.liftType, ex.goalTier, bw, sex);
+      ex.goal = computeStandardGoal(key, ex.goalTier, bw, sex);
     });
-  }
-
-  // Pace tiers as sec/mile ceilings, fastest first (lower is better). Slower
-  // than the last is "Building base".
-  const PACE_TIER_LABELS = S.PACE_TIER_LABELS;
-  const PACE_TIERS = S.PACE_TIERS;
-
-  function classifyAscending(value, thresholds, labels) {
-    let idx = 0;
-    for (let i = 0; i < thresholds.length; i++) { if (value >= thresholds[i]) idx = i + 1; }
-    return labels[idx];
-  }
-  function classifyDescending(value, ceilings, labels) {
-    for (let i = 0; i < ceilings.length; i++) { if (value <= ceilings[i]) return labels[i]; }
-    return labels[labels.length - 1];
   }
 
   const BMI_CATEGORIES = S.BMI_CATEGORIES;
@@ -748,37 +768,39 @@
   }
 
   // Best estimated 1RM for one exercise (Epley, sets of 10 reps or fewer; see
-  // js/calc.js). Used by strengthLevelInfo(), which also needs a lift type, a
-  // bodyweight entry and a sex in Profile.
+  // js/calc.js). A bodyweight-standard goal is measured against it.
   function bestEstimatedOneRM(ex) {
     return window.FitCalc.bestEstimatedOneRM(entriesFor(ex.id), S);
   }
 
+  // Strength level for one exercise against its Strength Level table (see
+  // exStandardKey and FitCalc.strengthLevel). Needs a body weight entry and a sex in
+  // Profile; says which is missing instead of guessing.
   function strengthLevelInfo(ex) {
-    if (ex.kind !== 'weight' || !ex.liftType || !LIFT_STANDARDS[ex.liftType]) return null;
-    const bw = currentBodyWeightLb();
-    if (!bw) return { needsBodyWeight: true };
-    if (!state.profile.sex) return { needsSex: true };
-    const heaviestLoad = best(ex);
-    const oneRepMax = bestEstimatedOneRM(ex);
-    if (heaviestLoad == null) return null;
-    if (!oneRepMax) return { needsShorterSet: true, heaviestLoad };
-    const ratio = oneRepMax.oneRM / bw;
-    const table = LIFT_STANDARDS[ex.liftType][state.profile.sex];
-    return {
-      ratio, tier: classifyAscending(ratio, table, INSIGHT_TIER_LABELS), liftLabel: LIFT_STANDARDS[ex.liftType].label,
-      oneRepMax: oneRepMax.oneRM, oneRepMaxSet: oneRepMax, heaviestLoad,
-    };
+    const key = exStandardKey(ex);
+    if (!key) return null;
+    return window.FitCalc.strengthLevel(key, entriesFor(ex.id), { sex: state.profile.sex, bodyweightLb: currentBodyWeightLb() }, S);
   }
 
-  // Best pace against the recreational tiers; needs a logged pace and a sex in Profile.
-  function paceLevelInfo(ex) {
-    if (ex.kind !== 'cardio') return null;
-    const paceBest = best(ex, 'pace');
-    if (paceBest == null) return null;
+  // Running, matched by the library movement or, for an exercise made by hand, by
+  // its name.
+  function isRunning(ex) {
+    return ex.kind === 'cardio' && (ex.catalogId === 'cat_mv_running' || (!ex.catalogId && /^(running|run)$/.test(normName(ex.name))));
+  }
+
+  // Running level: each logged run from one mile to a marathon becomes a 5K-equivalent
+  // time (Riegel) and is placed on Running Level's age and sex table; the best run
+  // sets the level. Age is optional (an adult default is used and flagged).
+  function runLevelInfo(ex) {
+    if (!isRunning(ex)) return null;
     if (!state.profile.sex) return { needsSex: true };
-    const ceilings = PACE_TIERS[state.profile.sex];
-    return { pace: paceBest, tier: classifyDescending(paceBest, ceilings, PACE_TIER_LABELS) };
+    const age = state.profile.age;
+    let best = null;
+    entriesFor(ex.id).forEach((e) => {
+      const lvl = S.runLevel(state.profile.sex, age, e.distance, e.duration);
+      if (lvl && (!best || lvl.tier > best.level.tier || (lvl.tier === best.level.tier && lvl.equivalentSec < best.level.equivalentSec))) best = { entry: e, level: lvl };
+    });
+    return { best, ageAssumed: !(age > 0), age: age > 0 ? age : S.DEFAULT_RUN_AGE, hasRuns: entriesFor(ex.id).length > 0 };
   }
 
   /* ============================== Water ==============================
@@ -1483,7 +1505,7 @@
   // Every date with something logged in a section you track (see
   // FitStandards.STREAK_RULE): workouts/habits, food, water, body entries.
   const trackedAreas = () => ({
-    workout: domainTracked('workout'), measurements: domainTracked('measurements'),
+    workout: domainTracked('workout') || domainTracked('daily'), measurements: domainTracked('measurements'),
     water: domainTracked('water'), food: domainTracked('food'),
   });
   function activityDays() { return window.FitCalc.activityDays(state, trackedAreas()); }
@@ -1552,57 +1574,89 @@
       ${captionText ? `<div class="tier-bar-caption muted-text">${captionText}</div>` : ''}`;
   }
 
-  // Strength level card for the exercise detail modal: a `.standards-preview`
-  // table showing each tier's multiplier and the weight it means at the current
-  // bodyweight. The current tier gets `.is-selected`.
+  // Strength level card for the exercise detail modal: for each way the table
+  // measures the exercise (estimated 1RM, reps at body weight, added weight), a
+  // `.standards-preview` table of the tier thresholds at the current body weight,
+  // with the current tier marked `.is-selected`.
   function strengthStandardsDetailHtml(ex) {
     const info = strengthLevelInfo(ex);
     if (!info) return '';
     const head = '<div class="section-head"><div class="setting-row-label"><span class="setting-icon">'+STATIC_ICONS.trophy+'</span><h2>Strength level</h2></div></div>';
-    if (info.needsBodyWeight) return `<div class="card">${head}<p class="muted-text">Log your body weight to see your strength level.</p></div>`;
-    if (info.needsSex) return `<div class="card">${head}<p class="muted-text">Set your sex in Settings → Profile to see your strength level.</p></div>`;
-    if (info.needsShorterSet) return `<div class="card">${head}<p class="muted-text">Log a set of ${S.ONE_RM_MAX_REPS} reps or fewer to see your strength level. The estimate is not reliable on longer sets.</p></div>`;
-    const bw = currentBodyWeightLb();
-    const table = LIFT_STANDARDS[ex.liftType][state.profile.sex];
-    const thresholds = table.map((mult) => Math.round((bw * mult) / 5) * 5);
-    const rows = INSIGHT_TIER_LABELS.map((label, j) => {
-      const rightText = j === 0
-        ? `Under ${fmtWeight(thresholds[0])}`
-        : `${round(table[j - 1], 2)}&times; &middot; ${fmtWeight(thresholds[j - 1])}+`;
-      return { label, rightText, isCurrent: label === info.tier };
-    });
+    if (info.missing === 'bodyweight') return `<div class="card">${head}<p class="muted-text">Log your body weight to see your strength level.</p></div>`;
+    if (info.missing === 'sex') return `<div class="card">${head}<p class="muted-text">Set your sex in Settings → Profile to see your strength level.</p></div>`;
+    const logged = entriesFor(ex.id).length > 0;
+    if (info.best < 0) {
+      if (!logged) return '';
+      const need = info.metric === '1rm' ? `Log a set of ${S.ONE_RM_MAX_REPS} reps or fewer to see your strength level. The estimate is not reliable on longer sets.` : 'Log a set of reps to see your strength level.';
+      return `<div class="card">${head}<p class="muted-text">${need}</p></div>`;
+    }
+    // Assisted pull-up and dip tables run below zero ("−6 lb" is 6 lb of assistance).
+    const fmtVal = (mode, v) => {
+      if (mode === 'reps') return `${v} rep${v === 1 ? '' : 's'}`;
+      if (mode === 'added') return v < 0 ? `\u2212${fmtWeight(-v)}` : `+${fmtWeight(v)}`;
+      return fmtWeight(v);
+    };
+    const blocks = info.results.map((r) => {
+      // A line at zero can't be missed, so the row below it is shown as "Any" and the
+      // "Untrained" row, which would read "Under 0", is dropped.
+      const rows = S.TIER_LABELS.map((label, j) => ({
+        label,
+        rightText: j === 0 ? `Under ${fmtVal(r.mode, r.thresholds[0])}` : r.thresholds[j - 1] <= 0 && r.mode === 'reps' ? 'Any' : `${fmtVal(r.mode, r.thresholds[j - 1])}${r.mode === 'added' && r.thresholds[j - 1] < 0 ? ' or more' : '+'}`,
+        isCurrent: r.value != null && j === r.tier,
+      })).filter((row, j) => !(j === 0 && r.thresholds[0] <= 0 && r.mode === 'reps'));
+      let line;
+      let sub = '';
+      if (r.value == null) line = r.mode === 'added' ? 'Added weight: log a set with weight added to see this.' : 'Log a set to see this.';
+      else if (r.mode === '1rm') {
+        line = `${r.detail.method === 'actual' ? '1RM (logged single)' : 'Estimated 1RM'} ${fmtWeight(r.value)} &middot; <strong>${S.TIER_LABELS[r.tier]}</strong>`;
+        sub = r.detail.method === 'actual' ? 'A real lift you logged.' : `Calculated from ${fmtWeight(r.detail.weight)} &times; ${r.detail.reps}.`;
+      } else if (r.mode === 'reps') {
+        line = `Best set at body weight ${fmtVal('reps', r.value)} &middot; <strong>${S.TIER_LABELS[r.tier]}</strong>`;
+      } else {
+        line = `Added weight, estimated 1RM ${fmtVal('added', r.value)} &middot; <strong>${S.TIER_LABELS[r.tier]}</strong>`;
+        sub = `Calculated from body weight plus ${fmtWeight(r.detail.addedWeight)} &times; ${r.detail.reps}.`;
+      }
+      const title = info.results.length > 1 ? `<div class="insight-line"><strong>${r.mode === 'reps' ? 'Reps at body weight' : 'With added weight'}</strong></div>` : '';
+      return `<div class="standards-block">${title}<div class="insight-line">${line}</div>${sub ? `<div class="insight-line muted-text">${sub}</div>` : ''}
+        <div class="standards-preview">
+          ${rows.map((row) => `<div class="standards-preview-row${row.isCurrent ? ' is-selected' : ''}"><span>${row.label}</span><span>${row.rightText}</span></div>`).join('')}
+        </div></div>`;
+    }).join('');
+    const loadNote = { hand: 'Weights are per dumbbell.', bar: 'Weights include the bar.', machine: 'Weights are the stack as shown.' }[info.load] || '';
+    const how = info.metric === '1rm' ? `Estimates use the Epley formula on sets of ${S.ONE_RM_MAX_REPS} reps or fewer. ` : '';
     return `
       <div class="card">
         ${head}
-        <div class="insight-line">${info.oneRepMaxSet.method === 'actual' ? '1RM (logged single)' : 'Estimated 1RM'} ${fmtWeight(info.oneRepMax)} &middot; ${round(info.ratio, 2)}&times; bodyweight &middot; <strong>${info.tier}</strong></div>
-        <div class="insight-line muted-text">${info.oneRepMaxSet.method === 'actual' ? 'A real lift you logged.' : `Calculated from ${fmtWeight(info.oneRepMaxSet.weight)} &times; ${info.oneRepMaxSet.reps}.`} Heaviest set logged: ${fmtWeight(info.heaviestLoad)}.</div>
-        <div class="standards-preview">
-          ${rows.map((r) => `<div class="standards-preview-row${r.isCurrent ? ' is-selected' : ''}"><span>${r.label}</span><span>${r.rightText}</span></div>`).join('')}
-        </div>
-        <p class="muted-text field-hint">Estimates use the Epley formula on sets of ${S.ONE_RM_MAX_REPS} reps or fewer, compared with community bodyweight-multiple tables for your sex. See About the numbers in Settings.</p>
+        <div class="insight-line"><strong>${escapeHtml(info.label)}</strong></div>
+        ${blocks}
+        <p class="muted-text field-hint">${how}${loadNote} Compared with Strength Level's tables for your sex and body weight: each tier means stronger than about 5%, 20%, 50%, 80% and 95% of lifters. See About the numbers in Settings.</p>
       </div>`;
   }
 
-  // The "Pace level" counterpart: a `.standards-preview` table with each tier's
-  // pace ceiling per mile.
-  function paceStandardsDetailHtml(ex) {
-    const info = paceLevelInfo(ex);
+  // The running counterpart: Running Level's 5K tiers for your sex and age. Each
+  // run is converted to its 5K-equivalent time first.
+  function runStandardsDetailHtml(ex) {
+    const info = runLevelInfo(ex);
     if (!info) return '';
-    if (info.needsSex) return `<div class="card"><div class="section-head"><h2>Pace level</h2></div><p class="muted-text">Set your sex in Settings → Profile to see your pace level.</p></div>`;
-    const ceilings = PACE_TIERS[state.profile.sex];
-    const rows = PACE_TIER_LABELS.map((label, i) => ({
+    const head = '<div class="section-head"><div class="setting-row-label"><span class="setting-icon">'+STATIC_ICONS.trophy+'</span><h2>Running level</h2></div></div>';
+    if (info.needsSex) return `<div class="card">${head}<p class="muted-text">Set your sex in Settings → Profile to see your running level.</p></div>`;
+    if (!info.hasRuns) return '';
+    if (!info.best) return `<div class="card">${head}<p class="muted-text">Log a run of 1 mile to a marathon with a time to see your running level.</p></div>`;
+    const { entry, level } = info.best;
+    const labels = S.RUN_TIER_LABELS;
+    const rows = labels.map((label, j) => ({
       label,
-      rightText: i < ceilings.length ? `&le; ${fmtPace(ceilings[i])}` : `&gt; ${fmtPace(ceilings[ceilings.length - 1])}`,
-      isCurrent: label === info.tier,
+      rightText: j === 0 ? `Slower than ${fmtDuration(level.thresholds[0])}` : `${fmtDuration(level.thresholds[j - 1])} or faster`,
+      isCurrent: j === level.tier,
     }));
     return `
       <div class="card">
-        <div class="section-head"><h2>Pace level</h2></div>
-        <div class="insight-line">${fmtPace(info.pace)} &middot; <strong>${info.tier}</strong></div>
+        ${head}
+        <div class="insight-line">Best run ${fmtDistance(entry.distance)} in ${fmtDuration(entry.duration)} &middot; 5K equivalent ${fmtDuration(Math.round(level.equivalentSec))} &middot; <strong>${labels[level.tier]}</strong></div>
         <div class="standards-preview">
           ${rows.map((r) => `<div class="standards-preview-row${r.isCurrent ? ' is-selected' : ''}"><span>${r.label}</span><span>${r.rightText}</span></div>`).join('')}
         </div>
-        <p class="muted-text field-hint">Classified against general pace-per-mile tiers for your sex.</p>
+        <p class="muted-text field-hint">5K finish times for your sex, ${info.ageAssumed ? `with an adult age of ${info.age} assumed (add your age in Settings → Profile)` : `age ${info.age}`}. Runs from 1 mile to a marathon are converted to a 5K time with Riegel's formula, so the level is the best effort you have logged. Running Level's tiers: faster than about 5%, 20%, 50%, 80% and 95% of runners.</p>
       </div>`;
   }
 
@@ -1722,7 +1776,7 @@
 
   // A Daily targets row. A habit logs in one tap ("Done", then "+1" once its count
   // is met); others open Log. The button stays after the target is met.
-  function dailyTargetRowHtml(ex) {
+  function dailyTargetRowHtml(ex, repLabel) {
     const prog = todayProgressOf(ex);
     const complete = prog.pct != null && prog.pct >= 100;
     const isHabit = ex.kind === 'habit';
@@ -1738,7 +1792,7 @@
             ${glanceMeterHtml(ex, prog.pct)}
           </div>
         </div>
-        <button type="button" class="btn btn-secondary btn-sm glance-btn" data-action="${isHabit ? 'log-habit' : 'log-daily'}">${isHabit ? (complete ? '+1' : 'Done') : 'Add'}</button>
+        <button type="button" class="btn btn-secondary btn-sm glance-btn" data-action="${isHabit ? 'log-habit' : 'log-daily'}">${isHabit ? (complete ? '+1' : 'Done') : (repLabel || 'Add')}</button>
       </div>`;
   }
 
@@ -1891,7 +1945,7 @@
         <div class="section-head"><h2>What do you track?</h2></div>
         ${setupBoolRowHtml('review_trackWorkout', 'Lifting', s.trackWorkout)}
         ${setupBoolRowHtml('review_trackCardio', 'Running & cardio', s.trackCardio)}
-        ${setupBoolRowHtml('review_trackHabits', 'Habits & daily reps', s.trackHabits)}
+        ${setupBoolRowHtml('review_trackHabits', 'Daily (habits & reps)', s.trackHabits)}
         ${setupBoolRowHtml('review_trackMeasurements', 'Body', s.trackMeasurements)}
         ${setupBoolRowHtml('review_trackWater', 'Water', s.trackWater)}
         ${setupBoolRowHtml('review_trackFood', 'Food', s.trackFood)}
@@ -1906,7 +1960,7 @@
         <div class="section-head"><h2>Insights &amp; guidance</h2></div>
         ${setupBoolRowHtml('review_showWeightInsights', 'Body weight insights', s.showWeightInsights)}
         ${setupBoolRowHtml('review_showStrengthLevel', 'Strength level', s.showStrengthLevel)}
-        ${setupBoolRowHtml('review_showPaceLevel', 'Pace level', s.showPaceLevel)}
+        ${setupBoolRowHtml('review_showPaceLevel', 'Running level', s.showPaceLevel)}
         ${setupBoolRowHtml('review_showSleepInsights', 'Sleep insights', s.showSleepInsights)}
         ${setupBoolRowHtml('review_showMacroGuidance', 'Daily-value guidance', s.showMacroGuidance)}
       </div>
@@ -2257,7 +2311,7 @@
     renderProgressGoals();
     const all = activeExercises();
     const goalList = all.filter((e) => sectionOf(e) === 'goal');
-    document.getElementById('dashboardEmpty').hidden = !domainTracked('workout') || (goalList.length + all.filter((e) => sectionOf(e) === 'daily').length) > 0;
+    document.getElementById('dashboardEmpty').hidden = !(domainTracked('workout') || domainTracked('daily')) || (goalList.length + all.filter((e) => sectionOf(e) === 'daily').length) > 0;
 
     const cardsWrap = document.getElementById('exerciseCards');
     cardsWrap.innerHTML = goalList.map(goalCardHtml).join('');
@@ -2592,7 +2646,7 @@
         catalogId: mv.id, icon: ITEM_ICONS[mv.icon] ? mv.icon : undefined,
       };
       if (eq) ex.equipment = eq;
-      if (mv.kind === 'weight') { ex.bodyRegion = guessBodyRegion(mv.name); ex.liftType = (eq || null) === (mv.defaultEquipment || null) && !state.exercises.some((x) => x.liftType && x.liftType === mv.liftType) ? (mv.liftType || null) : null; }
+      if (mv.kind === 'weight') ex.bodyRegion = guessBodyRegion(mv.name);
       if (mv.kind === 'cardio') { ex.distanceGoal = null; ex.paceGoal = null; }
       if (mv.unit) ex.unit = mv.unit;
       if (!ex.icon) delete ex.icon;
@@ -2818,9 +2872,9 @@
   const cat = { scope: ['exercises'], tab: 'exercises', query: '', group: 'all', pack: 'all', cat: 'all', open: null, pick: { exercises: new Set(), habits: new Set(), foods: new Set() } };
 
   // The sheet only offers what belongs to the screen that opened it: Manage >
-  // Workout gets exercises (and habits when those are on), Manage > Food gets foods.
+  // Workout gets exercises, Manage > Daily gets habits, Manage > Food gets foods.
   function openCatalogSheet(tab) {
-    cat.scope = tab === 'foods' ? ['foods'] : ['exercises'].concat(habitsTracked() ? ['habits'] : []);
+    cat.scope = tab === 'foods' ? ['foods'] : tab === 'habits' ? ['habits'] : ['exercises'];
     cat.tab = cat.scope.includes(tab) ? tab : cat.scope[0]; cat.query = ''; cat.group = 'all'; cat.pack = 'all'; cat.cat = 'all'; cat.open = null;
     cat.pick = { exercises: new Set(), habits: new Set(), foods: new Set() };
     openModal(`
@@ -3060,7 +3114,7 @@
   function renderLogExercisePicker() {
     const lastMap = lastEntryMap();
     const q = logEx.query.trim().toLowerCase();
-    const active = activeExercises();
+    const active = activeExercises().filter((e) => !isDailyEx(e));
     const favs = active.filter(isFavoriteExercise);
     const recent = active.filter((e) => lastMap[e.id]).sort((a, b) => lastMap[b.id].k.localeCompare(lastMap[a.id].k));
     const byName = (a, b) => a.name.localeCompare(b.name);
@@ -3218,15 +3272,12 @@
   /* ---------- Manage -> Workout ---------- */
 
   const manageEx = { query: '', filter: 'all', open: {} };
-  const MANAGE_EX_FILTERS = [['all', 'All'], ['goal', 'Goals'], ['daily', 'Daily targets'], ['habit', 'Habits'], ['accessory', 'Other']];
+  const MANAGE_EX_FILTERS = [['all', 'All'], ['goal', 'Goals'], ['accessory', 'Other']];
   function manageExMatchesFilter(ex, f) {
-    if (f === 'all') return true;
-    if (f === 'habit') return ex.kind === 'habit';
-    if (f === 'daily') return sectionOf(ex) === 'daily' && ex.kind !== 'habit';
-    return sectionOf(ex) === f && ex.kind !== 'habit';
+    return f === 'all' || sectionOf(ex) === f;
   }
 
-  function manageExRowHtml(ex) {
+  function manageExRowHtml(ex, { star = true } = {}) {
     return `
       <div class="entry-row is-manage${ex.archived ? ' is-toggled-off' : ''}" data-exercise-id="${ex.id}">
         ${exerciseIconHtml(ex, true)}
@@ -3238,7 +3289,7 @@
           ${ex.archived ? `<button class="btn btn-secondary btn-sm" data-action="unarchive-exercise" data-id="${ex.id}">Unarchive</button>` : ''}
           <button class="icon-btn" data-action="edit-exercise" data-id="${ex.id}" aria-label="Edit">${EDIT_ICON_SVG}</button>
         </div>
-        ${ex.archived ? '' : starButtonHtml('data-fav', ex.id, isFavoriteExercise(ex))}
+        ${ex.archived || !star ? '' : starButtonHtml('data-fav', ex.id, isFavoriteExercise(ex))}
       </div>`;
   }
 
@@ -3247,7 +3298,7 @@
     const wrap = document.getElementById('exerciseManageList');
     const q = manageEx.query.trim().toLowerCase();
     const matchesQ = (ex) => !q || exerciseLabel(ex).toLowerCase().includes(q) || exerciseGroupLabel(ex).toLowerCase().includes(q);
-    const queried = state.exercises.filter(matchesQ);
+    const queried = state.exercises.filter((ex) => !isDailyEx(ex)).filter(matchesQ);
 
     const fcounts = {};
     MANAGE_EX_FILTERS.forEach(([f]) => { fcounts[f] = queried.filter((ex) => manageExMatchesFilter(ex, f)).length; });
@@ -3266,7 +3317,7 @@
 
     // A small list opens fully; a long one starts with just Pinned open so
     // the group headers (with counts) are what you scan.
-    const totalActive = state.exercises.filter((e) => !e.archived).length;
+    const totalActive = state.exercises.filter((e) => !e.archived && !isDailyEx(e)).length;
     const filtering = !!q || manageEx.filter !== 'all';
     const isOpen = (key) => {
       if (filtering) return true;
@@ -3284,7 +3335,7 @@
     }).join('');
     wrap.innerHTML = html
       ? `<div class="card org-card">${html}</div>`
-      : `<div class="card org-card"><p class="muted-text org-empty">${state.exercises.length ? 'No exercises match.' : 'No exercises yet.'}</p></div>`;
+      : `<div class="card org-card"><p class="muted-text org-empty">${state.exercises.some((e) => !isDailyEx(e)) ? 'No exercises match.' : 'No exercises yet.'}</p></div>`;
   }
 
   function wireManageExercises() {
@@ -3315,6 +3366,42 @@
         ex.archived = false;
         if (!save()) return;
         toast('Exercise unarchived');
+        renderAll();
+      }
+    });
+  }
+
+
+  // Manage > Daily: every habit and daily rep target, split into Habits, Daily reps and
+  // Archived. Editing, archiving and the catalog work as they do for exercises.
+  function renderDailyManageList() {
+    if (!renderDomainTrackToggle('daily')) return;
+    const wrap = document.getElementById('dailyManageList');
+    const items = state.exercises.filter(isDailyEx);
+    const block = (label, list) => list.length ? `
+      <div class="manage-group-label">${label} · ${list.length}</div>
+      <div class="card org-card"><div class="g-list">${list.map((ex) => manageExRowHtml(ex, { star: false })).join('')}</div></div>` : '';
+    const byName = (a, b) => a.name.localeCompare(b.name);
+    const live = items.filter((e) => !e.archived);
+    wrap.innerHTML = items.length
+      ? block('Habits', live.filter((e) => e.kind === 'habit').sort(byName)) +
+        block('Daily reps', live.filter((e) => e.kind !== 'habit').sort(byName)) +
+        block('Archived', items.filter((e) => e.archived).sort(byName))
+      : `<div class="card org-card"><p class="muted-text org-empty">Nothing here yet. Add a habit like Creatine or Stretching, or a daily rep target like Push-ups.</p></div>`;
+  }
+
+  function wireManageDaily() {
+    document.querySelectorAll('#manageDailyPanel [data-action="add-daily"]').forEach((btn) => btn.addEventListener('click', () => openExerciseForm(null, { kind: 'habit', section: 'daily' })));
+    document.getElementById('dailyManageList').addEventListener('click', (ev) => {
+      const edit = ev.target.closest('[data-action="edit-exercise"]');
+      if (edit) { openExerciseForm(edit.dataset.id); return; }
+      const un = ev.target.closest('[data-action="unarchive-exercise"]');
+      if (un) {
+        const ex = exerciseById(un.dataset.id);
+        if (!ex) return;
+        ex.archived = false;
+        if (!save()) return;
+        toast('Unarchived');
         renderAll();
       }
     });
@@ -3364,7 +3451,7 @@
     select.innerHTML = html;
   }
 
-  // The Log tab switches between Workout, Body, Water and Food with a segmented
+  // The Log tab switches between Workout, Daily, Body, Water and Food with a segmented
   // control; they share the "Recent entries" list. availableDomainCategories()
   // says which are shown.
   let logCategory = 'workout';
@@ -3385,7 +3472,7 @@
   // The day-streak flame (see renderSummary); Lucide `flame`.
   const FLAME_ICON_SVG = '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3q1 4 4 6.5t3 5.5a1 1 0 0 1-14 0 5 5 0 0 1 1-3 1 1 0 0 0 5 0c0-2-1.5-3-1.5-5q0-2 2.5-4"/></svg>';
 
-  // Icons for the four domain tabs (Workout, Body, Water, Food), shared by Log,
+  // Icons for the five domain tabs (Workout, Daily, Body, Water, Food), shared by Log,
   // History and Manage. They resolve to ITEM_ICONS (js/icons.js); getters because
   // ITEM_ICONS is declared further down.
   const DOMAIN_TAB_ICONS = {
@@ -3393,6 +3480,7 @@
     get measurements() { return itemIconSvg('ruler'); },
     get water() { return itemIconSvg('droplets'); },
     get food() { return itemIconSvg('apple'); },
+    get daily() { return STATIC_ICONS.daily; },
   };
 
   // Icons for the static `data-icon="name"` spots in index.html (and the trophy
@@ -3418,8 +3506,11 @@
     calendar: lucide('<path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/>'),
     contrast: lucide('<circle cx="12" cy="12" r="10"/><path d="M12 18a6 6 0 0 0 0-12v12z"/>'),
     get check() { return STATIC_ICONS.habits; },
+    daily: lucide('<path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/><path d="m9 16 2 2 4-4"/>'),
     habits: lucide('<path d="m3 17 2 2 4-4"/><path d="m3 7 2 2 4-4"/><path d="M13 6h8"/><path d="M13 12h8"/><path d="M13 18h8"/>'),
     calculator: lucide('<rect width="16" height="20" x="4" y="2" rx="2"/><line x1="8" x2="16" y1="6" y2="6"/><line x1="16" x2="16" y1="14" y2="18"/><path d="M16 10h.01"/><path d="M12 10h.01"/><path d="M8 10h.01"/><path d="M12 14h.01"/><path d="M8 14h.01"/><path d="M12 18h.01"/><path d="M8 18h.01"/>'),
+    trash: lucide('<path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/>'),
+    'triangle-alert': lucide('<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/>'),
     download: lucide('<path d="M12 15V3"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/>'),
     upload: lucide('<path d="M12 3v12"/><path d="m17 8-5-5-5 5"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>'),
   };
@@ -3519,24 +3610,21 @@
 
   // Display label per domain. The id stays `measurements` (matching
   // settings.trackMeasurements) though it is labelled "Body".
-  const DOMAIN_LABELS = { workout: 'Workout', measurements: 'Body', water: 'Water', food: 'Food' };
-  const DOMAIN_ORDER = ['workout', 'measurements', 'water', 'food'];
+  const DOMAIN_LABELS = { workout: 'Workout', daily: 'Daily', measurements: 'Body', water: 'Water', food: 'Food' };
+  const DOMAIN_ORDER = ['workout', 'daily', 'measurements', 'water', 'food'];
 
   // Master "Track this" switch per domain (settings.trackWorkout/trackMeasurements/
-  // trackWater/trackFood). The Workout domain counts as on while Lifting, Running &
-  // cardio or Habits is on (js/features.js).
+  // trackWater/trackFood). Workout counts as on while Lifting or Running & cardio is
+  // on; Daily (habits and daily reps) follows trackHabits (js/features.js).
   function domainTracked(id) { return F.domainTracked(state.settings, id); }
 
-  // Log and History offer only domains that are on. Manage offers all four
+  // Log and History offer only domains that are on. Manage offers all five
   // (ALL_DOMAIN_CATEGORIES).
   function availableDomainCategories() {
-    // With only Habits on, "Workout" would promise lifting that isn't being
-    // tracked, so Log and History call it what it holds.
-    const habitsOnly = F.habitsOnly(state.settings);
-    return DOMAIN_ORDER.filter(domainTracked).map((id) => ({ id, label: id === 'workout' && habitsOnly ? 'Habits' : DOMAIN_LABELS[id] }));
+    return DOMAIN_ORDER.filter(domainTracked).map((id) => ({ id, label: DOMAIN_LABELS[id] }));
   }
 
-  // Manage always offers all four domains: it is where an off domain is turned back on.
+  // Manage always offers all five domains: it is where an off domain is turned back on.
   const ALL_DOMAIN_CATEGORIES = DOMAIN_ORDER.map((id) => ({ id, label: DOMAIN_LABELS[id] }));
 
   // Domain tab markup shared by Log, History and Manage. An off domain gets
@@ -3544,7 +3632,7 @@
   function domainTabsHtml(cats, activeId) {
     return cats.map((c) => `
       <button type="button" class="domain-tab${domainTracked(c.id) ? '' : ' is-toggled-off'}" data-domain-cat="${c.id}" role="radio" aria-checked="${c.id === activeId}">
-        ${c.label === 'Habits' ? STATIC_ICONS.habits : (DOMAIN_TAB_ICONS[c.id] || '')}
+        ${DOMAIN_TAB_ICONS[c.id] || ''}
         <span>${c.label}</span>
       </button>`).join('');
   }
@@ -3670,6 +3758,75 @@
     renderHistory();
   }
 
+  /* ---------- Log -> Daily ----------
+     Habits and daily-rep targets, one screen: today's count and streak, a tap-to-check
+     list of the habits due today, then the daily rep targets with a meter and a Log
+     button (which opens the same rep form as Workout). Nothing here is new data: it is
+     the Home "Daily targets" list, given its own home. */
+  function dailyItemsToday() {
+    const all = activeExercises().filter(isDailyEx);
+    return { habits: all.filter((e) => e.kind === 'habit' && habitDueToday(e)), reps: all.filter((e) => e.kind !== 'habit') };
+  }
+  const dailyComplete = (ex) => { const p = todayProgressOf(ex); return p.pct != null && p.pct >= 100; };
+
+  function dailyHabitRowHtml(ex) {
+    const goal = ex.goal || 1;
+    const done = entriesFor(ex.id).filter((e) => e.date === todayISO()).length;
+    const complete = done >= goal;
+    const repeat = (HABIT_REPEATS.find((r) => r[0] === ex.repeat) || HABIT_REPEATS[0])[1];
+    const sub = goal > 1 ? `${goal} times · ${Math.min(done, goal)} of ${goal} today` : repeat;
+    const pips = goal > 1 ? `<span class="daily-pips" aria-hidden="true">${Array.from({ length: Math.min(goal, 6) }, (_, i) => `<i class="daily-pip${i < done ? ' on' : ''}"></i>`).join('')}</span>` : '';
+    return `
+      <div class="glance-row daily-row${complete ? ' is-complete' : ''}" data-exercise-id="${ex.id}">
+        <div class="glance-open">
+          ${exerciseIconHtml(ex)}
+          <div class="glance-main">
+            <div class="glance-name">${exerciseLabelHtml(ex)}</div>
+            <div class="glance-sub">${escapeHtml(sub)}</div>
+          </div>
+        </div>
+        ${pips}
+        <button type="button" class="daily-cb${complete ? ' is-on' : ''}" data-action="daily-check" aria-label="${complete ? `${escapeHtml(ex.name)} is done today. Open details` : `Mark ${escapeHtml(ex.name)} done`}">${complete ? CHECK_ICON_SVG : ''}</button>
+      </div>`;
+  }
+
+  function renderLogDailyPanel() {
+    const panel = document.getElementById('logDailyPanel');
+    if (panel.hidden) return;
+    const { habits, reps } = dailyItemsToday();
+    const all = habits.concat(reps);
+    const done = all.filter(dailyComplete).length;
+    const streak = computeStreak();
+    const pct = all.length ? Math.round((done / all.length) * 100) : 0;
+    const section = (title, items, rowFn) => items.length ? `
+      <div class="section-head daily-head"><h2>${title}</h2><span class="muted-text">${items.filter(dailyComplete).length} of ${items.length}</span></div>
+      <div class="card card-list">${items.map(rowFn).join('')}</div>` : '';
+    panel.innerHTML = `
+      <div class="card daily-summary">
+        <div class="daily-summary-top">
+          <div>
+            <span class="daily-eyebrow">Today</span>
+            <div class="daily-big">${done}<span> of ${all.length} done</span></div>
+          </div>
+          <span class="daily-streak${streak > 0 ? ' is-hot' : ''}">${FLAME_ICON_SVG}${streak} day streak</span>
+        </div>
+        <div class="meter"><div class="meter-fill${all.length && done === all.length ? ' is-complete' : ''}" style="--fill:${pct}%"></div></div>
+      </div>
+      ${all.length ? '' : '<p class="muted-text">Nothing is due today. Add a habit or a daily rep target to start a checklist.</p>'}
+      ${section('Habits', habits, dailyHabitRowHtml)}
+      ${section('Daily reps', reps, (ex) => dailyTargetRowHtml(ex, 'Log'))}
+      <button type="button" class="card daily-add" data-action="add-daily">${uiIcon('plus')}<span>Add to Daily</span></button>`;
+    panel.querySelectorAll('.glance-row').forEach((row) => {
+      const exId = row.getAttribute('data-exercise-id');
+      const ex = exerciseById(exId);
+      wireOpenable(row.querySelector('.glance-open'), () => openExerciseDetail(exId));
+      const check = row.querySelector('[data-action="daily-check"]');
+      if (check) { check.addEventListener('click', () => { if (dailyComplete(ex)) openExerciseDetail(exId); else logHabit(exId); }); return; }
+      row.querySelector('.glance-btn').addEventListener('click', () => openLogFor(exId));
+    });
+    panel.querySelector('[data-action="add-daily"]').addEventListener('click', () => openExerciseForm(null, { kind: 'habit', section: 'daily' }));
+  }
+
   // Redraw the selected Log form and the shared "Recent entries" list.
   function renderLogView() {
     renderLogCategorySegmented();
@@ -3683,6 +3840,7 @@
     document.getElementById('logSwitchCard').hidden = true;
     document.getElementById('logMeasurementForm').hidden = allOff || logCategory !== 'measurements';
     document.getElementById('logWaterPanel').hidden = allOff || logCategory !== 'water';
+    document.getElementById('logDailyPanel').hidden = allOff || logCategory !== 'daily';
     // Food: saved foods lead; typing one in by hand is collapsed under them
     // (open straight away when nothing is saved yet).
     const hasSaved = state.food.savedFoods.length > 0;
@@ -3696,6 +3854,7 @@
     }
     if (!allOff) {
       if (logCategory === 'workout') renderLogForm(); else syncLogWorkoutUI();
+      if (logCategory === 'daily') renderLogDailyPanel();
       if (logCategory === 'measurements') renderLogMeasurementForm();
       if (logCategory === 'water') renderLogWaterPanel();
       if (logCategory === 'food') { renderLogFoodForm(); renderSavedFoodLogList(); }
@@ -3727,7 +3886,8 @@
       wireFoodEntryRowClicks(wrap);
       return;
     }
-    const recent = state.entries.slice().sort((a, b) => (b.date + b.id).localeCompare(a.date + a.id)).slice(0, 1);
+    const wantDaily = logCategory === 'daily';
+    const recent = state.entries.filter((e) => isDailyEntry(e) === wantDaily).sort((a, b) => (b.date + b.id).localeCompare(a.date + a.id)).slice(0, 1);
     if (!recent.length) { wrap.innerHTML = `<p class="muted-text">Nothing logged yet — your latest entry will show up here.</p>`; return; }
     wrap.innerHTML = recent.map((e) => entryRowHtml(e)).join('');
     wireEntryRowClicks(wrap);
@@ -4356,7 +4516,7 @@
 
   function dayActivity(dateIso) {
     // A domain switched off in Manage shows no dot.
-    const workout = domainTracked('workout') && state.entries.some((e) => e.date === dateIso);
+    const workout = (domainTracked('workout') || domainTracked('daily')) && state.entries.some((e) => e.date === dateIso);
     const body = domainTracked('measurements') && state.measurements.some((m) => m.date === dateIso);
     const waterHit = domainTracked('water') && !!(state.water.goalMl && waterTotalForDate(dateIso) >= state.water.goalMl);
     const food = domainTracked('food') && state.food.entries.some((e) => e.date === dateIso);
@@ -4402,8 +4562,9 @@
   function renderHistoryFilter() {
     const select = document.getElementById('historyFilter');
     const prev = select.value;
-    const groups = groupBySection(state.exercises);
-    let html = `<option value="__all__">All exercises</option>`;
+    const daily = historyCategory === 'daily';
+    const groups = groupBySection(state.exercises.filter((e) => isDailyEx(e) === daily));
+    let html = `<option value="__all__">${daily ? 'All habits and daily reps' : 'All exercises'}</option>`;
     ['goal', 'daily', 'accessory'].forEach((sec) => {
       if (!groups[sec].length) return;
       html += `<optgroup label="${SECTION_LABELS[sec]}">` +
@@ -4425,7 +4586,7 @@
     seg.querySelectorAll('button').forEach((b) => {
       b.addEventListener('click', () => { historyCategory = b.dataset.domainCat; renderHistory(); });
     });
-    document.getElementById('historyFilterField').hidden = historyCategory !== 'workout' || !cats.length;
+    document.getElementById('historyFilterField').hidden = !(historyCategory === 'workout' || historyCategory === 'daily') || !cats.length;
   }
 
   // Heading for the list: "All entries", "Today", or the selected date.
@@ -4497,6 +4658,7 @@
     renderHistoryFilter();
     const filter = document.getElementById('historyFilter').value || '__all__';
     const list = state.entries
+      .filter((e) => isDailyEntry(e) === (historyCategory === 'daily'))
       .filter((e) => filter === '__all__' || e.exerciseId === filter)
       .filter((e) => !historySelectedDate || e.date === historySelectedDate)
       .slice()
@@ -4646,8 +4808,8 @@
           : '<p class="muted-text">No distance or pace goal set yet.</p>')
       : progressBlockHtml(ex);
 
-    const standardsHtml = ex.kind === 'weight' && state.settings.showStrengthLevel ? strengthStandardsDetailHtml(ex)
-      : ex.kind === 'cardio' && state.settings.showPaceLevel ? paceStandardsDetailHtml(ex)
+    const standardsHtml = ex.kind !== 'cardio' && state.settings.showStrengthLevel ? strengthStandardsDetailHtml(ex)
+      : ex.kind === 'cardio' && state.settings.showPaceLevel ? runStandardsDetailHtml(ex)
       : '';
 
     openModal(`
@@ -4790,16 +4952,18 @@
 
   /* ============================== Add / edit exercise modal ============================== */
 
-  function openExerciseForm(exId) {
+  // `preset` ({ kind, section }) only sets the starting choices of a NEW exercise; Manage > Daily
+  // passes a habit.
+  function openExerciseForm(exId, preset) {
     const editing = !!exId;
     const ex = editing ? exerciseById(exId) : null;
     const hasEntries = editing && entriesFor(exId).length > 0;
-    const kind = ex ? ex.kind : 'weight';
-    const section = ex ? sectionOf(ex) : 'goal';
+    const kind = ex ? ex.kind : ((preset && preset.kind) || 'weight');
+    const section = ex ? sectionOf(ex) : ((preset && preset.section) || 'goal');
     const bodyRegion = ex ? (ex.bodyRegion || 'upper') : 'upper';
 
     openModal(`
-      <div class="modal-title-row"><h2>${editing ? 'Edit exercise' : 'Add exercise'}</h2><button class="modal-close" data-action="close-modal">${CLOSE_ICON_SVG}</button></div>
+      <div class="modal-title-row"><h2>${editing ? 'Edit exercise' : (preset && preset.kind === 'habit' ? 'Add to Daily' : 'Add exercise')}</h2><button class="modal-close" data-action="close-modal">${CLOSE_ICON_SVG}</button></div>
       <div class="form-card">
         ${nameIconHtml({ iconId: 'exIcon', inputId: 'exName', value: ex && ex.name, placeholder: 'e.g. Overhead Press', maxlength: 60 })}
 
@@ -4845,13 +5009,8 @@
         </div>
 
         <div class="field" id="liftTypeField" hidden>
-          <span class="field-label">Lift type <span class="muted-text">(for the optional "Strength level" insight in Settings — leave as None to skip it)</span></span>
-          <div class="segmented" id="exLiftTypeSegmented" role="radiogroup">
-            <button type="button" data-lift-type="" role="radio">None</button>
-            <button type="button" data-lift-type="bench" role="radio">Bench</button>
-            <button type="button" data-lift-type="squat" role="radio">Squat</button>
-            <button type="button" data-lift-type="deadlift" role="radio">Deadlift</button>
-          </div>
+          <label class="field-label" for="exStandard">Strength standard <span class="muted-text">(for the optional "Strength level" insight in Settings)</span></label>
+          <select id="exStandard"></select>
         </div>
 
         <div id="goalFieldWrap"></div>
@@ -4894,7 +5053,7 @@
 
     const SECTION_HINTS = {
       goal: 'Shown on your home screen once logged today, with a full progress card in Progress.',
-      daily: 'Something you’re aiming to do every day (push-ups, pull-ups, ...). Always shown in Daily targets on your home screen.',
+      daily: 'Something you’re aiming to do every day (push-ups, pull-ups, ...). Lives in the Daily tab, and in Daily targets on your home screen.',
       accessory: 'Hidden from your home screen. Still loggable and viewable in History — for accessory/other exercises.',
       habit: 'Habits are always daily targets.',
     };
@@ -4912,31 +5071,57 @@
       selectedRegion = r;
       document.querySelectorAll('#exBodyRegionSegmented button').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.region === r)));
     }
-    function setLiftTypeUI(t) {
-      selectedLiftType = t;
-      document.querySelectorAll('#exLiftTypeSegmented button').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.liftType === t)));
-      // A standard goal needs a lift type (it picks the LIFT_STANDARDS table), so
-      // clearing the type falls back to 'fixed'.
-      if (!t) selectedGoalMode = 'fixed';
-      if (selectedKind === 'weight' && document.getElementById('goalFieldWrap')) renderGoalField();
+    // The Strength Level table for this form: the one picked in the select, else the
+    // library's match for a movement added from it. Weight exercises use 1RM tables and
+    // rep exercises (not timed holds) use rep tables.
+    const standardMetric = () => (selectedKind === 'weight' ? '1rm' : selectedKind === 'reps' && selectedUnit !== 'time' ? 'reps' : null);
+    function formAutoKey() {
+      const k = ex ? autoStandardKey(ex) : null;
+      return k && S.STRENGTH[k].metric === standardMetric() ? k : null;
     }
+    function formStandardKey() {
+      const std = selectedLiftType && S.STRENGTH[selectedLiftType];
+      if (std && std.metric === standardMetric()) return selectedLiftType;
+      return formAutoKey();
+    }
+    let standardBuiltFor = null;
+    function renderStandardField() {
+      const metric = standardMetric();
+      document.getElementById('liftTypeField').hidden = !metric;
+      if (!metric) return;
+      const sel = document.getElementById('exStandard');
+      if (selectedLiftType && (!S.STRENGTH[selectedLiftType] || S.STRENGTH[selectedLiftType].metric !== metric)) selectedLiftType = '';
+      if (standardBuiltFor !== metric) {
+        standardBuiltFor = metric;
+        const auto = formAutoKey();
+        const groups = {};
+        S.STRENGTH_KEYS.filter((k) => S.STRENGTH[k].metric === metric).forEach((k) => { (groups[S.STRENGTH[k].group] = groups[S.STRENGTH[k].group] || []).push(k); });
+        sel.innerHTML = `<option value="">${auto ? `Automatic: ${escapeHtml(S.STRENGTH[auto].label)}` : 'None'}</option>`
+          + Object.keys(groups).map((g) => `<optgroup label="${g[0].toUpperCase()}${g.slice(1)}">${groups[g].map((k) => `<option value="${k}">${escapeHtml(S.STRENGTH[k].label)}</option>`).join('')}</optgroup>`).join('');
+      }
+      sel.value = selectedLiftType;
+    }
+    document.getElementById('exStandard').addEventListener('change', (e) => {
+      selectedLiftType = e.target.value;
+      if (!formStandardKey()) selectedGoalMode = 'fixed';
+      renderGoalField();
+    });
     document.querySelectorAll('#exSectionSegmented button').forEach((b) => b.addEventListener('click', () => setSectionUI(b.dataset.section)));
     document.querySelectorAll('#exBodyRegionSegmented button').forEach((b) => b.addEventListener('click', () => setRegionUI(b.dataset.region)));
-    document.querySelectorAll('#exLiftTypeSegmented button').forEach((b) => b.addEventListener('click', () => setLiftTypeUI(b.dataset.liftType)));
     setSectionUI(selectedSection);
     setRegionUI(selectedRegion);
-    setLiftTypeUI(selectedLiftType);
 
     // The weight goal field: a plain number, or, with a lift type, a "Fixed number" /
     // "Bodyweight standard" toggle with the same Beginner..Elite preview as the wizard.
     function weightGoalFieldHtml() {
       const fixedVal = ex && ex.goal ? round(Units.lbToDisplay(ex.goal), 1) : '';
-      if (!selectedLiftType || !LIFT_STANDARDS[selectedLiftType]) {
+      const stdKey = formStandardKey();
+      if (!stdKey) {
         return `<label class="field"><span class="field-label">Goal weight (${Units.weightUnitLabel()})</span><input type="number" step="any" id="goalInput" value="${fixedVal}"${canonAttr(ex && ex.goal)} placeholder="e.g. 225" /></label>`;
       }
       const bw = currentBodyWeightLb();
       const sex = state.profile.sex;
-      const rows = standardGoalPreviewRows(selectedLiftType, bw, sex);
+      const rows = standardGoalPreviewRows(stdKey, bw, sex);
       const canUseStandards = !!rows;
       return `
         <div class="field">
@@ -4981,7 +5166,7 @@
     function renderGoalField() {
       const wrap = document.getElementById('goalFieldWrap');
       document.getElementById('bodyRegionField').hidden = selectedKind !== 'weight';
-      document.getElementById('liftTypeField').hidden = selectedKind !== 'weight';
+      renderStandardField();
       if (selectedKind === 'weight') {
         wrap.innerHTML = weightGoalFieldHtml();
         wireWeightGoalField();
@@ -5047,9 +5232,9 @@
       let distanceGoal = null;
       let paceGoal = null;
       let standardPending = false;
-      const usingStandardGoal = selectedKind === 'weight' && selectedLiftType && LIFT_STANDARDS[selectedLiftType] && selectedGoalMode === 'standard';
+      const usingStandardGoal = selectedKind === 'weight' && !!formStandardKey() && selectedGoalMode === 'standard';
       if (usingStandardGoal) {
-        goal = computeStandardGoal(selectedLiftType, selectedGoalTier, currentBodyWeightLb(), state.profile.sex);
+        goal = computeStandardGoal(formStandardKey(), selectedGoalTier, currentBodyWeightLb(), state.profile.sex);
         // No body weight or sex yet: save anyway. The goal stays empty and fills in by itself
         // (recomputeStandardGoals) once both exist. Refusing to save left the user stuck.
         standardPending = goal == null;
@@ -5080,12 +5265,13 @@
         ex.group = selectedGroup;
         ex.favorite = selectedFavorite;
         if (selectedKind === 'weight') {
-          ex.bodyRegion = selectedRegion; ex.liftType = selectedLiftType || null;
+          ex.bodyRegion = selectedRegion;
           ex.goalMode = usingStandardGoal ? 'standard' : 'fixed';
           ex.goalTier = usingStandardGoal ? selectedGoalTier : null;
         } else {
-          delete ex.bodyRegion; ex.liftType = null; ex.goalMode = 'fixed'; ex.goalTier = null;
+          delete ex.bodyRegion; ex.goalMode = 'fixed'; ex.goalTier = null;
         }
+        ex.liftType = standardMetric() ? (selectedLiftType || null) : null;
         if (selectedKind === 'cardio') {
           ex.distanceGoal = distanceGoal;
           ex.paceGoal = paceGoal;
@@ -5097,10 +5283,11 @@
       } else {
         const newEx = { id: genId('ex'), name, kind: selectedKind, section: selectedSection, group: selectedGroup, favorite: selectedFavorite, goal, goalMode: 'fixed', goalTier: null, archived: false, createdAt: new Date().toISOString() };
         if (selectedKind === 'weight') {
-          newEx.bodyRegion = selectedRegion; newEx.liftType = selectedLiftType || null;
+          newEx.bodyRegion = selectedRegion;
           newEx.goalMode = usingStandardGoal ? 'standard' : 'fixed';
           newEx.goalTier = usingStandardGoal ? selectedGoalTier : null;
         }
+        if (standardMetric()) newEx.liftType = selectedLiftType || null;
         if (selectedKind === 'cardio') { newEx.distanceGoal = distanceGoal; newEx.paceGoal = paceGoal; }
         if (selectedKind === 'habit') newEx.repeat = selectedRepeat;
         if (selectedKind === 'reps' && selectedUnit === 'time') newEx.unit = 'time';
@@ -5536,8 +5723,8 @@
   }
 
   /* ============================== Manage ==============================
-     One tab with four domain panels (Workout, Body, Water, Food) switched by
-     manageCategorySegmented. All four always show (ALL_DOMAIN_CATEGORIES), since this is
+     One tab with five domain panels (Workout, Daily, Body, Water, Food) switched by
+     manageCategorySegmented. All five always show (ALL_DOMAIN_CATEGORIES), since this is
      where an off domain is turned back on. Each has a "Track this" switch
      (renderDomainTrackToggle()); Settings holds app-wide preferences only. */
 
@@ -5551,6 +5738,7 @@
       b.addEventListener('click', () => setManageCategory(b.dataset.domainCat));
     });
     document.getElementById('manageExercisesPanel').hidden = cat !== 'workout';
+    document.getElementById('manageDailyPanel').hidden = cat !== 'daily';
     document.getElementById('manageMeasurementsPanel').hidden = cat !== 'measurements';
     document.getElementById('manageWaterPanel').hidden = cat !== 'water';
     document.getElementById('manageFoodPanel').hidden = cat !== 'food';
@@ -5738,7 +5926,7 @@
   function renderManage() {
     setManageCategory(manageCategory);
     // One section failing must not blank the others.
-    [renderExerciseManageList, renderImportCard, renderTidyCard, renderTrackerManageList, renderWaterManagePanel, renderFoodManagePanel].forEach((fn) => {
+    [renderExerciseManageList, renderDailyManageList, renderImportCard, renderTidyCard, renderTrackerManageList, renderWaterManagePanel, renderFoodManagePanel].forEach((fn) => {
       try { fn(); } catch (e) { console.error('Manage section failed:', fn.name, e); }
     });
   }
@@ -5827,6 +6015,28 @@
     // Revoking immediately can cancel the download in Safari; give it a moment.
     setTimeout(() => URL.revokeObjectURL(url), 10000);
     toast('Backup downloaded');
+  }
+
+  // Settings -> Erase data. Removes the one storage key and reloads, so the app comes back
+  // exactly as on a first install (the setup guide). Nothing is sent anywhere; there is no
+  // other copy, which is why the dialog says so and offers a backup first.
+  function eraseAllData() {
+    openModal(`
+      <div class="modal-title-row"><h2>Erase all data?</h2><button class="modal-close" data-action="close-modal">${CLOSE_ICON_SVG}</button></div>
+      <p class="muted-text"><strong>This can&rsquo;t be reversed.</strong> Every exercise, entry, measurement, water and food log, habit, your profile and your settings will be deleted from this device, and Fit Log will start over from the setup guide.</p>
+      <p class="muted-text">There is no other copy. Export a backup first if you might want your data back.</p>
+      <button type="button" class="btn btn-secondary btn-block btn-icon-label" id="eraseExportBtn"><span data-icon="download"></span>Export a backup first</button>
+      <div class="btn-row confirm-actions">
+        <button class="btn btn-secondary" data-action="close-modal">Cancel</button>
+        <button class="btn btn-danger-solid" id="eraseConfirmBtn">Erase everything</button>
+      </div>
+    `);
+    hydrateStaticIcons();
+    document.getElementById('eraseExportBtn').addEventListener('click', exportBackup);
+    document.getElementById('eraseConfirmBtn').addEventListener('click', () => {
+      try { localStorage.removeItem(STORAGE_KEY); } catch (e) { toast('Could not erase: your browser blocked access to storage.'); return; }
+      location.reload();
+    });
   }
 
   // A real backup is well under a few MB; refuse absurd files before parsing them.
@@ -5999,7 +6209,7 @@
       <div class="setup-tiles">
         ${interestTileHtml('lifting', DOMAIN_TAB_ICONS.workout, 'Lifting', i.lifting, 'Sets, reps, weight and personal bests')}
         ${interestTileHtml('running', STATIC_ICONS.footprints, 'Cardio', i.running, 'Running, walking, cycling, with distance and pace goals')}
-        ${interestTileHtml('habits', STATIC_ICONS.habits, 'Habits', i.habits, 'Creatine, stretching, daily reps, anything daily')}
+        ${interestTileHtml('habits', STATIC_ICONS.daily, 'Daily', i.habits, 'Creatine, stretching, daily reps, anything daily')}
         ${interestTileHtml('food', DOMAIN_TAB_ICONS.food, 'Food', i.food, 'Calories and macros, common foods ready')}
         ${interestTileHtml('water', DOMAIN_TAB_ICONS.water, 'Water', i.water, 'Glasses and bottles against a daily goal')}
         ${interestTileHtml('bodyweight', DOMAIN_TAB_ICONS.measurements, 'Body', i.bodyweight, 'Weight, BMI and other measurements')}
@@ -6198,7 +6408,7 @@
     { id: 'bench', mv: 'cat_mv_bench_press', lift: 'bench', typical: 225, note: 'two plates a side' },
     { id: 'squat', mv: 'cat_mv_squat', lift: 'squat', typical: 315, note: 'three plates a side' },
     { id: 'deadlift', mv: 'cat_mv_deadlift', lift: 'deadlift', typical: 405, note: 'four plates a side' },
-    { id: 'ohp', mv: 'cat_mv_ohp', typical: 135, note: 'one plate a side' },
+    { id: 'ohp', mv: 'cat_mv_ohp', lift: 'shoulder-press', typical: 135, note: 'one plate a side' },
     { id: 'pushups', mv: 'cat_mv_pushups', typical: 50, note: 'in a day' },
     { id: 'pullups', mv: 'cat_mv_pullups', typical: 15, note: 'in a day' },
     { id: 'bwsquats', mv: 'cat_mv_bw_squats', typical: 50, note: 'in a day' },
@@ -6826,6 +7036,7 @@
     document.getElementById('streakCard').addEventListener('click', () => switchTab('history'));
     document.getElementById('recentHistoryBtn').addEventListener('click', () => switchTab('history'));
     wireManageExercises();
+    wireManageDaily();
     wireFoodLog();
     wireManageFood();
     document.getElementById('logForm').addEventListener('submit', handleLogSubmit);
@@ -7046,6 +7257,7 @@
 
     document.getElementById('aboutNumbersBtn').addEventListener('click', openReferencesModal);
     document.getElementById('exportBtn').addEventListener('click', exportBackup);
+    document.getElementById('eraseAllBtn').addEventListener('click', eraseAllData);
     document.getElementById('importBtn').addEventListener('click', () => document.getElementById('importFile').click());
     document.getElementById('importFile').addEventListener('change', (ev) => {
       const file = ev.target.files[0];
