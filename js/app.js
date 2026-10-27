@@ -1,31 +1,10 @@
-/* ============================================================================
-   FIT LOG - app.js
-   Plain HTML/CSS/JavaScript: no build step, no framework, no libraries. index.html holds
-   every screen as a <section>; this file shows and hides them. All data lives in
-   localStorage on the device and is never sent over the network.
+/* Fit Log. Plain HTML/CSS/JS with no build step or framework. index.html holds every screen
+   as a <section>; this file shows and hides them. Data lives in localStorage on the device and
+   is never sent anywhere.
 
-   One IIFE, split into sections marked by banner comments (search for a section's name
-   to jump to it). Pure logic lives in other files:
-     js/migrations.js  schema version and migrations (additive only)
-     js/units.js       unit conversion and number formatting
-     js/calc.js        streak, sleep and estimated-1RM calculators
-     js/features.js    feature on/off rules (Lifting, Running & cardio, Daily habits and reps)
-     js/standards.js   reference tables and nutrition maths
-     js/icons.js       ITEM_ICONS data
-     js/catalog.js, js/backup.js, js/charts.js
-
-   Sections here, in order: Defaults, Store, Unit helpers, Derived data, Progressive-overload
-   suggestion engine, Body & wellness trackers, Insights & standards, Water, Food / nutrition,
-   Theme, Toast, Modal, Chip picker, Dynamic set fields, Rendering: Dashboard, Returning-user
-   setup review, Home sections, Rendering: Log tab, Organization, Catalog & equipment
-   variants, Item icons, Saved Foods, Rendering: History, Entry modal, Exercise detail
-   modal, Add / edit exercise modal, Tracker detail modal, Add / edit tracker modal, Water:
-   cup management, Manage, Settings, Backup validation, First-run setup wizard, Tabs /
-   global wiring, Data recovery screen, Init.
-
-   Data flow: an event handler updates `state`, calls save(), then calls the render*()
-   functions for whatever changed. See README.md for a walkthrough and common changes.
-   ============================================================================ */
+   One IIFE. Logic that doesn't touch the DOM is in the other files in js/ (migrations, units,
+   calc, features, standards, catalog, backup). A handler updates `state`, calls save(), then
+   calls the render*() functions for whatever changed. README.md has the walkthrough. */
 (() => {
   'use strict';
 
@@ -39,8 +18,6 @@
   const upgradeData = (raw) => window.FitMigrations.upgrade(raw, {
     defaultSettings: makeDefaultSettings, defaultProfile, defaultTrackers, defaultWater, defaultFood,
   });
-
-  /* ============================== Defaults ============================== */
 
   // Starter trackers: Weight and Sleep only. `kind: 'metric'` is a number with an
   // optional goal; `kind: 'sleep'` also stores a 1-5 `quality` per entry. Others
@@ -143,7 +120,7 @@
     };
   }
 
-  /* ============================== Store ==============================
+  /* Store
      load() and save() are the only code that touches localStorage. */
 
   let state = null;
@@ -171,8 +148,9 @@
       const looksLikeData = parsed && typeof parsed === 'object' && !Array.isArray(parsed)
         && (Array.isArray(parsed.exercises) || Array.isArray(parsed.entries) || typeof parsed.version === 'number');
       if (!looksLikeData) throw new Error('bad shape');
+      const fromVersion = parsed.version;
       state = upgradeData(parsed);
-      save(); // persist the migrated shape once, so this doesn't re-run every load
+      if (fromVersion !== SCHEMA_VERSION) save();
     } catch (e) {
       // Saved data exists but could not be parsed or migrated. Do not overwrite it
       // (there is no other copy); leave localStorage alone and let the recovery
@@ -201,15 +179,11 @@
     return `${prefix}_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
   }
 
-  /* ============================== Unit helpers ============================== */
-
   const {
     LB_PER_KG, MIN_AGE, MAX_AGE, MIN_HEIGHT_CM, MAX_HEIGHT_CM,
-    Units, round, cmToFtIn, fmtWeight, fmtReps, isTimed, fmtHold, fmtCount, fmtDistance, fmtSecShort,
+    Units, round, cmToFtIn, fmtWeight, isTimed, fmtHold, fmtCount, fmtDistance,
     fmtPace, fmtLength, fmtVolume, fmtDuration, localDateISO, todayISO, fmtDateShort,
   } = window.FitUnits.create(() => state.settings);
-
-  /* ============================== Derived data ============================== */
 
   // Habits and daily-rep targets follow the Habits switch, cardio follows
   // Running & cardio, everything else follows Lifting (js/features.js). Turning
@@ -389,7 +363,7 @@
     return exercise.goal ? ` · ${goalLabelForExercise(exercise)}` : ' · no goal set';
   }
 
-  /* ============================== Progressive-overload suggestion engine ==============================
+  /* Progressive-overload suggestion engine
      RPE bands when the last top set has an RPE; otherwise a two-session trend
      (not the NSCA "2-for-2 rule"). A general guideline, not coaching; the UI says so. */
 
@@ -460,7 +434,10 @@
           const w = lastTop.weight + weightIncrementLb(region, 1);
           return { headline: `Try ${fmtWeight(w)} next session`, detail: `You matched or beat your reps (${prevTop.reps} → ${lastTop.reps}) at this weight for two sessions in a row.`, method: 'sametrend' };
         }
-        return { headline: `Repeat ${fmtWeight(lastTop.weight)} next session`, detail: `Reps dipped (${prevTop.reps} → ${lastTop.reps}) — consolidate before adding load.`, method: 'sametrend' };
+        const detail = lastTop.reps < prevTop.reps
+          ? `Reps dipped (${prevTop.reps} → ${lastTop.reps}). Consolidate before adding load.`
+          : `Fewer than 5 reps (${lastTop.reps}) at this weight. Build to 5 before adding load.`;
+        return { headline: `Repeat ${fmtWeight(lastTop.weight)} next session`, detail, method: 'sametrend' };
       }
       return { headline: `Repeat ${fmtWeight(lastTop.weight)}, or log RPE for a sharper suggestion`, detail: 'Logging an RPE (how hard that top set felt, 1–10) unlocks a tailored recommendation.', method: null };
     }
@@ -520,13 +497,13 @@
     if (exercise.kind === 'habit') return 'Habit';
     if (exercise.kind === 'cardio') {
       const metrics = cardioMetricsOf(exercise);
-      if (metrics.length === 2) return 'Run · distance & pace';
-      return metrics[0] === 'pace' ? 'Run · pace' : 'Run · distance';
+      if (metrics.length === 2) return 'Cardio · distance & pace';
+      return metrics[0] === 'pace' ? 'Cardio · pace' : 'Cardio · distance';
     }
     return '';
   }
 
-  /* ============================== Body & wellness trackers ==============================
+  /* Body & wellness trackers
      A tracker logs a number against an optional goal (weight, sleep, custom).
      Values are stored in one canonical unit per unitKind (see Unit helpers). */
 
@@ -548,7 +525,7 @@
       case 'length': return fmtLength(v);
       case 'percent': return `${round(v, 1)}%`;
       case 'hours': return `${round(v, 1)} hr`;
-      case 'rating': return `${Math.round(v)}/${tracker.ratingMax || 5}`;
+      case 'rating': return `${Math.round(v)}/${Number(tracker.ratingMax) || 5}`;
       default: return `${round(v, 1)}${tracker.unitLabel ? ' ' + escapeHtml(tracker.unitLabel) : ''}`;
     }
   }
@@ -593,11 +570,12 @@
   // usable baseline or once the goal is reached.
   function trackerProgressDeltaText(tracker, value) {
     if (value == null || tracker.goal == null || !trackerBaselineUsable(tracker)) return null;
-    const moved = Math.abs(tracker.baseline - value);
+    const down = tracker.direction === 'down';
+    const moved = down ? tracker.baseline - value : value - tracker.baseline;
     const remaining = Math.abs(tracker.goal - value);
     if (remaining <= 0) return null;
-    const dir = tracker.direction === 'down' ? 'down' : 'up';
-    return `${fmtTrackerValue(tracker, moved)} ${dir} · ${fmtTrackerValue(tracker, remaining)} remaining`;
+    if (moved <= 0) return `${fmtTrackerValue(tracker, remaining)} to go`;
+    return `${fmtTrackerValue(tracker, moved)} ${down ? 'down' : 'up'} · ${fmtTrackerValue(tracker, remaining)} remaining`;
   }
 
   // Convert a stored value (lb, cm, ...) to and from the number shown in an
@@ -620,19 +598,18 @@
       case 'length': return Units.lengthUnitLabel();
       case 'percent': return '%';
       case 'hours': return 'hr';
-      case 'rating': return `/ ${tracker.ratingMax || 5}`;
+      case 'rating': return `/ ${Number(tracker.ratingMax) || 5}`;
       default: return tracker.unitLabel ? escapeHtml(tracker.unitLabel) : '';
     }
   }
 
-  /* ============================== Insights & standards ==============================
+  /* Insights & standards
      Optional calculators (BMI, weight trend, strength and running level), on by
      default and switched in Settings -> Insights. Each says what is missing
      instead of guessing. Tables and sources: js/standards.js. General guidance only. */
 
   // Thresholds, formulas and sources live in js/standards.js (FitStandards).
   const S = window.FitStandards;
-  const INSIGHT_TIER_LABELS = S.TIER_LABELS;
   // Fixed "plates" goals: 2/3/4 plates a side plus a 45 lb bar. Used by the
   // setup wizard and defaultData().
   const PLATE_GOALS = { bench: 225, squat: 315, deadlift: 405 };
@@ -744,7 +721,7 @@
       const baseline = list.filter((m) => m.date <= cutoffIso).slice(-1)[0] || list[0];
       if (baseline.id !== latest.id) {
         const days = Math.round((new Date(latest.date + 'T00:00:00') - new Date(baseline.date + 'T00:00:00')) / 86400000);
-        trend = { delta: latest.value - baseline.value, days };
+        if (days > 0) trend = { delta: latest.value - baseline.value, days };
       }
     }
     let bmi = null;
@@ -803,7 +780,7 @@
     return { best, ageAssumed: !(age > 0), age: age > 0 ? age : S.DEFAULT_RUN_AGE, hasRuns: entriesFor(ex.id).length > 0 };
   }
 
-  /* ============================== Water ==============================
+  /* Water
      Water has its own data shape (see defaultWater()), not a tracker kind, since
      tap-a-cup logging differs from typing a number. */
 
@@ -818,7 +795,7 @@
     return { pct: Math.max(0, pct), achieved: pct >= 100, total };
   }
 
-  /* ============================== Food / nutrition ==============================
+  /* Food / nutrition
      `state.food` is separate from exercises, trackers and water. An entry is one thing eaten or
      drunk with an optional number per MACRO_KEYS field (at least one required, see anyMacro()).
      Calories is always tracked; other fields only while `settings.macroGoals[key].enabled` is on,
@@ -935,11 +912,9 @@
   function macroSummaryText(values) {
     const parts = trackedMacroKeys()
       .filter((k) => values[k] != null)
-      .map((k) => k === 'calories' ? `${Math.round(values[k])} cal` : `${fmtMacroValue(k, values[k])} ${MACRO_LABELS[k].toLowerCase()}`);
+      .map((k) => k === 'calories' ? `${Math.round(values[k])} kcal` : `${fmtMacroValue(k, values[k])} ${MACRO_LABELS[k].toLowerCase()}`);
     return parts.length ? parts.join(', ') : 'No macros logged';
   }
-
-  /* ============================== Theme ============================== */
 
   function resolvedTheme() {
     const t = state.settings.theme;
@@ -976,8 +951,6 @@
     if (page) { lightMeta.setAttribute('content', page); darkMeta.setAttribute('content', page); }
   }
 
-  /* ============================== Toast ============================== */
-
   let toastTimer = null;
   // `action` ({label, run}) adds one button, e.g. Undo, and keeps the toast up longer.
   function toast(msg, action) {
@@ -991,10 +964,8 @@
     }
     el.hidden = false;
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => { el.hidden = true; }, action ? 7000 : 2200);
+    toastTimer = setTimeout(() => { el.hidden = true; }, action ? 7000 : Math.max(2200, msg.length * 55));
   }
-
-  /* ============================== Modal ============================== */
 
   const modalRoot = () => document.getElementById('modalRoot');
   const modalSheet = () => document.getElementById('modalSheet');
@@ -1004,20 +975,33 @@
     return Array.from(container.querySelectorAll('a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'));
   }
 
-  /* ===== Back-button / swipe-back step navigation =========================
+  /* Back-button / swipe-back step navigation
    * One history entry per level below Dashboard makes Back close the modal, then return to
    * Dashboard, then ask for a second press to exit. Only navPushModal()/navPopModal() and
    * switchTab() touch history. suppressNextPopHandling skips the popstate from our own
    * history.back(); handlingPopState stops its handlers from pushing or popping again. */
   const NAV_MODAL = 'modal';
   const NAV_TAB = 'tab';
+  const NAV_SETTINGS = 'settings';
   let suppressNextPopHandling = false;
   let handlingPopState = false;
   let exitWarningArmed = false;
   let exitWarningTimer = null;
+  // A tab switch requested while our own back() is still in flight waits for it to land;
+  // pushing first would put the new entry above the one being popped.
+  let pendingNav = null;
+  // The entry under Settings: a tab's, or Dashboard's guard.
+  let navBelowSettings = null;
 
   let suppressTimer = null;
-  function navPop() {
+  function popLanded() {
+    suppressNextPopHandling = false;
+    clearTimeout(suppressTimer);
+    const next = pendingNav;
+    pendingNav = null;
+    if (next) next();
+  }
+  function navPop(steps = 1) {
     // A back() is already in flight (history.state does not change until it lands), so a
     // second request in the same tick, e.g. confirmDialog closing and then its callback
     // closing again, would step back twice and land on Dashboard. Ignore it.
@@ -1026,8 +1010,8 @@
     // Safety net: if the browser never fires popstate (nothing to go back to), don't leave
     // the flag set and swallow the user's next real Back press.
     clearTimeout(suppressTimer);
-    suppressTimer = setTimeout(() => { suppressNextPopHandling = false; }, 600);
-    history.back();
+    suppressTimer = setTimeout(popLanded, 600);
+    history.go(-steps);
   }
   function navPushModal() {
     if (handlingPopState) return;
@@ -1042,15 +1026,29 @@
   const NAV_TRACKED_TABS = new Set(['dashboard', 'progress', 'log', 'history', 'manage', 'settings']);
   function navOnSwitchTab(tab) {
     if (handlingPopState || !NAV_TRACKED_TABS.has(tab)) return;
+    if (suppressNextPopHandling) { pendingNav = () => navOnSwitchTab(tab); return; }
+    const cur = (history.state || {}).nav;
+    if (tab === 'settings') {
+      if (cur !== NAV_SETTINGS) { navBelowSettings = cur; history.pushState({ nav: NAV_SETTINGS }, ''); }
+      return;
+    }
+    // Leaving Settings drops its entry; going Home also drops the tab entry under it.
+    const fromSettings = cur === NAV_SETTINGS;
+    const below = fromSettings ? navBelowSettings : cur;
     if (tab === 'dashboard') {
-      if ((history.state || {}).nav === NAV_TAB) navPop();
-    } else if ((history.state || {}).nav !== NAV_TAB) {
+      const steps = (fromSettings ? 1 : 0) + (below === NAV_TAB ? 1 : 0);
+      if (steps) navPop(steps);
+    } else if (below === NAV_TAB) {
+      if (fromSettings) navPop();
+    } else if (fromSettings) {
+      history.replaceState({ nav: NAV_TAB }, '');
+    } else {
       history.pushState({ nav: NAV_TAB }, '');
     }
   }
 
   window.addEventListener('popstate', () => {
-    if (suppressNextPopHandling) { suppressNextPopHandling = false; clearTimeout(suppressTimer); return; }
+    if (suppressNextPopHandling) { popLanded(); return; }
     handlingPopState = true;
     try {
       if (!modalRoot().hidden) { closeModal(); return; }
@@ -1181,7 +1179,7 @@
   // The dialog closes itself before running onConfirm: callbacks must not call closeModal().
   function confirmDialog(title, body, confirmLabel, onConfirm, danger) {
     openModal(`
-      <div class="modal-title-row"><h2>${escapeHtml(title)}</h2><button class="modal-close" data-action="close-modal">${CLOSE_ICON_SVG}</button></div>
+      <div class="modal-title-row"><h2>${escapeHtml(title)}</h2><button class="modal-close" data-action="close-modal" aria-label="Close">${CLOSE_ICON_SVG}</button></div>
       <p class="muted-text">${escapeHtml(body)}</p>
       <div class="btn-row confirm-actions">
         <button class="btn btn-secondary" data-action="close-modal">Cancel</button>
@@ -1191,7 +1189,7 @@
     document.getElementById('confirmDialogBtn').addEventListener('click', () => { closeModal(); onConfirm(); });
   }
 
-  /* ============================== Chip picker ==============================
+  /* Chip picker
      A row of tap targets for a few discrete choices (sleep quality 1-5). The
      container's data-value is the source of truth ('' = none); tapping the
      selected chip clears it. */
@@ -1221,7 +1219,7 @@
     el.setAttribute('tabindex', '0');
     el.addEventListener('click', onOpen);
     el.addEventListener('keydown', (ev) => {
-      if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); onOpen(); }
+      if (ev.target === el && (ev.key === 'Enter' || ev.key === ' ')) { ev.preventDefault(); onOpen(); }
     });
   }
   function resetChipPicker(el) {
@@ -1248,14 +1246,19 @@
     if (tracker.kind === 'sleep' && (canon < 0 || canon > 24)) return 'Sleep must be between 0 and 24 hours.';
     if (tracker.unitKind === 'weight' && (canon <= 0 || canon > LIMITS.weightLb)) return 'That weight is out of range. Check the number and unit.';
     if (tracker.unitKind === 'length' && (canon <= 0 || canon > 1000)) return 'That length is out of range. Check the number and unit.';
+    if (tracker.unitKind === 'rating') {
+      const max = Number(tracker.ratingMax) || 5;
+      if (canon < 1 || canon > max) return `Pick a rating from 1 to ${max}.`;
+    }
+    if (tracker.unitKind === 'percent' && (canon < 0 || canon > 100)) return 'A percentage must be between 0 and 100.';
+    if (tracker.unitKind === 'hours' && (canon < 0 || canon > 24)) return 'Hours must be between 0 and 24.';
+    if (tracker.unitKind === 'count' && canon < 0) return 'A count can’t be negative.';
     return null;
   }
   const WATER_TOO_BIG = 'That amount is too large to be right. Check the number and unit.';
   function escapeHtml(s) {
     return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   }
-
-  /* ============================== Dynamic set fields (shared by Log tab + edit modal) ============================== */
 
   // Column labels show only above the first set row. Later rows keep them in the
   // markup, hidden by CSS (`.set-row:not(:first-child) .field-label`), so screen
@@ -1450,7 +1453,7 @@
       if (!Number.isNaN(distV) && Units.displayToMi(distV) > LIMITS.distanceMi) return { error: 'That distance is too large to be right. Check the number and unit.' };
       if (!Number.isNaN(minV) && minV * 60 > LIMITS.durationSec) return { error: 'That time is too long to be right.' };
       if ((!Number.isNaN(minV) && minV < 0) || (!Number.isNaN(secV) && secV < 0)) return { error: 'Time can’t be negative.' };
-      if (!Number.isNaN(secV) && secV >= 60) return { error: 'Seconds must be less than 60 — carry the rest over into minutes.' };
+      if (!Number.isNaN(secV) && secV >= 60) return { error: 'Seconds must be less than 60. Carry the rest over into minutes.' };
       if (invalidRpe(rpeV)) return { error: `RPE must be between ${RPE_MIN} and ${RPE_MAX}.` };
       const hasDist = !Number.isNaN(distV) && distV > 0;
       const minPart = Number.isNaN(minV) ? 0 : minV;
@@ -1459,7 +1462,7 @@
       if (!hasDist && !hasTime) return null;
       return {
         distance: hasDist ? fieldCanon(container.querySelector('#cardioDistance'), Units.displayToMi) : null,
-        duration: hasTime ? minPart * 60 + secPart : null,
+        duration: hasTime ? Math.round(minPart * 60 + secPart) : null,
         rpe: Number.isNaN(rpeV) ? null : rpeV,
       };
     }
@@ -1488,7 +1491,10 @@
         const r = parseFloat(row.querySelector('.set-reps').value);
         const aw = parseFloat(row.querySelector('.set-addedweight').value);
         const rpe = parseFloat(row.querySelector('.set-rpe').value);
-        if (Number.isNaN(r)) continue;
+        if (Number.isNaN(r)) {
+          if (Number.isNaN(aw) && Number.isNaN(rpe)) continue;
+          return { error: 'Add the reps for this set, or clear the row.' };
+        }
         if (r <= 0 || !Number.isInteger(r)) return { error: 'Reps must be a whole number greater than zero.' };
         if (!Number.isNaN(aw) && aw < 0) return { error: 'Added weight can’t be negative.' };
         if (r > (exercise.unit === 'time' ? LIMITS.holdSeconds : LIMITS.reps)) return { error: 'That value is too large to be right.' };
@@ -1500,12 +1506,10 @@
     return sets.length ? { sets } : null;
   }
 
-  /* ============================== Rendering: Dashboard ============================== */
-
   // Every date with something logged in a section you track (see
   // FitStandards.STREAK_RULE): workouts/habits, food, water, body entries.
   const trackedAreas = () => ({
-    workout: domainTracked('workout') || domainTracked('daily'), measurements: domainTracked('measurements'),
+    workout: (e) => domainTracked(isDailyEntry(e) ? 'daily' : 'workout'), measurements: domainTracked('measurements'),
     water: domainTracked('water'), food: domainTracked('food'),
   });
   function activityDays() { return window.FitCalc.activityDays(state, trackedAreas()); }
@@ -1542,10 +1546,12 @@
     const { pct, achieved, best: b } = progressPct(ex, metric);
     const goal = ex.kind === 'cardio' ? cardioGoalFor(ex, metric) : ex.goal;
     const fillPct = Math.min(100, pct);
-    const label = metric === 'pace' ? 'Pace' : 'Distance';
+    // A bodyweight-standard goal is measured on estimated 1RM, not the heaviest set; say so.
+    const oneRM = ex.kind === 'weight' && ex.goalMode === 'standard';
+    const label = oneRM ? 'Est. 1RM' : metric === 'pace' ? 'Pace' : 'Distance';
     return `
       <div class="ex-card-metric">
-        ${opts.labeled ? `<div class="ex-card-metric-label">${label}</div>` : ''}
+        ${opts.labeled || oneRM ? `<div class="ex-card-metric-label">${label}</div>` : ''}
         <div class="ex-card-values">
           <div class="ex-card-current">${formatValueForExercise(ex, b, metric)}</div>
           ${goal ? `<div class="ex-card-goal">/ ${goalLabelForExercise(ex, metric).replace('Goal ', '')}</div>` : ''}
@@ -1736,7 +1742,7 @@
       </div>`;
   }
 
-  /* ---- Home rows ----
+  /* Home rows
      Every Home section is a card of `.glance-row`s: icon, name, value, meter, optional action. */
 
   // Today's progress toward one daily target, as display text plus a 0-100+
@@ -1761,7 +1767,7 @@
       return { curText: cur == null ? '0' : fmtWeight(cur), goalText: ex.goal ? `/ ${fmtWeight(ex.goal)}` : '', pct: ex.goal ? ((cur || 0) / ex.goal) * 100 : null };
     }
     const cur = today.reduce((sum, e) => sum + (e.sets || []).reduce((m, st) => m + (st.reps || 0), 0), 0);
-    return { curText: String(cur), goalText: isTimed(ex) ? (ex.goal ? `/ ${fmtHold(ex.goal)}` : '') : (ex.goal ? `/ ${Math.round(ex.goal)} reps` : 'reps'), pct: ex.goal ? (cur / ex.goal) * 100 : null };
+    return { curText: isTimed(ex) ? fmtHold(cur) : String(cur), goalText: isTimed(ex) ? (ex.goal ? `/ ${fmtHold(ex.goal)}` : '') : (ex.goal ? `/ ${Math.round(ex.goal)} reps` : 'reps'), pct: ex.goal ? (cur / ex.goal) * 100 : null };
   }
 
   function glanceMeterHtml(ex, pct) {
@@ -1893,7 +1899,7 @@
       .reduce((max, en) => (en.id > max ? en.id : max), '');
   }
 
-  /* ============================== Returning-user setup review ==============================
+  /* Returning-user setup review
      Offers a lightly used existing install a one-time look at tracking options
      added since it started (new defaults do not reach saved settings). It is not
      a re-run of the wizard, which replaces data; it only flips settings booleans. */
@@ -1939,7 +1945,7 @@
     const s = state.settings;
     const macroRowHtml = (k) => setupBoolRowHtml(`review_macro_${k}`, MACRO_LABELS[k], macroGoalInfo(k).enabled);
     openModal(`
-      <div class="modal-title-row"><h2>Review your tracking</h2><button class="modal-close" data-action="close-modal">${CLOSE_ICON_SVG}</button></div>
+      <div class="modal-title-row"><h2>Review your tracking</h2><button class="modal-close" data-action="close-modal" aria-label="Close">${CLOSE_ICON_SVG}</button></div>
       <p class="muted-text">Fit Log has added tracking options and insight cards since you started — here's a chance to double check what's on. Nothing you've already logged changes either way.</p>
       <div class="card form-card">
         <div class="section-head"><h2>What do you track?</h2></div>
@@ -1992,29 +1998,28 @@
     });
   }
 
-  /* ============================== Home sections ==============================
+  /* Home sections
      Each section belongs to one module and disappears with it. Home only reads existing data. */
 
   const dayLabel = (iso) => new Date(iso + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'short' });
   function openLogCategory(cat) { logCategory = cat; switchTab('log'); }
   function openManageCategory(cat) { manageCategory = cat; switchTab('manage'); }
 
-  // Exercises that belong in Training: lifts and cardio, not the daily
-  // counters and habits that live in the Checklist.
+  // Home's Workout section: lifts and cardio. Habits and daily reps belong to Daily.
   function trainingExercises() {
-    return activeExercises().filter((e) => e.kind !== 'habit' && sectionOf(e) !== 'daily');
+    return activeExercises().filter((e) => !isDailyEx(e));
   }
 
   const homeSectionOn = (key) => F.homeSectionOn(state.settings, key);
 
   function renderChecklist(all) {
-    const daily = homeSectionOn('checklist') ? all.filter((e) => sectionOf(e) === 'daily' && (e.kind !== 'habit' || habitDueToday(e))) : [];
+    const daily = homeSectionOn('checklist') ? all.filter((e) => isDailyEx(e) && (e.kind !== 'habit' || habitDueToday(e))) : [];
     document.getElementById('dailyTargetsHead').hidden = daily.length === 0;
     const done = daily.filter((e) => { const p = todayProgressOf(e); return p.pct != null && p.pct >= 100; }).length;
     document.getElementById('checklistCount').textContent = `${done} of ${daily.length} done`;
     const wrap = document.getElementById('dailyTargetsWrap');
     wrap.hidden = daily.length === 0;
-    wrap.innerHTML = daily.map(dailyTargetRowHtml).join('');
+    wrap.innerHTML = daily.map((e) => dailyTargetRowHtml(e, 'Log')).join('');
     wrap.querySelectorAll('.glance-row').forEach((row) => {
       const exId = row.getAttribute('data-exercise-id');
       wireOpenable(row.querySelector('.glance-open'), () => openExerciseDetail(exId));
@@ -2037,11 +2042,16 @@
       .filter((e) => entriesFor(e.id).some((en) => en.date === today))
       .sort((a, b) => latestTodayEntryId(b.id).localeCompare(latestTodayEntryId(a.id)));
     const rows = doneToday.map((ex) => {
-      const en = entriesFor(ex.id).filter((x) => x.date === today).slice(-1)[0];
-      const sets = en.sets ? en.sets.length : 0;
+      const todays = entriesFor(ex.id).filter((x) => x.date === today);
+      const sets = todays.reduce((n, x) => n + (x.sets ? x.sets.length : 0), 0);
+      let en = todays[0];
+      let val = entryValue(ex, en);
+      todays.slice(1).forEach((x) => {
+        const v = entryValue(ex, x);
+        if (v != null && (val == null || (isLowerBetter(ex) ? v < val : v > val))) { en = x; val = v; }
+      });
       const top = topSetOf(ex, en);
       const prior = entriesFor(ex.id).filter((x) => x.date < today).map((x) => entryValue(ex, x)).filter((v) => v != null);
-      const val = entryValue(ex, en);
       const priorTop = prior.length ? (isLowerBetter(ex) ? Math.min(...prior) : Math.max(...prior)) : null;
       const isBest = val != null && priorTop != null && (isLowerBetter(ex) ? val < priorTop : val > priorTop);
       const tiesBest = val != null && priorTop != null && val === priorTop;
@@ -2052,7 +2062,7 @@
             ${exerciseIconHtml(ex)}
             <div class="glance-main">
               <div class="glance-name">${exerciseLabelHtml(ex)}${isBest ? ' <span class="tag tag-good">New best</span>' : tiesBest ? ' <span class="tag tag-good">Ties best</span>' : ''}</div>
-              <div class="glance-sub">Today · ${sets} set${sets === 1 ? '' : 's'}${topText}</div>
+              <div class="glance-sub">Today · ${ex.kind === 'cardio' ? escapeHtml(entrySummaryText(ex, en)) : `${sets} set${sets === 1 ? '' : 's'}${topText}`}</div>
             </div>
             ${CHEVRON_RIGHT_SVG}
           </div>
@@ -2068,8 +2078,8 @@
           <div class="glance-open">
             ${itemIconHtml('dumbbell')}
             <div class="glance-main">
-              <div class="glance-name">Nothing lifted yet today</div>
-              <div class="glance-sub">${lastDate ? `Last lifted ${dayLabel(lastDate)} · ${escapeHtml(names)}` : 'Log your first set to get started'}</div>
+              <div class="glance-name">Nothing logged yet today</div>
+              <div class="glance-sub">${lastDate ? `Last workout ${dayLabel(lastDate)} · ${escapeHtml(names)}` : 'Log your first set to get started'}</div>
             </div>
           </div>
         </div>`;
@@ -2206,11 +2216,14 @@
         items.push({ type: 'daily', ex, name: exerciseLabel(ex), icon: exerciseIconHtml(ex), cur: p.curText, goal: p.goalText.replace(/^\/ /, ''), pct: p.pct, met: p.pct >= 100, open: () => openExerciseDetail(ex.id) });
         return;
       }
-      const metric = ex.kind === 'cardio' ? (cardioMetricsOf(ex)[0] || 'distance') : undefined;
-      const goal = ex.kind === 'cardio' ? cardioGoalFor(ex, metric) : ex.goal;
-      if (!goal) return;
-      const { pct, best: b } = progressPct(ex, metric);
-      items.push({ type: ex.kind === 'cardio' ? 'cardio' : 'lift', ex, name: exerciseLabel(ex), icon: exerciseIconHtml(ex), cur: formatValueForExercise(ex, b, metric), goal: goalLabelForExercise(ex, metric).replace('Goal ', ''), pct, met: pct >= 100, open: () => openExerciseDetail(ex.id) });
+      // A run can have a distance goal and a pace goal; each gets its own row.
+      const metrics = ex.kind === 'cardio' ? (cardioMetricsOf(ex).length ? cardioMetricsOf(ex) : ['distance']) : [undefined];
+      metrics.forEach((metric) => {
+        const goal = ex.kind === 'cardio' ? cardioGoalFor(ex, metric) : ex.goal;
+        if (!goal) return;
+        const { pct, best: b } = progressPct(ex, metric);
+        items.push({ type: ex.kind === 'cardio' ? 'cardio' : 'lift', ex, name: exerciseLabel(ex), icon: exerciseIconHtml(ex), cur: formatValueForExercise(ex, b, metric), goal: goalLabelForExercise(ex, metric).replace('Goal ', ''), pct, met: pct >= 100, open: () => openExerciseDetail(ex.id) });
+      });
     });
     if (domainTracked('measurements')) {
       activeTrackers().forEach((t) => {
@@ -2392,7 +2405,7 @@
       calcHtml = `
         <div class="section-head"><h2>Recommendation</h2></div>
         <div class="card">
-          <div class="insight-line">${suggestion.calories} cal &middot; ${suggestion.protein}g protein</div>
+          <div class="insight-line">${suggestion.calories} kcal &middot; ${suggestion.protein}g protein</div>
           <p class="muted-text field-hint">For ${NUTRITION_GOAL_LABELS[calc.goal]}, ${ACTIVITY_LEVELS[calc.activityLevel].label.toLowerCase()}.</p>
         </div>`;
     }
@@ -2415,7 +2428,7 @@
       </div>` : '';
 
     openModal(`
-      <div class="modal-title-row"><h2>Food today</h2><button class="modal-close" data-action="close-modal">${CLOSE_ICON_SVG}</button></div>
+      <div class="modal-title-row"><h2>Food today</h2><button class="modal-close" data-action="close-modal" aria-label="Close">${CLOSE_ICON_SVG}</button></div>
       <button type="button" class="btn btn-primary btn-block" id="logFoodFromDetailBtn">Log food</button>
       <div class="section-head"><h2>Today's totals</h2></div>
       <div class="standards-preview food-totals">${rows}</div>
@@ -2455,15 +2468,13 @@
     switchTab('manage');
   }
 
-  /* ============================== Rendering: Log tab ============================== */
-
   function groupBySection(list) {
     const groups = { goal: [], daily: [], accessory: [] };
     list.forEach((ex) => { groups[sectionOf(ex)].push(ex); });
     return groups;
   }
 
-  /* ============================== Organization: groups, favorites, search ==============================
+  /* Organization: groups, favorites, search
      Exercises and saved foods share a favorite star, "recent" (derived from logged
      entries, never stored) and search/filter chips; exercises also have a muscle
      group (`ex.group`). No migration: a missing `group` is inferred from the name. */
@@ -2501,7 +2512,7 @@
     if (has(/burpee|clean|snatch|thruster|kettlebell|swing|full body/)) return 'full';
     return 'other';
   }
-  function exerciseGroup(ex) { return EXERCISE_GROUP_LABELS[ex.group] ? ex.group : inferExerciseGroup(ex); }
+  function exerciseGroup(ex) { return Object.hasOwn(EXERCISE_GROUP_LABELS, ex.group) ? ex.group : inferExerciseGroup(ex); }
   function exerciseGroupLabel(ex) { return EXERCISE_GROUP_LABELS[exerciseGroup(ex)]; }
   // Until someone stars or unstars an exercise, the lifts they set a goal for count
   // as favorites, so Favorites is useful from day one.
@@ -2595,7 +2606,7 @@
     return (ev) => { if ((ev.key === 'Enter' || ev.key === ' ') && ev.target.hasAttribute('data-pick')) { ev.preventDefault(); handler(ev); } };
   }
 
-  /* ============================== Catalog & equipment variants ==============================
+  /* Catalog & equipment variants
      js/catalog.js is reference data (movements, habits, foods). Nothing reaches the user's data
      until they tick it in "Add from catalog"; copies are ordinary items. Each equipment variant
      of a movement is its own exercise (same `catalogId`, different `equipment`). */
@@ -2610,7 +2621,7 @@
   // otherwise just its own name.
   function exerciseLabel(ex) {
     if (!ex) return '';
-    const mv = ex.catalogId && MOVEMENTS[ex.catalogId];
+    const mv = ex.catalogId && Object.hasOwn(MOVEMENTS, ex.catalogId) && MOVEMENTS[ex.catalogId];
     const eq = ex.equipment && mv && mv.equipment.length > 1 && ex.equipment !== 'bodyweight' && equipmentLabel(ex.equipment);
     return eq ? `${ex.name} · ${eq}` : ex.name;
   }
@@ -2687,7 +2698,7 @@
       const n = importMissingMovements(isCardioMovement);
       return n ? `Added ${n} cardio activities` : '';
     }
-    if (key === 'trackWorkout' && !state.exercises.some((e) => e.kind === 'weight' || e.kind === 'reps')) {
+    if (key === 'trackWorkout' && !state.exercises.some((e) => (e.kind === 'weight' || e.kind === 'reps') && !isDailyEx(e))) {
       const n = importMissingMovements((m) => !isCardioMovement(m));
       return n ? `Added ${n} exercises` : '';
     }
@@ -2704,7 +2715,7 @@
     return 1;
   }
 
-  /* ---------- Tidy up: group older exercises under catalog movements ----------
+  /* Tidy up: group older exercises under catalog movements
      Offers to link exercises that predate the catalog (e.g. "Cable Bicep Curl") to a movement
      plus equipment. Entries and goals stay on the same record unless a variant already exists,
      in which case the two merge. Nothing changes until ticked rows are applied; Manage can undo. */
@@ -2839,7 +2850,7 @@
     const on = new Set(items.map((c, i) => (c.note ? -1 : i)).filter((i) => i >= 0));
     openModal(`
       <div class="split-shell">
-        <div class="modal-title-row"><h2>Tidy up</h2><button class="modal-close" data-action="close-modal">${CLOSE_ICON_SVG}</button></div>
+        <div class="modal-title-row"><h2>Tidy up</h2><button class="modal-close" data-action="close-modal" aria-label="Close">${CLOSE_ICON_SVG}</button></div>
         <p class="muted-text">Tick the ones you want grouped. Your entries and goals stay with each exercise${items.some((c) => c.merge) ? '; where a variant already exists the two are merged' : ''}.</p>
         <div class="split-scroll"><div id="tidyList" class="cat-list"></div></div>
         <div class="split-foot"><button type="button" class="btn btn-primary btn-block" id="tidyApplyBtn"></button></div>
@@ -2866,8 +2877,6 @@
     });
   }
 
-  /* ---------- the Add-from-catalog sheet ---------- */
-
   // Transient UI state (never saved). `pick` holds what is ticked per tab.
   const cat = { scope: ['exercises'], tab: 'exercises', query: '', group: 'all', pack: 'all', cat: 'all', open: null, pick: { exercises: new Set(), habits: new Set(), foods: new Set() } };
 
@@ -2879,7 +2888,7 @@
     cat.pick = { exercises: new Set(), habits: new Set(), foods: new Set() };
     openModal(`
       <div class="split-shell">
-        <div class="modal-title-row"><h2>${cat.scope[0] === 'foods' ? 'Add foods' : 'Add from catalog'}</h2><button class="modal-close" data-action="close-modal">${CLOSE_ICON_SVG}</button></div>
+        <div class="modal-title-row"><h2>${cat.scope[0] === 'foods' ? 'Add foods' : 'Add from catalog'}</h2><button class="modal-close" data-action="close-modal" aria-label="Close">${CLOSE_ICON_SVG}</button></div>
         ${cat.scope.length > 1 ? `<div class="segmented segmented-fill" id="catTabs" role="radiogroup" aria-label="Catalog">
           ${cat.scope.map((t) => `<button type="button" role="radio" data-cat-tab="${t}">${{ exercises: 'Exercises', habits: 'Habits', foods: 'Foods' }[t]}</button>`).join('')}
         </div>` : '<div id="catTabs" hidden></div>'}
@@ -3013,7 +3022,7 @@
             ${catCheck(on || have, have)}
             ${itemIconHtml(ITEM_ICONS[f.icon] ? f.icon : 'utensils', true)}
             <div class="entry-row-main"><div class="entry-row-title">${escapeHtml(f.name)}</div>
-              <div class="entry-row-sub">${escapeHtml(f.serving)} · ${f.calories} cal · ${f.protein != null ? `${f.protein} g protein` : ''}</div></div>
+              <div class="entry-row-sub">${escapeHtml(f.serving)} · ${f.calories} kcal · ${f.protein != null ? `${f.protein} g protein` : ''}</div></div>
             ${have ? '<span class="chip">Added</span>' : ''}
           </div>`;
       }).join('');
@@ -3096,8 +3105,6 @@
     renderAll();
   }
 
-  /* ---------- Log -> Workout ---------- */
-
   // Transient UI state (never saved).
   const logEx = { seg: null, group: 'all', query: '', showAll: false, pickerOpen: false };
   const LOG_LIST_LIMIT = 5;
@@ -3125,7 +3132,7 @@
     document.getElementById('logExSeg').innerHTML = segHtml([['fav', 'Favorites'], ['recent', 'Recent'], ['all', `All ${active.length}`]], seg);
 
     let base = seg === 'fav' ? favs : seg === 'recent' ? recent : active.slice().sort(byName);
-    if (searching) base = active.filter((e) => e.name.toLowerCase().includes(q) || exerciseGroupLabel(e).toLowerCase().includes(q)).sort(byName);
+    if (searching) base = active.filter((e) => exerciseLabel(e).toLowerCase().includes(q) || exerciseGroupLabel(e).toLowerCase().includes(q)).sort(byName);
 
     const counts = {};
     base.forEach((e) => { const g = exerciseGroup(e); counts[g] = (counts[g] || 0) + 1; });
@@ -3193,7 +3200,7 @@
   // Equipment chips on the Log form: switch to (or start) the same movement
   // on other equipment. Each variant keeps its own records and goals.
   function variantChipsHtml(ex) {
-    const mv = ex.catalogId && MOVEMENTS[ex.catalogId];
+    const mv = ex.catalogId && Object.hasOwn(MOVEMENTS, ex.catalogId) && MOVEMENTS[ex.catalogId];
     if (!mv || mv.equipment.length < 2) return '';
     return `<div class="variant-chips" role="group" aria-label="Equipment">${mv.equipment.map((eq) => {
       const rec = variantRecord(mv.id, eq) || legacyVariantMatch(mv, eq);
@@ -3268,8 +3275,6 @@
       if (ev.target.closest('#logChangeBtn')) { logEx.pickerOpen = true; syncLogWorkoutUI(); }
     });
   }
-
-  /* ---------- Manage -> Workout ---------- */
 
   const manageEx = { query: '', filter: 'all', open: {} };
   const MANAGE_EX_FILTERS = [['all', 'All'], ['goal', 'Goals'], ['accessory', 'Other']];
@@ -3371,7 +3376,6 @@
     });
   }
 
-
   // Manage > Daily: every habit and daily rep target, split into Habits, Daily reps and
   // Archived. Editing, archiving and the catalog work as they do for exercises.
   function renderDailyManageList() {
@@ -3406,8 +3410,6 @@
       }
     });
   }
-
-  /* ---------- Saved foods: shared helpers ---------- */
 
   // savedFoodId -> sortable date+id of its last use. Entries from a saved food
   // carry its id; older ones match by the note holding its name.
@@ -3518,7 +3520,7 @@
     document.querySelectorAll('[data-icon]').forEach((el) => { el.innerHTML = STATIC_ICONS[el.dataset.icon] || ''; });
   }
 
-  /* ============================== Item icons ==============================
+  /* Item icons
      Every exercise, tracker, cup and saved food shows an icon: the user's choice (an optional
      `icon` key) or a default by type. ITEM_ICONS (js/icons.js) maps key -> [label, picker
      category, Lucide paths]. */
@@ -3637,15 +3639,19 @@
       </button>`).join('');
   }
 
+  // A daily rep target logs through the workout form, even when the Workout area is off.
+  let logWorkoutBorrowed = false;
+
   function renderLogCategorySegmented() {
     const cats = availableDomainCategories();
+    if (logWorkoutBorrowed && logCategory === 'workout' && !cats.some((c) => c.id === 'workout')) cats.unshift({ id: 'workout', label: DOMAIN_LABELS.workout });
     // All domains can be off at once, so cats[0] may not exist.
     if (cats.length && !cats.some((c) => c.id === logCategory)) logCategory = cats[0].id;
     const seg = document.getElementById('logCategorySegmented');
     seg.innerHTML = domainTabsHtml(cats, logCategory);
     seg.hidden = cats.length < 2; // a single tracked section needs no switcher
     seg.querySelectorAll('button').forEach((b) => {
-      b.addEventListener('click', () => { logCategory = b.dataset.domainCat; renderLogView(); });
+      b.addEventListener('click', () => { logCategory = b.dataset.domainCat; logWorkoutBorrowed = false; renderLogView(); });
     });
   }
 
@@ -3669,15 +3675,67 @@
     if (prevValue && [...select.options].some((o) => o.value === prevValue)) select.value = prevValue;
   }
 
+  // The Body entry starts at the tracker's last value, so a routine weigh-in is a tap on
+  // Save or a nudge of the stepper instead of typing the whole number. measFilledFor
+  // remembers which tracker the field was filled for, so a value being typed survives
+  // re-renders.
+  let measFilledFor = null;
+  const MEAS_STEP = { weight: 0.1, length: 0.1, percent: 0.1, hours: 0.25, rating: 1, count: 1 };
+
   function renderLogMeasurementForm() {
     const select = document.getElementById('logTracker');
     populateTrackerSelect(select);
-    document.getElementById('logMeasurementDate').value = document.getElementById('logMeasurementDate').value || todayISO();
     const tracker = trackerById(select.value);
+    const chips = document.getElementById('logTrackerChips');
+    chips.innerHTML = activeTrackers().map((t) => chipHtml(t.id, escapeHtml(t.name), null, t.id === select.value)).join('');
+    chips.querySelectorAll('[data-chip]').forEach((b) => b.addEventListener('click', () => {
+      select.value = b.dataset.chip;
+      select.dispatchEvent(new Event('change'));
+    }));
+    const dateEl = document.getElementById('logMeasurementDate');
+    dateEl.value = dateEl.value || todayISO();
+    syncMeasurementDateBtn();
     const isSleep = tracker && tracker.kind === 'sleep';
+    document.getElementById('logMeasurementValueLabel').textContent = tracker ? (isSleep ? 'Hours slept' : `Log ${tracker.name}`) : 'Value';
     // innerHTML on purpose: trackerUnitLabel() already escapes, so textContent would show "&amp;".
-    document.getElementById('logMeasurementValueLabel').innerHTML = tracker ? (isSleep ? 'Hours slept' : `Value (${trackerUnitLabel(tracker)})`) : 'Value';
+    document.getElementById('logMeasurementUnit').innerHTML = tracker ? trackerUnitLabel(tracker) : '';
+    document.getElementById('logMeasurementSaveBtn').textContent = tracker ? `Save ${tracker.name.toLowerCase()}` : 'Save entry';
     document.getElementById('logSleepQualityField').hidden = !isSleep;
+    if (tracker && measFilledFor !== tracker.id) {
+      const latest = latestMeasurement(tracker.id);
+      document.getElementById('logMeasurementValue').value = latest ? trackerDisplayFromCanonical(tracker, latest.value) : '';
+      measFilledFor = tracker.id;
+    }
+  }
+
+  function syncMeasurementDateBtn() {
+    const date = document.getElementById('logMeasurementDate').value || todayISO();
+    const label = relDay(date);
+    document.getElementById('logMeasurementDateBtn').textContent = label[0].toUpperCase() + label.slice(1);
+  }
+
+  function stepMeasurement(dir) {
+    const tracker = trackerById(document.getElementById('logTracker').value);
+    if (!tracker) return;
+    const input = document.getElementById('logMeasurementValue');
+    const step = MEAS_STEP[tracker.unitKind] || 1;
+    const cur = parseFloat(input.value);
+    let next = round((Number.isNaN(cur) ? 0 : cur) + dir * step, 2);
+    if (tracker.unitKind === 'rating') next = Math.min(Number(tracker.ratingMax) || 5, Math.max(1, next));
+    input.value = Math.max(0, next);
+  }
+
+  function wireLogMeasurementForm() {
+    document.querySelectorAll('[data-meas-step]').forEach((b) => b.addEventListener('click', () => stepMeasurement(Number(b.dataset.measStep))));
+    const reveal = (btnId, fieldId, focusId) => document.getElementById(btnId).addEventListener('click', (ev) => {
+      const field = document.getElementById(fieldId);
+      field.hidden = !field.hidden;
+      ev.currentTarget.setAttribute('aria-expanded', String(!field.hidden));
+      if (!field.hidden) document.getElementById(focusId).focus();
+    });
+    reveal('logMeasurementDateBtn', 'logMeasurementDateField', 'logMeasurementDate');
+    reveal('logMeasurementNoteBtn', 'logMeasurementNoteField', 'logMeasurementNote');
+    document.getElementById('logMeasurementDate').addEventListener('change', syncMeasurementDateBtn);
   }
 
   function handleLogMeasurementSubmit(ev) {
@@ -3705,9 +3763,13 @@
     if (tracker.id === BODY_WEIGHT_TRACKER_ID) recomputeStandardGoals();
     if (!save()) return;
     toast('Entry saved');
-    document.getElementById('logMeasurementValue').value = '';
+    // The field keeps the value just saved; date and note fold away again.
     resetChipPicker(document.getElementById('logSleepQuality'));
     document.getElementById('logMeasurementNote').value = '';
+    document.getElementById('logMeasurementDate').value = todayISO();
+    ['logMeasurementDateField', 'logMeasurementNoteField'].forEach((id) => { document.getElementById(id).hidden = true; });
+    ['logMeasurementDateBtn', 'logMeasurementNoteBtn'].forEach((id) => document.getElementById(id).setAttribute('aria-expanded', 'false'));
+    syncMeasurementDateBtn();
     renderRecentEntries();
     renderDashboard();
     renderHistory();
@@ -3745,6 +3807,7 @@
       values[k] = (!Number.isNaN(raw) && raw >= 0) ? raw : null;
     });
     if (!anyMacro(values)) { toast('Enter at least one value to log a food entry.'); return; }
+    if (macroTooBig(values)) return;
     const date = readDate('logFoodDate', todayISO());
     if (!date) return;
     const note = document.getElementById('logFoodNote').value.trim();
@@ -3758,9 +3821,9 @@
     renderHistory();
   }
 
-  /* ---------- Log -> Daily ----------
-     Habits and daily-rep targets, one screen: today's count and streak, a tap-to-check
-     list of the habits due today, then the daily rep targets with a meter and a Log
+  /* Log -> Daily
+     Habits and daily-rep targets, one screen (today's count and streak are in the glance
+     card above it): a tap-to-check list of the habits due today, then the daily rep targets with a meter and a Log
      button (which opens the same rep form as Workout). Nothing here is new data: it is
      the Home "Daily targets" list, given its own home. */
   function dailyItemsToday() {
@@ -3795,24 +3858,11 @@
     if (panel.hidden) return;
     const { habits, reps } = dailyItemsToday();
     const all = habits.concat(reps);
-    const done = all.filter(dailyComplete).length;
-    const streak = computeStreak();
-    const pct = all.length ? Math.round((done / all.length) * 100) : 0;
     const section = (title, items, rowFn) => items.length ? `
       <div class="section-head daily-head"><h2>${title}</h2><span class="muted-text">${items.filter(dailyComplete).length} of ${items.length}</span></div>
       <div class="card card-list">${items.map(rowFn).join('')}</div>` : '';
     panel.innerHTML = `
-      <div class="card daily-summary">
-        <div class="daily-summary-top">
-          <div>
-            <span class="daily-eyebrow">Today</span>
-            <div class="daily-big">${done}<span> of ${all.length} done</span></div>
-          </div>
-          <span class="daily-streak${streak > 0 ? ' is-hot' : ''}">${FLAME_ICON_SVG}${streak} day streak</span>
-        </div>
-        <div class="meter"><div class="meter-fill${all.length && done === all.length ? ' is-complete' : ''}" style="--fill:${pct}%"></div></div>
-      </div>
-      ${all.length ? '' : '<p class="muted-text">Nothing is due today. Add a habit or a daily rep target to start a checklist.</p>'}
+      ${all.length ? '' : '<p class="muted-text">Nothing is due today. Add a habit or a daily rep target to get started.</p>'}
       ${section('Habits', habits, dailyHabitRowHtml)}
       ${section('Daily reps', reps, (ex) => dailyTargetRowHtml(ex, 'Log'))}
       <button type="button" class="card daily-add" data-action="add-daily">${uiIcon('plus')}<span>Add to Daily</span></button>`;
@@ -3839,6 +3889,7 @@
     document.getElementById('logExercisePicker').hidden = true;
     document.getElementById('logSwitchCard').hidden = true;
     document.getElementById('logMeasurementForm').hidden = allOff || logCategory !== 'measurements';
+    document.getElementById('logTrackerChipsWrap').hidden = allOff || logCategory !== 'measurements' || activeTrackers().length === 0;
     document.getElementById('logWaterPanel').hidden = allOff || logCategory !== 'water';
     document.getElementById('logDailyPanel').hidden = allOff || logCategory !== 'daily';
     // Food: saved foods lead; typing one in by hand is collapsed under them
@@ -3859,17 +3910,23 @@
       if (logCategory === 'water') renderLogWaterPanel();
       if (logCategory === 'food') { renderLogFoodForm(); renderSavedFoodLogList(); }
     }
-    renderTodayBars();
     renderRecentEntries();
   }
 
   // "Recent entries" follows the active Log category.
   function renderRecentEntries() {
-    renderTodayBars();
+    renderLogGlance();
     const wrap = document.getElementById('recentEntries');
-    if (!availableDomainCategories().length) { wrap.innerHTML = ''; return; }
+    const head = document.getElementById('recentHead');
+    // Daily's rows already show what is done today, so it has no Latest entry section.
+    const show = availableDomainCategories().length > 0 && logCategory !== 'daily';
+    head.hidden = !show;
+    if (!show) { wrap.innerHTML = ''; return; }
+    head.querySelector('h2').textContent = logCategory === 'measurements' ? 'Latest entries' : 'Latest entry';
     if (logCategory === 'measurements') {
-      const recent = state.measurements.slice().sort((a, b) => (b.date + b.id).localeCompare(a.date + a.id)).slice(0, 1);
+      // The selected tracker's last three entries.
+      const trackerId = document.getElementById('logTracker').value;
+      const recent = measurementsFor(trackerId).sort((a, b) => (b.date + b.id).localeCompare(a.date + a.id)).slice(0, 3);
       wrap.innerHTML = recent.length ? recent.map((m) => measurementRowHtml(m)).join('') : `<p class="muted-text">Nothing logged yet.</p>`;
       wireMeasurementRowClicks(wrap);
       return;
@@ -3886,9 +3943,10 @@
       wireFoodEntryRowClicks(wrap);
       return;
     }
-    const wantDaily = logCategory === 'daily';
+    // A daily rep target logs through the Workout form; show it there too.
+    const wantDaily = logWorkoutBorrowed;
     const recent = state.entries.filter((e) => isDailyEntry(e) === wantDaily).sort((a, b) => (b.date + b.id).localeCompare(a.date + a.id)).slice(0, 1);
-    if (!recent.length) { wrap.innerHTML = `<p class="muted-text">Nothing logged yet — your latest entry will show up here.</p>`; return; }
+    if (!recent.length) { wrap.innerHTML = `<p class="muted-text">Nothing logged yet. Your latest entry will show up here.</p>`; return; }
     wrap.innerHTML = recent.map((e) => entryRowHtml(e)).join('');
     wireEntryRowClicks(wrap);
   }
@@ -3925,7 +3983,7 @@
 
   function wireEntryRowClicks(container) {
     container.querySelectorAll('.entry-row[data-entry-id]').forEach((row) => {
-      row.addEventListener('click', () => openEntryModal(row.getAttribute('data-entry-id')));
+      wireOpenable(row, () => openEntryModal(row.getAttribute('data-entry-id')));
     });
   }
 
@@ -3935,7 +3993,7 @@
       <div class="entry-row" data-water-entry-id="${e.id}">
         ${cupIconHtml(cup, true)}
         <div class="entry-row-main">
-          <div class="entry-row-title">${cup ? escapeHtml(cup.name) : 'Custom amount'}</div>
+          <div class="entry-row-title">${cup ? escapeHtml(cup.name) : e.cupName ? escapeHtml(e.cupName) : 'Custom amount'}</div>
           <div class="entry-row-sub">${fmtVolume(e.amountMl)}</div>
         </div>
         <div class="entry-row-date">${fmtDateShort(e.date)}</div>
@@ -3944,7 +4002,7 @@
 
   function wireWaterEntryRowClicks(container) {
     container.querySelectorAll('.entry-row[data-water-entry-id]').forEach((row) => {
-      row.addEventListener('click', () => openWaterEntryModal(row.getAttribute('data-water-entry-id')));
+      wireOpenable(row, () => openWaterEntryModal(row.getAttribute('data-water-entry-id')));
     });
   }
 
@@ -3952,7 +4010,7 @@
     const e = state.waterEntries.find((x) => x.id === entryId);
     if (!e) return;
     openModal(`
-      <div class="modal-title-row"><h2>Edit water entry</h2><button class="modal-close" data-action="close-modal">${CLOSE_ICON_SVG}</button></div>
+      <div class="modal-title-row"><h2>Edit water entry</h2><button class="modal-close" data-action="close-modal" aria-label="Close">${CLOSE_ICON_SVG}</button></div>
       <div class="form-card">
         <label class="field"><span class="field-label">Date</span><input type="date" id="editWaterDate" value="${e.date}" /></label>
         <label class="field"><span class="field-label">Amount (${Units.volumeUnitLabel()})</span>
@@ -3999,7 +4057,7 @@
 
   function wireFoodEntryRowClicks(container) {
     container.querySelectorAll('.entry-row[data-food-entry-id]').forEach((row) => {
-      row.addEventListener('click', () => openFoodEntryModal(row.getAttribute('data-food-entry-id')));
+      wireOpenable(row, () => openFoodEntryModal(row.getAttribute('data-food-entry-id')));
     });
   }
 
@@ -4021,7 +4079,7 @@
     // `prefill` param). Hidden once a saved food with this name exists.
     const offerSaveAsFood = !foodEntryAlreadySaved(e);
     openModal(`
-      <div class="modal-title-row"><h2>Edit food entry</h2><button class="modal-close" data-action="close-modal">${CLOSE_ICON_SVG}</button></div>
+      <div class="modal-title-row"><h2>Edit food entry</h2><button class="modal-close" data-action="close-modal" aria-label="Close">${CLOSE_ICON_SVG}</button></div>
       <div class="form-card">
         <label class="field"><span class="field-label">Date</span><input type="date" id="editFoodDate" value="${e.date}" /></label>
         ${trackedMacroKeys().map((k) => {
@@ -4043,6 +4101,7 @@
       const values = {};
       trackedMacroKeys().forEach((k) => { values[k] = readMacro(`editFood_${k}`); });
       if (!anyMacro(values)) { toast('Enter at least one value to save this entry.'); return; }
+      if (macroTooBig(values)) return;
       const newDate = readDate('editFoodDate', e.date);
       if (!newDate) return;
       e.date = newDate;
@@ -4071,7 +4130,7 @@
     });
   }
 
-  /* ============================== Saved Foods ==============================
+  /* Saved Foods
      Named food templates (Manage -> Food -> Saved foods). Logging one is a
      single tap, optionally scaled by quantity, and creates a normal food entry. */
 
@@ -4093,7 +4152,7 @@
     let selectedCategory = (seed && seed.category) || 'other';
     let selectedFavorite = !!(food && food.favorite);
     openModal(`
-      <div class="modal-title-row"><h2>${editing ? 'Edit food' : 'Add a food'}</h2><button class="modal-close" data-action="close-modal">${CLOSE_ICON_SVG}</button></div>
+      <div class="modal-title-row"><h2>${editing ? 'Edit food' : 'Add a food'}</h2><button class="modal-close" data-action="close-modal" aria-label="Close">${CLOSE_ICON_SVG}</button></div>
       <div class="form-card">
         ${nameIconHtml({ iconId: 'savedFoodIcon', inputId: 'savedFoodName', value: seed && seed.name, placeholder: 'e.g. Chicken breast, 6oz', maxlength: 60 })}
         <label class="field"><span class="field-label">Serving <span class="muted-text">(optional)</span></span>
@@ -4143,6 +4202,7 @@
         values[k] = (!Number.isNaN(raw) && raw >= 0) ? raw : null;
       });
       if (!anyMacro(values)) { toast('Enter at least one value to save this food.'); return; }
+      if (macroTooBig(values)) return;
       if (editing) {
         food.name = name;
         food.category = selectedCategory;
@@ -4182,11 +4242,17 @@
   // macros it has no value for stay null.
   function scaledSavedFoodValues(food, qty) {
     const values = {};
-    trackedMacroKeys().forEach((k) => { values[k] = food[k] != null ? round(food[k] * qty, 1) : null; });
+    // Every macro, tracked or not, so turning one on later still shows it for past entries.
+    MACRO_KEYS.forEach((k) => { values[k] = food[k] != null ? round(food[k] * qty, 1) : null; });
     return values;
   }
-
-  /* ---------- Log -> Food: saved foods ---------- */
+  // Same ceilings the backup validator uses, so anything saved here can be exported and re-imported.
+  function macroTooBig(values) {
+    const bad = Object.keys(values).find((k) => values[k] != null && values[k] > window.FitBackup.macroLimit(k));
+    if (!bad) return false;
+    toast(`That ${MACRO_LABELS[bad].toLowerCase()} value is too large to be right.`);
+    return true;
+  }
 
   // Transient UI state (never saved).
   const foodLog = { seg: null, cat: 'all', query: '', showAll: false, manualOpen: false };
@@ -4204,38 +4270,127 @@
     return parts.join(' · ');
   }
 
-  function todayBarHtml(value, goalText, label, fillPct, over, linkId, linkText) {
+  /* Log glance card
+     Every Log tab opens with the same small two-line card: the number with the area's
+     streak, then a thin meter (week dots for Workout), one short status and one link.
+     Each area counts its streak in its own rhythm: days for Daily, Water and Food, weeks
+     with at least one workout for Workout, and days or weeks for a Body tracker depending
+     on how often it is usually logged (FitCalc.loggingRhythm). */
+  function relDay(iso) {
+    const gap = dayGap(iso, todayISO());
+    if (gap === 0) return 'today';
+    if (gap === 1) return 'yesterday';
+    return gap > 1 && gap < 7 ? dayLabel(iso) : fmtDateShort(iso);
+  }
+  function glanceMeter(pct, fillClass = '') {
+    return `<div class="meter meter-sm"><div class="meter-fill${fillClass}" style="--fill:${Math.max(0, Math.min(100, pct))}%"></div></div>`;
+  }
+  function glanceHtml({ eyebrow, value, unit, empty, streak, streakUnit, row2 }) {
+    const st = streak > 0
+      ? `<span class="lg-st">${FLAME_ICON_SVG}${streak} ${streakUnit} streak</span>`
+      : `<span class="lg-st is-off">${FLAME_ICON_SVG}No streak yet</span>`;
     return `
-      <div class="today-bar-top"><span class="num"><b>${value}</b> <span class="muted-text">${goalText ? `/ ${goalText} ${label}` : label}</span></span><button type="button" class="link-btn" id="${linkId}">${linkText}</button></div>
-      ${fillPct != null ? `<div class="meter meter-sm"><div class="meter-fill${over ? ' is-over' : ''}" style="--fill:${Math.min(100, fillPct)}%"></div></div>` : ''}`;
+      <div class="lg-r1">
+        <div class="lg-ev"><span class="lg-eb">${eyebrow}</span>${empty ? '<span class="lg-v is-empty">None yet</span>' : `<span class="lg-v">${value} <span class="lg-u">${unit}</span></span>`}</div>
+        ${st}
+      </div>
+      <div class="lg-r2">${row2}</div>`;
   }
+  const glanceLink = (text) => `<button type="button" class="link-btn" data-glance-link>${text}</button>`;
 
-  // Food and Water each get their own "today" bar on their own Log tab only.
-  function renderFoodTodayBar() {
-    const bar = document.getElementById('foodTodayBar');
-    const on = state.settings.trackFood && logCategory === 'food' && availableDomainCategories().length > 0;
-    bar.hidden = !on; if (!on) return;
-    const totals = foodTotalsForDate(todayISO());
-    const cal = macroGoalInfo('calories');
-    const hasGoal = cal.enabled && cal.goal != null;
-    const eaten = totals.calories || 0;
-    bar.innerHTML = todayBarHtml(Math.round(eaten).toLocaleString(), hasGoal ? Math.round(cal.goal).toLocaleString() : '', hasGoal ? 'kcal today' : 'kcal today',
-      hasGoal ? (eaten / cal.goal) * 100 : null, hasGoal && eaten > cal.goal, 'foodViewDayBtn', 'View day');
-    document.getElementById('foodViewDayBtn').addEventListener('click', () => openFoodDetail());
+  function workoutGlance() {
+    const dates = new Set(state.entries.filter((e) => !isDailyEntry(e)).map((e) => e.date));
+    const today = todayISO();
+    const monday = new Date(today + 'T00:00:00');
+    monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
+    const week = Array.from({ length: 7 }, (_, i) => { const d = new Date(monday); d.setDate(d.getDate() + i); return localDateISO(d); });
+    const last = [...dates].sort().pop();
+    const dots = `<div class="lg-dots" aria-label="${week.filter((d) => dates.has(d)).length} workout days this week">${week.map((d) => `<i class="${dates.has(d) ? 'on' : ''}${d === today ? ' is-today' : ''}"></i>`).join('')}</div>`;
+    return {
+      html: glanceHtml({ eyebrow: 'This week', value: week.filter((d) => dates.has(d)).length, unit: 'of 7 days', streak: window.FitCalc.computeWeekStreak(dates, today), streakUnit: 'week',
+        row2: `${dots}<span class="lg-tx">${last ? `Last: ${relDay(last)}` : 'No workouts yet'}</span>` }),
+    };
   }
-
-  function renderWaterTodayBar() {
-    const bar = document.getElementById('waterTodayBar');
-    const on = state.settings.trackWater && logCategory === 'water' && availableDomainCategories().length > 0;
-    bar.hidden = !on; if (!on) return;
-    const total = waterTotalForDate(todayISO());
+  function dailyGlance() {
+    const { habits, reps } = dailyItemsToday();
+    const all = habits.concat(reps);
+    const done = all.filter(dailyComplete).length;
+    const dates = new Set(state.entries.filter(isDailyEntry).map((e) => e.date));
+    const left = all.length - done;
+    return {
+      html: glanceHtml({ eyebrow: 'Today', value: done, unit: `of ${all.length} done`, streak: window.FitCalc.computeStreak(dates, todayISO()), streakUnit: 'day',
+        row2: `${glanceMeter(all.length ? (done / all.length) * 100 : 0, all.length && !left ? ' is-complete' : '')}<span class="lg-tx">${!all.length ? 'Nothing due' : left ? `${left} left` : 'All done'}</span>` }),
+    };
+  }
+  function bodyGlance() {
+    const t = trackerById(document.getElementById('logTracker').value);
+    if (!t) return null;
+    const list = measurementsFor(t.id).sort((a, b) => (a.date + a.id).localeCompare(b.date + b.id));
+    const latest = list[list.length - 1];
+    const dates = list.map((m) => m.date);
+    const weekly = window.FitCalc.loggingRhythm(dates) === 'week';
+    const streak = weekly ? window.FitCalc.computeWeekStreak(new Set(dates), todayISO()) : window.FitCalc.computeStreak(new Set(dates), todayISO());
+    const base = { eyebrow: escapeHtml(t.name), streak, streakUnit: weekly ? 'week' : 'day' };
+    if (!latest) {
+      return { html: glanceHtml({ ...base, empty: true, row2: `${glanceMeter(0)}<span class="lg-tx">Log your first entry to start</span>${glanceLink(t.goal != null ? 'Goal' : 'Set goal')}` }), link: () => openTrackerForm(t.id) };
+    }
+    let row2;
+    if (t.kind === 'sleep') {
+      const recent = list.slice(-7);
+      const avg = recent.reduce((sum, m) => sum + m.value, 0) / recent.length;
+      row2 = `${t.goal != null ? glanceMeter((latest.value / t.goal) * 100, latest.value >= t.goal ? ' is-complete' : '') : ''}<span class="lg-tx">Avg ${round(avg, 1)} hr, last ${recent.length} night${recent.length === 1 ? '' : 's'}</span>`;
+    } else if (t.goal != null) {
+      const { pct, achieved } = trackerProgressPct(t, latest.value);
+      row2 = `${glanceMeter(pct, achieved ? ' is-complete' : '')}<span class="lg-tx">${achieved ? 'Goal reached' : `${fmtTrackerValue(t, Math.abs(t.goal - latest.value))} to go`}</span>`;
+    } else {
+      row2 = `<span class="lg-tx">Last: ${relDay(latest.date)}</span>`;
+    }
+    return {
+      html: glanceHtml({ ...base, value: trackerDisplayFromCanonical(t, latest.value), unit: trackerUnitLabel(t), row2: row2 + glanceLink(t.goal != null ? 'Goal' : 'Set goal') }),
+      link: () => openTrackerForm(t.id),
+    };
+  }
+  function waterGlance() {
     const goal = state.water.goalMl;
-    bar.innerHTML = todayBarHtml(fmtVolume(total), goal ? fmtVolume(goal) : '', 'today',
-      goal ? (total / goal) * 100 : null, false, 'waterGoalLinkBtn', goal ? 'Edit goal' : 'Set a goal');
-    document.getElementById('waterGoalLinkBtn').addEventListener('click', () => openManageCategory('water'));
+    const total = waterTotalForDate(todayISO());
+    const unit = Units.volumeUnitLabel();
+    const show = (ml) => round(Units.mlToDisplay(ml), 0);
+    const byDate = {};
+    state.waterEntries.forEach((w) => { byDate[w.date] = (byDate[w.date] || 0) + w.amountMl; });
+    // With a goal, a day counts once the goal is met; without one, any water counts.
+    const dates = new Set(Object.keys(byDate).filter((d) => !goal || byDate[d] >= goal));
+    const status = !goal ? 'No daily goal' : total >= goal ? 'Goal met' : `${show(goal - total)} to go of ${show(goal)} ${unit}`;
+    return {
+      html: glanceHtml({ eyebrow: 'Today', value: show(total), unit, streak: window.FitCalc.computeStreak(dates, todayISO()), streakUnit: 'day',
+        row2: `${goal ? glanceMeter((total / goal) * 100, total >= goal ? ' is-complete' : '') : ''}<span class="lg-tx">${status}</span>${glanceLink(goal ? 'Goal' : 'Set goal')}` }),
+      link: () => openManageCategory('water'),
+    };
   }
+  function foodGlance() {
+    const eaten = foodTotalsForDate(todayISO()).calories || 0;
+    const cal = macroGoalInfo('calories');
+    const goal = cal.enabled && cal.goal != null ? cal.goal : null;
+    const fmt = (n) => Math.round(n).toLocaleString();
+    const dates = new Set(state.food.entries.map((e) => e.date));
+    const status = goal == null ? 'No calorie target' : eaten > goal ? `${fmt(eaten - goal)} over ${fmt(goal)}` : `${fmt(goal - eaten)} left of ${fmt(goal)}`;
+    return {
+      html: glanceHtml({ eyebrow: 'Today', value: fmt(eaten), unit: 'kcal', streak: window.FitCalc.computeStreak(dates, todayISO()), streakUnit: 'day',
+        row2: `${goal != null ? glanceMeter((eaten / goal) * 100, eaten > goal ? ' is-over' : '') : ''}<span class="lg-tx">${status}</span>${glanceLink('Day')}` }),
+      link: () => openFoodDetail(),
+    };
+  }
+  const GLANCES = { workout: workoutGlance, daily: dailyGlance, measurements: bodyGlance, water: waterGlance, food: foodGlance };
 
-  function renderTodayBars() { renderFoodTodayBar(); renderWaterTodayBar(); }
+  function renderLogGlance() {
+    const card = document.getElementById('logGlance');
+    const on = availableDomainCategories().some((c) => c.id === logCategory) || (logWorkoutBorrowed && logCategory === 'workout');
+    const g = on ? GLANCES[logCategory]() : null;
+    card.hidden = !g;
+    if (!g) return;
+    card.innerHTML = g.html;
+    const link = card.querySelector('[data-glance-link]');
+    if (link && g.link) link.addEventListener('click', g.link);
+  }
 
   function renderSavedFoodLogList() {
     const wrap = document.getElementById('savedFoodsWrap');
@@ -4293,12 +4448,12 @@
           <div class="field"><span class="field-label qty-label"><span>Servings${food.serving ? ` <span class="muted-text">(1 = ${escapeHtml(food.serving)})</span>` : ''}</span>${starButtonHtml('data-fav', food.id, food.favorite)}</span>
             <div class="stepper" id="savedFoodStepper" role="group" aria-label="Servings">
               <button type="button" class="stepper-btn" data-step="-1" aria-label="Fewer servings">${uiIcon('minus')}</button>
-              <input type="number" inputmode="decimal" step="0.25" min="0.25" id="savedFoodCustomQty" value="${savedFoodQty}" aria-label="Servings" />
+              <input type="number" inputmode="decimal" step="0.25" min="0.25" id="savedFoodCustomQty" value="${savedFoodQty}" aria-label="Servings" data-enter-clicks="logSavedFoodBtn" />
               <button type="button" class="stepper-btn" data-step="1" aria-label="More servings">${uiIcon('plus')}</button>
             </div></div>
           <label class="field"><span class="field-label">Date</span>
             <input type="date" id="savedFoodDate" value="${savedFoodDate || todayISO()}" /></label>
-          <p class="muted-text field-hint">Logs: ${macroSummaryText(scaledSavedFoodValues(food, savedFoodQty))}</p>
+          <p class="muted-text field-hint" id="savedFoodLogsHint">Logs: ${macroSummaryText(scaledSavedFoodValues(food, savedFoodQty))}</p>
           <button type="button" class="btn btn-primary btn-block" id="logSavedFoodBtn">Log it</button>
         </div>` : ''}`;
     }).join('');
@@ -4310,16 +4465,28 @@
         renderSavedFoodLogList();
       }));
       const customInput = document.getElementById('savedFoodCustomQty');
-      customInput.addEventListener('change', () => {
+      // Only store the amount here. Re-rendering on blur would replace the Log it button under a tap.
+      customInput.addEventListener('input', () => {
         const raw = parseFloat(customInput.value);
-        if (!Number.isNaN(raw) && raw > 0) savedFoodQty = Math.min(99, raw);
-        renderSavedFoodLogList();
+        if (Number.isNaN(raw) || raw <= 0) return;
+        savedFoodQty = Math.min(99, raw);
+        const f = savedFoodById(expandedSavedFoodId);
+        const hint = document.getElementById('savedFoodLogsHint');
+        if (f && hint) hint.textContent = `Logs: ${macroSummaryText(scaledSavedFoodValues(f, savedFoodQty))}`;
       });
     }
     const dateInput = document.getElementById('savedFoodDate');
     if (dateInput) dateInput.addEventListener('input', () => { savedFoodDate = dateInput.value || null; });
     const logBtn = document.getElementById('logSavedFoodBtn');
-    if (logBtn) logBtn.addEventListener('click', () => logSavedFood(expandedSavedFoodId, savedFoodQty));
+    if (logBtn) logBtn.addEventListener('click', () => {
+      const customInput = document.getElementById('savedFoodCustomQty');
+      if (customInput) {
+        const raw = parseFloat(customInput.value);
+        if (Number.isNaN(raw) || raw <= 0) { toast('Enter how many servings, more than 0.'); return; }
+        savedFoodQty = Math.min(99, raw);
+      }
+      logSavedFood(expandedSavedFoodId, savedFoodQty);
+    });
   }
 
   // `date` is given by one-tap quick-add (always today); the expanded row's Log button omits it
@@ -4328,8 +4495,10 @@
     const food = savedFoodById(foodId);
     if (!food) return;
     const values = scaledSavedFoodValues(food, qty);
+    if (macroTooBig(values)) return;
     const dateEl = document.getElementById('savedFoodDate');
     date = date || (dateEl && dateEl.value) || savedFoodDate || todayISO();
+    if (!window.FitBackup.validDate(date, todayISO())) { toast('Pick a valid date, no more than a day or two ahead.'); return; }
     state.food.entries.push({ id: genId('food'), date, ...values, note: food.name, savedFoodId: food.id });
     if (!save()) return;
     toast(`${food.name} logged`);
@@ -4385,8 +4554,6 @@
     document.getElementById('logFoodManualBtn').addEventListener('click', () => { foodLog.manualOpen = !foodLog.manualOpen; renderLogView(); });
     document.getElementById('logFoodCreateBtn').addEventListener('click', () => openSavedFoodForm(null));
   }
-
-  /* ---------- Manage -> Food: saved foods ---------- */
 
   const foodManage = { query: '', filter: 'all', sort: 'recent', showAll: false };
 
@@ -4502,11 +4669,9 @@
     renderHistory();
   }
 
-  /* ============================== Rendering: History ============================== */
-
   // A month calendar above the entry list, with a dot per category active that day
-  // (colors in `.cal-dot-*` in styles.css): workout, water goal met, body
-  // measurement, food. Tapping a day filters "All entries" (within the active
+  // (colors in `.cal-dot-*` in styles.css, slots in CAL_DOT_SLOTS): workout, daily, water goal
+  // met, food, body measurement. Tapping a day filters "All entries" (within the active
   // domain tab) to that day; tapping it again clears the filter.
 
   let calendarMonth = (() => { const d = new Date(); d.setDate(1); return d; })();
@@ -4514,13 +4679,18 @@
   // Date filter for the "All entries" list; null shows everything. Starts as today.
   let historySelectedDate = todayISO();
 
+  // Fixed order (left to right) for the calendar dots and their legend.
+  const CAL_DOT_SLOTS = [['workout', 'cal-dot-workout'], ['daily', 'cal-dot-daily'], ['water', 'cal-dot-water'], ['food', 'cal-dot-food'], ['measurements', 'cal-dot-body']];
+
   function dayActivity(dateIso) {
     // A domain switched off in Manage shows no dot.
-    const workout = (domainTracked('workout') || domainTracked('daily')) && state.entries.some((e) => e.date === dateIso);
+    const dayEntries = state.entries.filter((e) => e.date === dateIso);
+    const workout = domainTracked('workout') && dayEntries.some((e) => !isDailyEntry(e));
+    const daily = domainTracked('daily') && dayEntries.some(isDailyEntry);
     const body = domainTracked('measurements') && state.measurements.some((m) => m.date === dateIso);
     const waterHit = domainTracked('water') && !!(state.water.goalMl && waterTotalForDate(dateIso) >= state.water.goalMl);
     const food = domainTracked('food') && state.food.entries.some((e) => e.date === dateIso);
-    return { workout, body, waterHit, food };
+    return { workout, daily, body, waterHit, food };
   }
 
   function renderHistoryCalendar() {
@@ -4536,20 +4706,19 @@
     for (let i = 0; i < firstWeekday; i++) html += `<button type="button" class="calendar-day" disabled></button>`;
     for (let day = 1; day <= daysInMonth; day++) {
       const dateIso = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-      const { workout, body, waterHit, food } = dayActivity(dateIso);
-      const dots = [
-        workout ? '<span class="cal-dot cal-dot-workout"></span>' : '',
-        waterHit ? '<span class="cal-dot cal-dot-water"></span>' : '',
-        body ? '<span class="cal-dot cal-dot-body"></span>' : '',
-        food ? '<span class="cal-dot cal-dot-food"></span>' : '',
-      ].join('');
+      const { workout, daily, body, waterHit, food } = dayActivity(dateIso);
+      const doneToday = [workout && 'workout', daily && 'daily', waterHit && 'water goal', food && 'food', body && 'body'].filter(Boolean);
+      const label = `${new Date(year, month, day).toLocaleDateString(undefined, { month: 'long', day: 'numeric' })}${doneToday.length ? ', ' + doneToday.join(', ') : ''}`;
+      const dots = CAL_DOT_SLOTS.filter(([area]) => domainTracked(area))
+        .map(([area, cls]) => `<span class="cal-dot ${cls}${({ workout, daily, water: waterHit, food, measurements: body })[area] ? '' : ' is-empty'}"></span>`).join('');
       html += `
-        <button type="button" class="calendar-day ${dateIso === todayIso ? 'is-today' : ''} ${dateIso === historySelectedDate ? 'is-selected' : ''}" data-date="${dateIso}" aria-pressed="${dateIso === historySelectedDate}">
+        <button type="button" class="calendar-day ${dateIso === todayIso ? 'is-today' : ''} ${dateIso === historySelectedDate ? 'is-selected' : ''}" data-date="${dateIso}" aria-label="${label}" aria-pressed="${dateIso === historySelectedDate}">
           <span>${day}</span>
           <span class="calendar-day-dots">${dots}</span>
         </button>`;
     }
     document.getElementById('calendarGrid').innerHTML = html;
+    document.querySelectorAll('[data-legend-area]').forEach((el) => { el.hidden = !domainTracked(el.dataset.legendArea); });
     document.querySelectorAll('#calendarGrid .calendar-day[data-date]').forEach((btn) => {
       btn.addEventListener('click', () => {
         const date = btn.dataset.date;
@@ -4668,14 +4837,12 @@
     wireEntryRowClicks(wrap);
   }
 
-  /* ============================== Entry modal (edit/delete) ============================== */
-
   function openEntryModal(entryId) {
     const entry = state.entries.find((e) => e.id === entryId);
     if (!entry) return;
     const ex = exerciseById(entry.exerciseId);
     openModal(`
-      <div class="modal-title-row"><h2>Edit entry</h2><button class="modal-close" data-action="close-modal">${CLOSE_ICON_SVG}</button></div>
+      <div class="modal-title-row"><h2>Edit entry</h2><button class="modal-close" data-action="close-modal" aria-label="Close">${CLOSE_ICON_SVG}</button></div>
       <p class="muted-text modal-subtitle">${escapeHtml(ex ? exerciseLabel(ex) : 'Deleted exercise')}</p>
       <div class="form-card">
         <label class="field"><span class="field-label">Date</span><input type="date" id="editEntryDate" value="${entry.date}" /></label>
@@ -4701,6 +4868,7 @@
       if (!save()) return;
       closeModal();
       toast('Entry updated');
+      if (logCategory === 'daily') renderLogDailyPanel();
       renderRecentEntries(); renderDashboard(); renderHistory();
     });
     document.getElementById('deleteEntryBtn').addEventListener('click', () => {
@@ -4708,6 +4876,7 @@
         state.entries = state.entries.filter((e) => e.id !== entryId);
         if (!save()) return;
         toast('Entry deleted');
+        if (logCategory === 'daily') renderLogDailyPanel();
         renderRecentEntries(); renderDashboard(); renderHistory();
       }, true);
     });
@@ -4721,6 +4890,7 @@
   }
   function openLogFor(exId) {
     logCategory = 'workout';
+    logWorkoutBorrowed = isDailyEx(exerciseById(exId));
     switchTab('log');
     const select = document.getElementById('logExercise');
     select.value = exId;
@@ -4735,8 +4905,6 @@
     select.value = trackerId;
     select.dispatchEvent(new Event('change'));
   }
-
-  /* ============================== Exercise detail modal ============================== */
 
   // A habit's detail: today's count, how often the target was met lately, and its
   // entries. There is no trend chart: there is nothing to measure but "done".
@@ -4755,14 +4923,14 @@
       <div class="modal-title-row">
         <h2 class="title-with-icon">${exerciseIconHtml(ex)}${exerciseLabelHtml(ex)}</h2>
         <div class="modal-title-actions">
-          <button class="icon-btn" id="editExerciseBtn" aria-label="Edit exercise">${EDIT_ICON_SVG}</button>
-          <button class="modal-close" data-action="close-modal">${CLOSE_ICON_SVG}</button>
+          <button class="icon-btn" id="editExerciseBtn" aria-label="Edit habit">${EDIT_ICON_SVG}</button>
+          <button class="modal-close" data-action="close-modal" aria-label="Close">${CLOSE_ICON_SVG}</button>
         </div>
       </div>
       <div class="card">
         <div class="ex-card-badge badge-standalone">${kindBadge(ex)}${escapeHtml(exerciseGoalSummary(ex))}</div>
         ${habitPanelHtml(ex)}
-        <p class="muted-text">Target met on ${hit} of the last 30 days.</p>
+        <p class="muted-text">${habitRepeatDays(ex) === 1 ? `Target met on ${hit} of the last 30 days.` : `Done ${hit} time${hit === 1 ? '' : 's'} in the last 30 days, about ${Math.floor(30 / habitRepeatDays(ex))} due.`}</p>
       </div>
       <div class="btn-row detail-actions">
         <button type="button" class="btn btn-primary" id="habitDoneBtn">Done</button>
@@ -4817,36 +4985,19 @@
         <h2 class="title-with-icon">${exerciseIconHtml(ex)}${exerciseLabelHtml(ex)}</h2>
         <div class="modal-title-actions">
           <button class="icon-btn" id="editExerciseBtn" aria-label="Edit exercise">${EDIT_ICON_SVG}</button>
-          <button class="modal-close" data-action="close-modal">${CLOSE_ICON_SVG}</button>
+          <button class="modal-close" data-action="close-modal" aria-label="Close">${CLOSE_ICON_SVG}</button>
         </div>
       </div>
-      <!-- Wrapped in the same .card the dashboard's own goal card uses (see
-           goalCardHtml()) rather than left as bare top-level modal content —
-           without this, the badge and progress meter had no container of
-           their own, so they picked up none of the spacing every other
-           block in this modal gets from .modal-sheet's gap, and sat jammed
-           against the suggestion card right below with zero space between. -->
       <div class="card">
         <div class="ex-card-badge badge-standalone">${kindBadge(ex)}</div>
         ${progressHtml}
       </div>
 
-      <!-- Quick access to actually logging this exercise, right where a
-           person lands after tapping in to check on it — rather than the
-           old "Sessions logged / Lifetime total" tiles here, which just
-           restated numbers already visible in the progress meter/chart
-           below without offering anything to do. -->
       <div class="btn-row detail-actions">
         <button type="button" class="btn btn-primary" id="logEntryFromDetailBtn">Log entry</button>
         <button type="button" class="btn btn-secondary" id="editGoalFromDetailBtn">Edit goal</button>
       </div>
 
-      <!-- Concise "at a glance" headline only — the detail sentence and the
-           method note (and the well-researched general explanation) now
-           live one tap away in openSuggestionInfoModal(), rather than
-           always being visible here. A suggestion with nothing further to
-           say (e.g. "Log a session to get a suggestion") isn't made
-           tappable at all — see the wiring below. -->
       ${suggestions.map((sugg, i) => `
         <div class="card suggestion-card" data-sugg-idx="${i}">
           <div class="suggestion-label">Next session${sugg.metric ? ` · ${sugg.metric === 'pace' ? 'Pace' : 'Distance'}` : ''}</div>
@@ -4925,7 +5076,7 @@
     const ex = exerciseById(exId);
     openModal(`
       <button type="button" class="modal-back-link" data-action="back-to-exercise">${BACK_CHEVRON_ICON_SVG}${ex ? exerciseLabelHtml(ex) : 'Back'}</button>
-      <div class="modal-title-row"><h2>Next session</h2><button class="modal-close" data-action="close-modal">${CLOSE_ICON_SVG}</button></div>
+      <div class="modal-title-row"><h2>Next session</h2><button class="modal-close" data-action="close-modal" aria-label="Close">${CLOSE_ICON_SVG}</button></div>
 
       ${sugg.detail || sugg.method ? `
         <div class="card suggestion-card">
@@ -4950,8 +5101,6 @@
     document.querySelector('[data-action="back-to-exercise"]').addEventListener('click', () => renderExerciseDetail(exId, scale, activeMetric));
   }
 
-  /* ============================== Add / edit exercise modal ============================== */
-
   // `preset` ({ kind, section }) only sets the starting choices of a NEW exercise; Manage > Daily
   // passes a habit.
   function openExerciseForm(exId, preset) {
@@ -4963,7 +5112,7 @@
     const bodyRegion = ex ? (ex.bodyRegion || 'upper') : 'upper';
 
     openModal(`
-      <div class="modal-title-row"><h2>${editing ? 'Edit exercise' : (preset && preset.kind === 'habit' ? 'Add to Daily' : 'Add exercise')}</h2><button class="modal-close" data-action="close-modal">${CLOSE_ICON_SVG}</button></div>
+      <div class="modal-title-row"><h2>${editing ? 'Edit exercise' : (preset && preset.kind === 'habit' ? 'Add to Daily' : 'Add exercise')}</h2><button class="modal-close" data-action="close-modal" aria-label="Close">${CLOSE_ICON_SVG}</button></div>
       <div class="form-card">
         ${nameIconHtml({ iconId: 'exIcon', inputId: 'exName', value: ex && ex.name, placeholder: 'e.g. Overhead Press', maxlength: 60 })}
 
@@ -4990,7 +5139,7 @@
         </div>
 
         <div class="field">
-          <span class="field-label">Type${hasEntries ? ' (locked — has logged entries)' : ''}</span>
+          <span class="field-label">Type${hasEntries ? ' (locked: has logged entries)' : ''}</span>
           <div class="option-list" id="exKindList" role="radiogroup">
             ${[['weight', 'Weighted lift', 'Sets, reps and weight'], ['reps', 'Bodyweight reps', 'Reps per session'], ['cardio', 'Cardio', 'Distance and time'], ['habit', 'Habit', 'Done N times a day']].map(([k, name, hint]) => `
             <button type="button" class="option-row" data-kind="${k}" role="radio" ${hasEntries && kind !== k ? 'disabled' : ''}>
@@ -5058,8 +5207,15 @@
       habit: 'Habits are always daily targets.',
     };
 
+    // A daily target adds up every set logged that day (todayProgressOf); a goal counts the best single set.
+    function repsGoalLabel(timed) {
+      if (selectedSection === 'daily') return timed ? 'Time per day (seconds, all sets)' : 'Reps per day (all sets)';
+      return timed ? 'Goal time (seconds, single set)' : 'Goal reps (single set)';
+    }
     function setSectionUI(s) {
       selectedSection = s;
+      const repsLabel = document.getElementById('repsGoalLabel');
+      if (repsLabel) repsLabel.textContent = repsGoalLabel(selectedUnit === 'time');
       const isHabit = selectedKind === 'habit';
       document.querySelectorAll('#exSectionSegmented button').forEach((b) => {
         b.setAttribute('aria-checked', String(b.dataset.section === s));
@@ -5123,12 +5279,15 @@
       const sex = state.profile.sex;
       const rows = standardGoalPreviewRows(stdKey, bw, sex);
       const canUseStandards = !!rows;
+      // A standard goal saved earlier stays selected while body weight or sex is missing;
+      // it fills in again by itself (recomputeStandardGoals) once both exist.
+      const waitingStandard = !canUseStandards && selectedGoalMode === 'standard';
       return `
         <div class="field">
           <span class="field-label">Goal style</span>
           <div class="segmented" id="exGoalModeSegmented" role="radiogroup" aria-label="Goal style">
             <button type="button" data-goal-mode="fixed" role="radio" aria-checked="${selectedGoalMode === 'fixed'}">Fixed number</button>
-            <button type="button" data-goal-mode="standard" role="radio" aria-checked="${selectedGoalMode === 'standard'}" ${canUseStandards ? '' : 'disabled'}>Bodyweight standard</button>
+            <button type="button" data-goal-mode="standard" role="radio" aria-checked="${selectedGoalMode === 'standard'}" ${canUseStandards || waitingStandard ? '' : 'disabled'}>Bodyweight standard</button>
           </div>
           ${!canUseStandards ? `<span class="muted-text field-hint">Log your body weight and set your sex in Settings → Profile to unlock bodyweight-standard goals.</span>` : ''}
         </div>
@@ -5143,6 +5302,8 @@
             ${rows.map((r) => `<div class="standards-preview-row${r.tierKey === selectedGoalTier ? ' is-selected' : ''}"><span>${r.label}</span><span>${fmtWeight(r.goalLb)}</span></div>`).join('')}
           </div>
           <p class="muted-text field-hint">This goal updates automatically whenever your logged body weight changes.</p>
+        ` : waitingStandard ? `
+          <p class="muted-text field-hint">Your ${escapeHtml(selectedGoalTier || 'standard')} goal is kept and shows again once body weight and sex are set. Pick Fixed number to type a goal instead.</p>
         ` : `
           <label class="field"><span class="field-label">Goal weight (${Units.weightUnitLabel()})</span>
             <input type="number" step="any" id="goalInput" value="${fixedVal}"${canonAttr(ex && ex.goal)} placeholder="e.g. 225" /></label>
@@ -5187,12 +5348,12 @@
         const v = ex && ex.goal ? ex.goal : '';
         const timed = selectedUnit === 'time';
         wrap.innerHTML = `
-          <div class="field"><span class="field-label">Measured in${hasEntries ? ' (locked — has logged entries)' : ''}</span>
+          <div class="field"><span class="field-label">Measured in${hasEntries ? ' (locked: has logged entries)' : ''}</span>
             <div class="segmented" id="exUnitSeg" role="radiogroup">
               <button type="button" role="radio" data-unit="reps" aria-checked="${!timed}" ${hasEntries ? 'disabled' : ''}>Reps</button>
               <button type="button" role="radio" data-unit="time" aria-checked="${timed}" ${hasEntries ? 'disabled' : ''}>Seconds held</button>
             </div></div>
-          <label class="field"><span class="field-label">${timed ? 'Goal time (seconds, single set)' : 'Goal reps (single set)'}</span><input type="number" step="1" min="1" id="goalInput" value="${v}" placeholder="${timed ? 'e.g. 60' : 'e.g. 20'}" /></label>`;
+          <label class="field"><span class="field-label" id="repsGoalLabel">${repsGoalLabel(timed)}</span><input type="number" step="1" min="1" id="goalInput" value="${v}" placeholder="${timed ? 'e.g. 60' : 'e.g. 20'}" /></label>`;
         wrap.querySelectorAll('#exUnitSeg button').forEach((b) => b.addEventListener('click', () => { if (b.disabled) return; selectedUnit = b.dataset.unit; renderGoalField(); }));
       } else {
         // Cardio has optional distance and pace goals, either or both: one run yields both.
@@ -5251,6 +5412,7 @@
         if (!Number.isNaN(rawDist) && rawDist > 0) distanceGoal = fieldCanon(document.getElementById('goalDistanceInput'), Units.displayToMi);
         const m = parseFloat(document.getElementById('goalPaceMin').value) || 0;
         const s = parseFloat(document.getElementById('goalPaceSec').value) || 0;
+        if (m < 0 || s < 0 || s >= 60) { toast('Pace needs whole minutes and 0 to 59 seconds.'); return; }
         if (m > 0 || s > 0) {
           const minEl = document.getElementById('goalPaceMin');
           const secEl = document.getElementById('goalPaceSec');
@@ -5325,8 +5487,6 @@
     }
   }
 
-  /* ============================== Tracker detail modal ============================== */
-
   function measurementRowHtml(m) {
     const tracker = trackerById(m.trackerId);
     const valueText = tracker ? fmtTrackerValue(tracker, m.value) : m.value;
@@ -5344,7 +5504,7 @@
 
   function wireMeasurementRowClicks(container) {
     container.querySelectorAll('.entry-row[data-measurement-id]').forEach((row) => {
-      row.addEventListener('click', () => openMeasurementModal(row.getAttribute('data-measurement-id')));
+      wireOpenable(row, () => openMeasurementModal(row.getAttribute('data-measurement-id')));
     });
   }
 
@@ -5354,7 +5514,7 @@
     const tracker = trackerById(m.trackerId);
     const isSleep = tracker && tracker.kind === 'sleep';
     openModal(`
-      <div class="modal-title-row"><h2>Edit entry</h2><button class="modal-close" data-action="close-modal">${CLOSE_ICON_SVG}</button></div>
+      <div class="modal-title-row"><h2>Edit entry</h2><button class="modal-close" data-action="close-modal" aria-label="Close">${CLOSE_ICON_SVG}</button></div>
       <p class="muted-text modal-subtitle">${escapeHtml(tracker ? tracker.name : 'Deleted tracker')}</p>
       <div class="form-card">
         <label class="field"><span class="field-label">Date</span><input type="date" id="editMeasurementDate" value="${m.date}" /></label>
@@ -5421,14 +5581,9 @@
         <h2 class="title-with-icon">${trackerIconHtml(tracker)}${escapeHtml(tracker.name)}</h2>
         <div class="modal-title-actions">
           <button class="icon-btn" id="editTrackerBtn" aria-label="Edit tracker">${EDIT_ICON_SVG}</button>
-          <button class="modal-close" data-action="close-modal">${CLOSE_ICON_SVG}</button>
+          <button class="modal-close" data-action="close-modal" aria-label="Close">${CLOSE_ICON_SVG}</button>
         </div>
       </div>
-      <!-- Wrapped in a .card (matching the exercise detail modal's own fix
-           and how a tracker's dashboard card already wraps this same
-           content) rather than left as bare top-level modal content, which
-           had no spacing of its own and sat jammed against whatever
-           followed it. -->
       <div class="card">
         <div class="ex-card-values">
           <div class="ex-card-current">${fmtTrackerValue(tracker, value)}</div>
@@ -5440,8 +5595,6 @@
         ${!achieved && trackerProgressDeltaText(tracker, value) ? `<div class="insight-line muted-text">${trackerProgressDeltaText(tracker, value)}</div>` : ''}` : ''}
       </div>
 
-      <!-- Quick access to logging this tracker, same as the exercise detail
-           modal's own Log entry button — see logTrackerFromDetail(). -->
       <div class="btn-row detail-actions">
         <button type="button" class="btn btn-primary" id="logEntryFromDetailBtn">Log entry</button>
         <button type="button" class="btn btn-secondary" id="editGoalFromDetailBtn">Edit goal</button>
@@ -5486,8 +5639,6 @@
     renderTrackerDetail(trackerId, state.settings.chartScale);
   }
 
-  /* ============================== Add / edit tracker modal ============================== */
-
   const UNIT_KIND_LABELS = { weight: 'Weight', length: 'Length', percent: 'Percent', hours: 'Hours', rating: 'Rating (1–5)', count: 'Custom number' };
 
   function unitLabelForKind(unitKind, ratingMax) {
@@ -5496,7 +5647,7 @@
       case 'length': return Units.lengthUnitLabel();
       case 'percent': return '%';
       case 'hours': return 'hr';
-      case 'rating': return `/ ${ratingMax || 5}`;
+      case 'rating': return `/ ${Number(ratingMax) || 5}`;
       default: return '';
     }
   }
@@ -5513,7 +5664,7 @@
     const typeLocked = hasEntries || isSleep;
 
     openModal(`
-      <div class="modal-title-row"><h2>${editing ? 'Edit tracker' : 'Add tracker'}</h2><button class="modal-close" data-action="close-modal">${CLOSE_ICON_SVG}</button></div>
+      <div class="modal-title-row"><h2>${editing ? 'Edit tracker' : 'Add tracker'}</h2><button class="modal-close" data-action="close-modal" aria-label="Close">${CLOSE_ICON_SVG}</button></div>
       <div class="form-card">
         ${nameIconHtml({ iconId: 'trkIcon', inputId: 'trkName', value: tracker && tracker.name, placeholder: 'e.g. Waist, Protein, Resting Heart Rate', maxlength: 60 })}
 
@@ -5650,14 +5801,13 @@
         confirmDialog('Delete tracker permanently?', body, 'Delete', () => {
           state.trackers = state.trackers.filter((t) => t.id !== trackerId);
           state.measurements = state.measurements.filter((m) => m.trackerId !== trackerId);
+          if (trackerId === BODY_WEIGHT_TRACKER_ID) recomputeStandardGoals();
           if (!save()) return;
           toast('Tracker deleted'); renderAll();
         }, true);
       });
     }
   }
-
-  /* ============================== Water: cup management ============================== */
 
   function cupRowHtml(cup) {
     return `
@@ -5677,7 +5827,7 @@
     const editing = !!cupId;
     const cup = editing ? cupById(cupId) : null;
     openModal(`
-      <div class="modal-title-row"><h2>${editing ? 'Edit cup' : 'Add cup'}</h2><button class="modal-close" data-action="close-modal">${CLOSE_ICON_SVG}</button></div>
+      <div class="modal-title-row"><h2>${editing ? 'Edit cup' : 'Add cup'}</h2><button class="modal-close" data-action="close-modal" aria-label="Close">${CLOSE_ICON_SVG}</button></div>
       <div class="form-card">
         ${nameIconHtml({ iconId: 'cupIcon', inputId: 'cupName', value: cup && cup.name, placeholder: 'e.g. Water bottle', maxlength: 40 })}
         <label class="field"><span class="field-label">Amount (${Units.volumeUnitLabel()})</span>
@@ -5710,19 +5860,23 @@
     });
     if (editing) {
       document.getElementById('deleteCupBtn').addEventListener('click', () => {
-        confirmDialog('Delete this cup?', 'This can’t be undone. Past water entries already logged aren’t affected.', 'Delete', () => {
+        confirmDialog('Delete this cup?', 'This can’t be undone. Water already logged with it keeps its amount and name.', 'Delete', () => {
+          // Keep the name on past entries so History still says what was logged.
+          state.waterEntries.forEach((w) => { if (w.cupId === cupId) w.cupName = cup.name; });
           state.water.cups = state.water.cups.filter((c) => c.id !== cupId);
           if (!save()) return;
           toast('Cup deleted');
           renderManage();
           renderDashboard();
-          renderLogForm();
+          renderLogWaterPanel();
+          renderRecentEntries();
+          renderHistory();
         }, true);
       });
     }
   }
 
-  /* ============================== Manage ==============================
+  /* Manage
      One tab with five domain panels (Workout, Daily, Body, Water, Food) switched by
      manageCategorySegmented. All five always show (ALL_DOMAIN_CATEGORIES), since this is
      where an off domain is turned back on. Each has a "Track this" switch
@@ -5838,15 +5992,19 @@
           <input type="number" step="any" min="0" data-macro-goal-input="${k}" />
         </label>`).join('');
       wrap.dataset.built = '1';
-      wrap.addEventListener('click', (ev) => {
-      });
       wrap.addEventListener('change', (ev) => {
         const input = ev.target.closest('[data-macro-goal-input]');
         if (!input) return;
         const k = input.dataset.macroGoalInput;
         const raw = parseFloat(input.value);
-        macroGoalInfo(k).goal = (!Number.isNaN(raw) && raw > 0) ? raw : null;
+        const info = macroGoalInfo(k);
+        info.goal = (!Number.isNaN(raw) && raw > 0) ? raw : null;
+        if (info.goal != null && info.goal > window.FitBackup.macroLimit(k)) { toast(`That ${MACRO_LABELS[k].toLowerCase()} goal is too large to be right.`); info.goal = null; renderMacroGoalRows(); return; }
+        // A typed goal is a goal: switch it on (clearing calories keeps the calorie mode as it is).
+        if (info.goal != null) info.enabled = true;
+        else if (k !== 'calories') info.enabled = false;
         if (!save()) return;
+        renderMacroGoalRows();
         renderDashboard();
       });
     }
@@ -5931,8 +6089,6 @@
     });
   }
 
-  /* ============================== Settings ============================== */
-
   // Settings flags driven by a plain on/off switch in index.html.
   const settingSwitches = {
     trackWorkoutSwitch: 'trackWorkout', trackMeasurementsSwitch: 'trackMeasurements',
@@ -5982,7 +6138,7 @@
     const link = (r) => (r && r.url ? `<a href="${escapeHtml(r.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(r.label)}</a>` : r ? escapeHtml(r.label) : '');
     const badge = (k) => `<span class="tag${k === 'reference' ? ' tag-good' : ''}">${k === 'reference' ? 'Published reference' : 'App assumption'}</span>`;
     openModal(`
-      <div class="modal-title-row"><h2>About the numbers</h2><button class="modal-close" data-action="close-modal">${CLOSE_ICON_SVG}</button></div>
+      <div class="modal-title-row"><h2>About the numbers</h2><button class="modal-close" data-action="close-modal" aria-label="Close">${CLOSE_ICON_SVG}</button></div>
       <p class="muted-text">Fit Log estimates are general guides, not medical advice. A published reference comes from a named source. An app assumption is a sensible default the app chose.</p>
       ${S.REFERENCES.map((r) => `
         <div class="card ref-card">
@@ -5995,25 +6151,27 @@
     `, { tall: true });
   }
 
-  /* ============================== Backup validation ==============================
+  /* Backup validation
      The checks live in js/backup.js (FitBackup.validate). Returns an error string or null. */
-  function isPlainObject(v) { return v != null && typeof v === 'object' && !Array.isArray(v); }
 
   function validateBackupShape(parsed) {
-    return window.FitBackup.validate(parsed, { schemaVersion: SCHEMA_VERSION, macroKeys: MACRO_KEYS, todayIso: todayISO() });
+    return window.FitBackup.validate(parsed, { schemaVersion: SCHEMA_VERSION, macroKeys: MACRO_KEYS, todayIso: todayISO(), strengthKeys: S.STRENGTH_KEYS, activityKeys: Object.keys(S.ACTIVITY_LEVELS), goalKeys: Object.keys(S.GOAL_ADJUST) });
   }
 
-  function exportBackup() {
-    const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
+  function downloadJson(name, text) {
+    const url = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
     const a = document.createElement('a');
     a.href = url;
-    a.download = `fit-log-backup-${todayISO()}.json`;
+    a.download = name;
     document.body.appendChild(a);
     a.click();
     a.remove();
-    // Revoking immediately can cancel the download in Safari; give it a moment.
+    // Revoking immediately can cancel the download in Safari.
     setTimeout(() => URL.revokeObjectURL(url), 10000);
+  }
+
+  function exportBackup() {
+    downloadJson(`fit-log-backup-${todayISO()}.json`, JSON.stringify(state, null, 2));
     toast('Backup downloaded');
   }
 
@@ -6022,7 +6180,7 @@
   // other copy, which is why the dialog says so and offers a backup first.
   function eraseAllData() {
     openModal(`
-      <div class="modal-title-row"><h2>Erase all data?</h2><button class="modal-close" data-action="close-modal">${CLOSE_ICON_SVG}</button></div>
+      <div class="modal-title-row"><h2>Erase all data?</h2><button class="modal-close" data-action="close-modal" aria-label="Close">${CLOSE_ICON_SVG}</button></div>
       <p class="muted-text"><strong>This can&rsquo;t be reversed.</strong> Every exercise, entry, measurement, water and food log, habit, your profile and your settings will be deleted from this device, and Fit Log will start over from the setup guide.</p>
       <p class="muted-text">There is no other copy. Export a backup first if you might want your data back.</p>
       <button type="button" class="btn btn-secondary btn-block btn-icon-label" id="eraseExportBtn"><span data-icon="download"></span>Export a backup first</button>
@@ -6054,7 +6212,7 @@
           // Kept so a failed write below can restore the in-memory state.
           const previousState = state;
           // Same pipeline as load(): older backups are upgraded additively, not rejected.
-          state = upgradeData(parsed);
+          try { state = upgradeData(parsed); } catch (e) { state = previousState; toast('Can’t import: that backup could not be upgraded.'); return; }
           if (!save()) { state = previousState; return; }
           applyTheme();
           renderAll();
@@ -6064,10 +6222,11 @@
         toast('That file doesn’t look like a valid Fit Log backup.');
       }
     };
+    reader.onerror = () => toast('Could not read that file.');
     reader.readAsText(file);
   }
 
-  /* ============================== First-run setup wizard ==============================
+  /* First-run setup wizard
      Shown once, only when there is no saved data (see load()). It builds a starting state like
      defaultData(), tailored to the answers; anything skipped can be added later in Manage or
      Settings. */
@@ -6330,9 +6489,9 @@
     const a = setupAnswers; const i = a.interests;
     const chips = [];
     const nHabits = Object.keys(a.habits).filter((k) => a.habits[k]).length + a.customHabits.length;
-    if (i.habits) chips.push(`Checklist · ${nHabits} habit${nHabits === 1 ? '' : 's'}`);
+    if (i.habits) chips.push(`Daily · ${nHabits} habit${nHabits === 1 ? '' : 's'}`);
     const nLifts = i.lifting ? setupLiftGoalCount() : 0;
-    if (i.lifting) chips.push(`Training · ${nLifts} goal${nLifts === 1 ? '' : 's'}`);
+    if (i.lifting) chips.push(`Workout · ${nLifts} goal${nLifts === 1 ? '' : 's'}`);
     const nCardio = i.running ? setupCardioGoalCount() : 0;
     if (i.running) chips.push(`Cardio · ${nCardio} goal${nCardio === 1 ? '' : 's'}`);
     if (i.food) {
@@ -6401,7 +6560,7 @@
     });
   }
 
-  /* ---- Goal pickers: Lifting, Cardio ----
+  /* Goal pickers: Lifting, Cardio
      Typical goals offered at setup. Names, icons and kinds come from the catalog movement (`mv`).
      Weights are pounds, rep goals are a count for the day, and the plank is seconds held. */
   const SETUP_LIFTS = [
@@ -6767,10 +6926,27 @@
     a.goalForm = null; a.habitForm = null;
   }
 
+  // Same bounds as Settings > Profile, so a typo is pointed out instead of silently dropped.
+  function setupAboutError() {
+    const a = setupAnswers;
+    const typedHeight = state.settings.lengthUnit === 'cm' ? parseFloat(a.heightCm) > 0 : (parseFloat(a.heightFt) || 0) + (parseFloat(a.heightIn) || 0) > 0;
+    const badHeight = typedHeight && heightCmFromSetup() == null;
+    const age = parseInt(a.age, 10);
+    const badAge = !Number.isNaN(age) && (age < MIN_AGE || age > MAX_AGE);
+    if (badHeight && badAge) return 'Height and age look out of range. Check them, or tap Skip.';
+    if (badHeight) return 'Height looks out of range. Check it, or tap Skip.';
+    if (badAge) return `Age must be between ${MIN_AGE} and ${MAX_AGE}, or tap Skip.`;
+    return null;
+  }
+
   function goSetupNext() {
     captureSetupStep();
     commitOpenSetupForms();
     const seq = setupStepSequence();
+    if (seq[setupStepIndex] === 'about') {
+      const err = setupAboutError();
+      if (err) { toast(err); return; }
+    }
     if (setupStepIndex === seq.length - 1) { finishSetup(); return; }
     setupStepIndex++;
     renderSetupStep();
@@ -6813,10 +6989,13 @@
   function finishSetup() {
     needsSetup = false; // the wizard is done; cross-window sync (wireLiveSync) may now apply
     const now = new Date().toISOString();
-    const heightCm = heightCmFromSetup();
-    const rawWeight = parseFloat(setupAnswers.weight);
-    const weightLb = (!Number.isNaN(rawWeight) && rawWeight > 0) ? Units.displayToLb(rawWeight) : null;
-    const sex = setupAnswers.sex || null;
+    const a = setupAnswers;
+    // Values carried across a unit switch keep their exact stored number (see setSetupUnitSystem).
+    const heightCm = `${a.heightCm}|${a.heightFt}|${a.heightIn}` === a.heightShown && a.heightCanon != null ? a.heightCanon : heightCmFromSetup();
+    const rawWeight = parseFloat(a.weight);
+    const weightLb = a.weight === a.weightShown && a.weightCanon != null ? a.weightCanon
+      : (!Number.isNaN(rawWeight) && rawWeight > 0) ? Units.displayToLb(rawWeight) : null;
+    const sex = a.sex || null;
     const i = setupAnswers.interests;
 
     // Goals ticked on the Lifting and Cardio steps become the "goal" and "daily" exercises. Every
@@ -6941,8 +7120,6 @@
     toast('All set — welcome to Fit Log!');
   }
 
-  /* ============================== Tabs / global wiring ============================== */
-
   // Show only the `.view` whose data-view matches `tab`, highlight its bottom tab
   // and re-render it. Settings has no tab button (it opens from the header gear),
   // so no tab is highlighted for it.
@@ -6970,6 +7147,12 @@
   // Sync the Profile height and age inputs on entry only: doing it in the general
   // re-render would overwrite a value typed but not saved (see renderSettings()).
   // Height is also resynced when the length unit changes, since the fields change.
+  // What the height fields showed when filled, so saving without touching them keeps the
+  // exact stored height instead of the rounded display value.
+  let profileHeightShown = null;
+  const profileHeightKey = () => (state.settings.lengthUnit === 'cm'
+    ? document.getElementById('profileHeightCm').value
+    : `${document.getElementById('profileHeightFt').value}|${document.getElementById('profileHeightIn').value}`);
   function syncProfileHeightInputs() {
     if (state.settings.lengthUnit === 'cm') {
       document.getElementById('profileHeightCm').value = state.profile.heightCm ? round(state.profile.heightCm, 1) : '';
@@ -6978,6 +7161,7 @@
       document.getElementById('profileHeightFt').value = ft;
       document.getElementById('profileHeightIn').value = inch;
     }
+    profileHeightShown = profileHeightKey();
     document.getElementById('profileAge').value = state.profile.age != null ? state.profile.age : '';
   }
 
@@ -7029,8 +7213,10 @@
         return;
       }
       logEx.pickerOpen = false;
+      logWorkoutBorrowed = isDailyEx(exerciseById(ev.target.value));
       renderDynamicFields(document.getElementById('logDynamicFields'), exerciseById(ev.target.value));
       syncLogWorkoutUI();
+      renderRecentEntries();
     });
     wireLogExercisePicker();
     document.getElementById('streakCard').addEventListener('click', () => switchTab('history'));
@@ -7042,8 +7228,9 @@
     document.getElementById('logForm').addEventListener('submit', handleLogSubmit);
 
     // Reuses renderLogMeasurementForm() for the label and the quality field.
-    document.getElementById('logTracker').addEventListener('change', renderLogMeasurementForm);
+    document.getElementById('logTracker').addEventListener('change', () => { renderLogMeasurementForm(); renderRecentEntries(); });
     document.getElementById('logMeasurementForm').addEventListener('submit', handleLogMeasurementSubmit);
+    wireLogMeasurementForm();
     wireChipPicker(document.getElementById('logSleepQuality'));
 
     document.getElementById('logWaterCustomAddBtn').addEventListener('click', () => {
@@ -7082,11 +7269,13 @@
     // not here, because MACRO_KEYS can grow.
     document.getElementById('saveWaterGoalBtn').addEventListener('click', () => {
       const raw = parseFloat(document.getElementById('waterGoalInput').value);
-      const goalMl = (!Number.isNaN(raw) && raw > 0) ? fieldCanon(document.getElementById('waterGoalInput'), Units.displayToMl) : null;
+      const blank = document.getElementById('waterGoalInput').value.trim() === '';
+      if (!blank && !(raw > 0)) { toast('Enter a goal above zero, or clear the field to remove it.'); return; }
+      const goalMl = blank ? null : fieldCanon(document.getElementById('waterGoalInput'), Units.displayToMl);
       if (goalMl != null && tooBigWater(goalMl)) { toast(WATER_TOO_BIG); return; }
       state.water.goalMl = goalMl;
       if (!save()) return;
-      toast('Water goal saved');
+      toast(blank ? 'Water goal removed' : 'Water goal saved');
       renderManage();
       renderDashboard();
     });
@@ -7228,12 +7417,13 @@
       // Reject the whole save rather than silently clearing an out-of-range height or age.
       if (heightOutOfRange || ageOutOfRange) {
         const what = heightOutOfRange && ageOutOfRange ? 'Height and age' : heightOutOfRange ? 'Height' : 'Age';
-        toast(`${what} looks out of range — please check the value before saving.`);
+        toast(`${what} looks out of range. Check the value before saving.`);
         return;
       }
-      state.profile.heightCm = heightCm;
+      if (profileHeightKey() !== profileHeightShown) state.profile.heightCm = heightCm;
       state.profile.age = age;
       if (!save()) return;
+      profileHeightShown = profileHeightKey();
       toast('Profile saved');
       closeProfilePanels();
       // renderAll() refreshes the calculator preview in Manage -> Food. Do not
@@ -7277,7 +7467,7 @@
     }
   }
 
-  /* ============================== Data recovery screen ==============================
+  /* Data recovery screen
      Shown instead of the app when load() could not read an existing saved payload. It offers an
      explicit choice instead of discarding data that may be salvageable. */
 
@@ -7285,15 +7475,7 @@
     hideAppChrome();
     switchTab('recover');
     document.getElementById('recoverExportBtn').addEventListener('click', () => {
-      const blob = new Blob([rawCorrupt || ''], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `fit-log-recovery-${todayISO()}.json`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
+      downloadJson(`fit-log-recovery-${todayISO()}.json`, rawCorrupt || '');
       toast('Recovery file downloaded');
     });
     document.getElementById('recoverResetBtn').addEventListener('click', () => {
@@ -7301,13 +7483,14 @@
         'Permanently delete this data?',
         'This clears the data Fit Log couldn’t read and starts fresh. Export a recovery file first if you haven’t already — this can’t be undone.',
         'Delete and start fresh',
-        () => { localStorage.removeItem(STORAGE_KEY); location.reload(); },
+        () => {
+          try { localStorage.removeItem(STORAGE_KEY); } catch (e) { toast('Could not erase: your browser blocked access to storage.'); return; }
+          location.reload();
+        },
         true
       );
     });
   }
-
-  /* ============================== Init ============================== */
 
   function init() {
     // Tag the initial history entry and push a guard entry above it, so a Back press
@@ -7316,6 +7499,15 @@
     history.replaceState({ nav: 'base' }, '');
     history.pushState({ nav: 'exit-guard' }, '');
     hydrateStaticIcons();
+    // Catalog and tidy rows are divs with role=button/checkbox; give them the keys a button has.
+    document.addEventListener('keydown', (ev) => {
+      if ((ev.key === 'Enter' || ev.key === ' ') && ev.target.matches && ev.target.matches('.cat-row[role]')) { ev.preventDefault(); ev.target.click(); }
+      // A lone amount field outside a form: Enter presses the button next to it.
+      if (ev.key === 'Enter' && ev.target.dataset && ev.target.dataset.enterClicks) {
+        const btn = document.getElementById(ev.target.dataset.enterClicks);
+        if (btn) { ev.preventDefault(); btn.click(); }
+      }
+    });
     // Bare buttons outside a <form> default to type=submit; make that explicit.
     document.querySelectorAll('button:not([type])').forEach((b) => { if (!b.closest('form')) b.type = 'button'; });
     load();
@@ -7332,7 +7524,7 @@
     registerServiceWorker();
   }
 
-  /* ===== Staying current: other tabs and midnight ==============================
+  /* Staying current: other tabs and midnight
      1. Two tabs (or a tab and the installed app) share one localStorage key. Each keeps its
         own in-memory copy and rewrites the whole key on every save, so the later save would
         silently erase the other tab's changes. The `storage` event tells this tab when
@@ -7341,7 +7533,10 @@
         changes, any date the user hasn't deliberately moved is advanced. */
   function wireLiveSync() {
     window.addEventListener('storage', (ev) => {
-      if (ev.key !== STORAGE_KEY || !ev.newValue || needsRecovery || needsSetup) return;
+      if (ev.key !== STORAGE_KEY && ev.key !== null) return;
+      // Another tab erased everything: reload so this one doesn't write its old data back.
+      if (!ev.newValue) { location.reload(); return; }
+      if (needsRecovery || needsSetup) return;
       let incoming;
       try { incoming = upgradeData(JSON.parse(ev.newValue)); } catch (e) { return; }
       state = incoming;

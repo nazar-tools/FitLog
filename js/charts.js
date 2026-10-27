@@ -1,19 +1,6 @@
-// Minimal dependency-free SVG chart helpers, following the dataviz skill's
-// mark specs: 2px line, round joins, ~10% opacity area wash, >=8px end
-// markers with a surface ring, dashed hairline goal reference, recessive axes.
-// No categorical color decisions needed here — every chart in this app is a
-// single-series magnitude trend, so it always uses the one accent hue (set
-// via CSS custom properties / classes in styles.css), never re-picked per call.
-//
-// lineChart() is the one chart type in the app, used at both a compact size
-// (dashboard cards) and a larger size (the exercise/tracker detail modals) —
-// there used to be a separate tiny "sparkline" renderer for cards, but a
-// smaller lineChart reads better (a real goal line and axis labels instead
-// of a bare squiggle), so that's gone in favor of one chart every screen
-// shares. The `width`/`height` opts only set the chart's internal drawing
-// units and aspect ratio, not its rendered pixel size — the SVG itself
-// always stretches to fill its container's actual width (see the aspect-
-// ratio style set below), so a chart never falls short of a card's edges.
+// Small dependency-free SVG chart helpers. lineChart() is the only chart type: one accent-colored
+// series with an optional dashed goal line. width/height set the drawing units and aspect ratio
+// only; the SVG stretches to fill its container.
 
 const Charts = (() => {
 
@@ -57,7 +44,7 @@ const Charts = (() => {
     const innerH = height - padT - padB;
     const n = entries.length;
     // X position by actual elapsed time between the first and last logged
-    // date, not by index — a plain index spacing put every entry the same
+    // date, not by index -  a plain index spacing put every entry the same
     // distance apart regardless of when it was actually logged, so a run of
     // daily entries followed by a two-week gap then one more looked exactly
     // like perfectly even logging: the gap and the density were both

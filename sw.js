@@ -3,7 +3,7 @@
 // online users get new files anyway; the bump gives the new worker a fresh cache and drops
 // the old one, which is what makes the "new version is ready" prompt appear.
 const CACHE_PREFIX = 'fitlog-';
-const CACHE_VERSION = 'fitlog-v61';
+const CACHE_VERSION = 'fitlog-v64';
 const APP_SHELL = [
   './',
   './index.html',
@@ -56,13 +56,13 @@ function fetchFresh(url) {
   return fetch(url, { cache: 'no-cache', signal: controller.signal }).finally(() => clearTimeout(timer));
 }
 
-// A usable response is a successful one that is not an HTML page standing in for a script or
-// stylesheet (what a captive portal or an error page returns with status 200).
+// A usable response is a successful one of the right kind: HTML for page loads, anything but
+// HTML for scripts, styles, the manifest and icons (a captive portal or error page comes back as
+// HTML with status 200, and would otherwise overwrite the good cached copy).
 function isUsable(request, response) {
   if (!response || !response.ok) return false;
-  const type = response.headers.get('content-type') || '';
-  const expectsCode = request.destination === 'script' || request.destination === 'style';
-  return !(expectsCode && type.includes('text/html'));
+  const isHtml = (response.headers.get('content-type') || '').includes('text/html');
+  return request.mode === 'navigate' ? isHtml : !isHtml;
 }
 
 async function networkFirst(event) {

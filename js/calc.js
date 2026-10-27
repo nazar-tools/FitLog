@@ -16,7 +16,9 @@
    *  `tracked` is { workout, measurements, water, food } booleans. */
   function activityDays(data, tracked) {
     const days = new Set();
-    if (tracked.workout) data.entries.forEach((e) => days.add(e.date));
+    // `workout` may be a per-entry check, so habit check-ins only count while Daily is on.
+    const countEntry = typeof tracked.workout === 'function' ? tracked.workout : () => !!tracked.workout;
+    data.entries.forEach((e) => { if (countEntry(e)) days.add(e.date); });
     if (tracked.measurements) data.measurements.forEach((m) => days.add(m.date));
     if (tracked.water) data.waterEntries.forEach((w) => days.add(w.date));
     if (tracked.food) data.food.entries.forEach((f) => days.add(f.date));
@@ -34,6 +36,40 @@
       cursor.setDate(cursor.getDate() - 1);
     }
     return streak;
+  }
+
+  // Monday of the week holding `iso`, as an ISO date.
+  function weekStartISO(iso) {
+    const d = new Date(iso + 'T00:00:00');
+    d.setDate(d.getDate() - ((d.getDay() + 6) % 7));
+    return localDateISO(d);
+  }
+
+  /** Consecutive weeks (Monday to Sunday) with at least one of `dates`, ending this
+   *  week. Like computeStreak, the current week may still be empty without breaking it. */
+  function computeWeekStreak(dates, todayIso) {
+    const weeks = new Set([...dates].map(weekStartISO));
+    const cursor = new Date(weekStartISO(todayIso) + 'T00:00:00');
+    if (!weeks.has(localDateISO(cursor))) cursor.setDate(cursor.getDate() - 7);
+    let streak = 0;
+    while (weeks.has(localDateISO(cursor))) {
+      streak++;
+      cursor.setDate(cursor.getDate() - 7);
+    }
+    return streak;
+  }
+
+  /** 'week' when entries are usually 4 or more days apart (a weekly tape measure),
+   *  otherwise 'day'. Looks at the last 6 gaps; fewer than 3 entries counts as daily. */
+  function loggingRhythm(dates) {
+    const sorted = [...new Set(dates)].sort();
+    if (sorted.length < 3) return 'day';
+    const gaps = [];
+    for (let i = Math.max(1, sorted.length - 6); i < sorted.length; i++) {
+      gaps.push(Math.round((new Date(sorted[i] + 'T00:00:00') - new Date(sorted[i - 1] + 'T00:00:00')) / 86400000));
+    }
+    gaps.sort((a, b) => a - b);
+    return gaps[Math.floor(gaps.length / 2)] >= 4 ? 'week' : 'day';
   }
 
   /** `list` is one tracker's measurements. Two views of the same data:
@@ -148,7 +184,7 @@
     return { key, label: std.label, group: std.group, load: std.load, metric: std.metric, results, best };
   }
 
-  const api = { localDateISO, activityDays, computeStreak, sleepInsights, bestEstimatedOneRM, bestReps, bestAddedOneRM, strengthLevel };
+  const api = { localDateISO, activityDays, computeStreak, computeWeekStreak, loggingRhythm, sleepInsights, bestEstimatedOneRM, bestReps, bestAddedOneRM, strengthLevel };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.FitCalc = api;
 })(typeof window !== 'undefined' ? window : globalThis);

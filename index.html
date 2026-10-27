@@ -3,22 +3,9 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<!-- theme-color tints the phone's browser chrome (status bar / nav bar).
-     Two tags, gated by `media`, rather than one tag app.js mutates in
-     place — Android's system-UI compositor doesn't reliably repaint the
-     status/nav bar from a JS-driven content change alone (this is what
-     caused "switching light->dark on my phone doesn't update the top and
-     bottom" — a device that launched already in dark mode picked the right
-     color at cold start and then never had to live-switch, which is why it
-     looked fine there). Two conditional tags let the OS/browser itself pick
-     the right one purely from its own live media-query evaluation, with no
-     JS involved and nothing to miss while backgrounded — the same pattern
-     recommended for this exact issue. app.js's syncThemeColorMeta() only
-     touches these when Settings -> Appearance is explicitly Light/Dark
-     (overriding the system default below), forcing both to match; on
-     "System" it leaves them alone so the browser drives it declaratively.
-     Keep these two colors in sync with --page's light/dark values in
-     css/styles.css. -->
+<!-- Two theme-color tags gated by media, so the OS repaints the status bar itself (a JS-driven
+     change alone doesn't on Android). app.js only touches them when Appearance is forced to
+     Light or Dark. Keep the colors in sync with --page in css/styles.css. -->
 <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f9f9f7" />
 <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0d0d0d" />
 <title>Fit Log</title>
@@ -42,7 +29,7 @@
 
   <main id="main">
 
-    <!-- FIRST-RUN SETUP WIZARD (only ever shown once, before any data exists —
+    <!-- FIRST-RUN SETUP WIZARD (only ever shown once, before any data exists -
          see startSetupWizard() in app.js) -->
     <section id="view-setup" class="view setup-view" data-view="setup" hidden>
       <div class="setup-progress" id="setupProgress" aria-hidden="true"></div>
@@ -62,18 +49,18 @@
     </section>
 
     <!-- DATA RECOVERY SCREEN (shown instead of the app when saved data exists
-         but couldn't be read — see showRecoveryScreen() in app.js) -->
+         but couldn't be read - see showRecoveryScreen() in app.js) -->
     <section id="view-recover" class="view" data-view="recover" hidden>
       <div class="section-head"><h2>Fit Log couldn’t read your saved data</h2></div>
       <div class="card form-card">
         <p>Something went wrong loading your data, so nothing has been changed or deleted — it's still sitting in this browser's storage exactly as it was.</p>
         <p>Export a recovery file first. It's the raw file the app couldn't read, but it keeps every byte intact in case it can be fixed or recovered later.</p>
         <button type="button" class="btn btn-primary btn-block" id="recoverExportBtn">Export recovery file</button>
-        <button type="button" class="btn-text-danger" id="recoverResetBtn">Delete this data and start fresh</button>
+        <button type="button" class="btn-text-danger" id="recoverResetBtn">Erase this data and start fresh</button>
       </div>
     </section>
 
-    <!-- HOME (internally "dashboard") — what needs doing or is happening today:
+    <!-- HOME (internally "dashboard") - what needs doing or is happening today:
          streak card, unlogged check-ins, daily targets, today's logged items, water and food.
          Goals and trends live in the Progress view below. -->
     <section id="view-dashboard" class="view" data-view="dashboard">
@@ -81,19 +68,19 @@
 
       <div id="setupReviewBanner" class="card" hidden>
         <h3>New tracking options are available</h3>
-        <p class="muted-text">Fit Log has added extra macros, insight cards, and per-domain on/off switches since you started. Take a look?</p>
+        <p class="muted-text">Fit Log has added extra macros, insight cards, and an on/off switch for each area since you started. Take a look?</p>
         <div class="btn-row">
           <button type="button" class="btn btn-ghost" id="dismissSetupReviewBtn">Not now</button>
           <button type="button" class="btn btn-primary" id="openSetupReviewBtn">Review tracking</button>
         </div>
       </div>
 
-      <button type="button" id="streakCard" class="streak-card" aria-label="Open history"></button>
+      <button type="button" id="streakCard" class="streak-card"></button>
 
-      <div class="section-head" id="dailyTargetsHead" hidden><h2>Checklist</h2><span class="muted-text" id="checklistCount"></span></div>
+      <div class="section-head" id="dailyTargetsHead" hidden><h2>Daily</h2><span class="muted-text" id="checklistCount"></span></div>
       <div id="dailyTargetsWrap" class="card card-list" hidden></div>
 
-      <div class="section-head" id="trainingHead" hidden><h2>Training</h2><span class="tag">Lifting</span></div>
+      <div class="section-head" id="trainingHead" hidden><h2>Workout</h2></div>
       <div id="trainingWrap" class="card card-list" hidden></div>
 
       <div class="section-head" id="nutritionHead" hidden><h2>Nutrition</h2><span class="head-actions"><span class="tag">Food</span><button type="button" class="icon-btn icon-btn-sm" id="homeFoodPencil" aria-label="Edit food targets"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/></svg></button></span></div>
@@ -106,7 +93,7 @@
 
     </section>
 
-    <!-- PROGRESS — every goal card plus the body & wellness trends -->
+    <!-- PROGRESS - every goal card plus the body & wellness trends -->
     <section id="view-progress" class="view" data-view="progress" hidden>
       <div class="section-head"><h2>Progress</h2></div>
       <div class="segmented segmented-fill" id="progressSeg" role="radiogroup" aria-label="Progress view">
@@ -141,10 +128,13 @@
       </div>
       <div class="domain-tabs" id="logCategorySegmented" role="radiogroup" aria-label="What to log"></div>
       <div id="logAllOffHint" class="empty-state" hidden>
-        <p>Every domain is turned off. Turn one back on in Manage to start logging.</p>
+        <p>Every area is turned off. Turn one back on in Manage to start logging.</p>
       </div>
 
       <!-- Log -> Daily: habits and daily rep targets (rendered by renderLogDailyPanel). -->
+      <div class="f-scroll pg" id="logTrackerChipsWrap" hidden><div class="f-chips" id="logTrackerChips" role="radiogroup" aria-label="Tracker"></div></div>
+      <!-- The small two-line summary every Log tab opens with (renderLogGlance). -->
+      <div id="logGlance" class="card log-glance" hidden></div>
       <div id="logDailyPanel" class="daily-panel" hidden></div>
 
       <!-- Log -> Workout. Nothing chosen yet (or "Switch exercise" tapped):
@@ -187,20 +177,17 @@
       </div>
 
       <form id="logMeasurementForm" class="card form-card" hidden>
-        <label class="field">
-          <span class="field-label">Tracker</span>
-          <select id="logTracker" required></select>
-        </label>
-        <label class="field">
-          <span class="field-label">Date</span>
-          <input type="date" id="logMeasurementDate" required />
-        </label>
-        <label class="field">
+        <select id="logTracker" hidden aria-hidden="true" tabindex="-1"></select>
+        <div class="field">
           <span class="field-label" id="logMeasurementValueLabel">Value</span>
-          <input type="number" step="any" id="logMeasurementValue" required />
-        </label>
+          <div class="meas-stepper">
+            <button type="button" class="step-btn" data-meas-step="-1" aria-label="Decrease">&minus;</button>
+            <label class="meas-value"><input type="number" step="any" inputmode="decimal" id="logMeasurementValue" required aria-labelledby="logMeasurementValueLabel" /><span class="meas-unit" id="logMeasurementUnit"></span></label>
+            <button type="button" class="step-btn" data-meas-step="1" aria-label="Increase">+</button>
+          </div>
+        </div>
         <div class="field" id="logSleepQualityField" hidden>
-          <span class="field-label">Sleep quality <span class="muted-text">(optional — tap again to clear)</span></span>
+          <span class="field-label">Sleep quality <span class="muted-text">(optional, tap again to clear)</span></span>
           <div class="chip-picker" id="logSleepQuality" data-value="" role="radiogroup" aria-label="Sleep quality">
             <button type="button" class="chip-option" data-value="1" role="radio" aria-checked="false">1</button>
             <button type="button" class="chip-option" data-value="2" role="radio" aria-checked="false">2</button>
@@ -209,21 +196,28 @@
             <button type="button" class="chip-option" data-value="5" role="radio" aria-checked="false">5</button>
           </div>
         </div>
-        <label class="field">
+        <div class="meas-meta">
+          <button type="button" class="f-chip" id="logMeasurementDateBtn" aria-expanded="false">Today</button>
+          <button type="button" class="link-btn" id="logMeasurementNoteBtn" aria-expanded="false">Add note</button>
+        </div>
+        <label class="field" id="logMeasurementDateField" hidden>
+          <span class="field-label">Date</span>
+          <input type="date" id="logMeasurementDate" required />
+        </label>
+        <label class="field" id="logMeasurementNoteField" hidden>
           <span class="field-label">Note (optional)</span>
           <input type="text" id="logMeasurementNote" maxlength="200" />
         </label>
-        <button type="submit" class="btn btn-primary btn-block">Save entry</button>
+        <button type="submit" class="btn btn-primary btn-block" id="logMeasurementSaveBtn">Save entry</button>
       </form>
 
-      <div id="waterTodayBar" class="today-bar" hidden></div>
       <div id="logWaterPanel" class="card form-card" hidden>
         <span class="field-label">Tap a cup to log it for today</span>
         <div id="waterCupButtons" class="cup-button-row"></div>
         <label class="field">
           <span class="field-label">Custom amount (<span id="logWaterUnitLabel"></span>)</span>
           <div class="inline-time-fields">
-            <input type="number" step="any" min="0" id="logWaterCustomAmount" placeholder="e.g. 12" />
+            <input type="number" step="any" min="0" id="logWaterCustomAmount" placeholder="e.g. 12" data-enter-clicks="logWaterCustomAddBtn" />
             <button type="button" class="btn btn-secondary" id="logWaterCustomAddBtn">Add</button>
           </div>
         </label>
@@ -231,7 +225,6 @@
 
       <!-- Log -> Food leads with saved foods (the one-tap path used every
            day); typing a food in by hand is collapsed under it. -->
-      <div id="foodTodayBar" class="today-bar" hidden></div>
       <div id="savedFoodsWrap" class="form-card is-bare" style="gap:12px" hidden>
         <div class="segmented seg-sm" id="foodSeg" role="radiogroup" aria-label="Which saved foods to list"></div>
         <label class="search"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg><input type="search" id="foodSearch" placeholder="Search my foods" aria-label="Search my foods" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="search" /></label>
@@ -258,7 +251,7 @@
         <button type="submit" class="btn btn-primary btn-block">Save entry</button>
       </form>
 
-      <div class="section-head">
+      <div class="section-head" id="recentHead">
         <h2>Latest entry</h2>
         <button type="button" class="link-btn" id="recentHistoryBtn">See all in History</button>
       </div>
@@ -284,19 +277,18 @@
         </div>
         <div class="calendar-grid" id="calendarGrid"></div>
         <div class="calendar-legend">
-          <span><i class="cal-dot cal-dot-workout"></i>Workout</span>
-          <span><i class="cal-dot cal-dot-water"></i>Water goal</span>
-          <span><i class="cal-dot cal-dot-body"></i>Body</span>
-          <span><i class="cal-dot cal-dot-food"></i>Food</span>
+          <span data-legend-area="workout"><i class="cal-dot cal-dot-workout"></i>Workout</span>
+          <span data-legend-area="daily"><i class="cal-dot cal-dot-daily"></i>Daily</span>
+          <span data-legend-area="water"><i class="cal-dot cal-dot-water"></i>Water goal</span>
+          <span data-legend-area="food"><i class="cal-dot cal-dot-food"></i>Food</span>
+          <span data-legend-area="measurements"><i class="cal-dot cal-dot-body"></i>Body</span>
         </div>
       </div>
 
       <div class="section-head">
         <h2 id="historyListHeading">All entries</h2>
       </div>
-      <!-- Rebuilt in JS by renderHistoryCategorySegmented() via the shared
-           domainTabsHtml() helper — same component Log and Manage use, so
-           all three always show the identical glyph/label per domain. -->
+      <!-- Filled by renderHistoryCategorySegmented() with domainTabsHtml(), shared with Log and Manage. -->
       <div class="domain-tabs" id="historyCategorySegmented" role="radiogroup" aria-label="History category"></div>
       <label class="field" id="historyFilterField">
         <span class="field-label">Filter by exercise</span>
@@ -308,17 +300,13 @@
       </div>
     </section>
 
-    <!-- MANAGE (four flat domain panels — Workout, Body, Water, Food — each
-         with the identical "Track this" master toggle) -->
+    <!-- MANAGE: one panel per area (Workout, Daily, Body, Water, Food), each with a "Track this" switch. -->
     <section id="view-manage" class="view" data-view="manage" hidden>
       <div class="section-head">
         <h2>Manage</h2>
       </div>
-      <!-- Rebuilt in JS by setManageCategory() via the shared
-           domainTabsHtml() helper — same component Log and History use.
-           Manage always shows all 4 regardless of tracked state (see
-           ALL_DOMAIN_CATEGORIES) since it's where a turned-off domain gets
-           turned back on. -->
+      <!-- Filled by setManageCategory(). Manage always lists all five areas (ALL_DOMAIN_CATEGORIES),
+           since it is where an area that is off gets turned back on. -->
       <div class="domain-tabs" id="manageCategorySegmented" role="radiogroup" aria-label="Manage category"></div>
 
       <div id="manageExercisesPanel">
@@ -332,7 +320,7 @@
             <button type="button" class="switch" id="trackCardioSwitch" role="switch" aria-checked="false" aria-label="Track running and cardio"><span class="switch-track"><span class="switch-thumb"></span></span></button>
           </div>
         </div>
-        <p class="muted-text" id="trackWorkoutOffHint" hidden>Workout is off — hidden from the dashboard, Log, and History. Nothing already logged is lost; turn it back on to see it again.</p>
+        <p class="muted-text" id="trackWorkoutOffHint" hidden>Workout is off — hidden from Home, Log, and History. Nothing already logged is lost; turn it back on to see it again.</p>
 
         <div id="workoutTrackedFields">
           <div id="importCard" class="card tidy-card" hidden></div>
@@ -351,10 +339,10 @@
         <div class="card card-list">
           <div class="setting-row">
             <span class="setting-row-label"><span class="setting-icon" data-icon="daily"></span><span>Track this</span></span>
-            <button type="button" class="switch" id="trackHabitsSwitch" role="switch" aria-checked="false" aria-label="Track daily habits and reps"><span class="switch-track"><span class="switch-thumb"></span></span></button>
+            <button type="button" class="switch" id="trackHabitsSwitch" role="switch" aria-checked="false" aria-label="Track Daily"><span class="switch-track"><span class="switch-thumb"></span></span></button>
           </div>
         </div>
-        <p class="muted-text" id="trackDailyOffHint" hidden>Daily is off — hidden from the dashboard, Log, and History. Nothing already logged is lost; turn it back on to see it again.</p>
+        <p class="muted-text" id="trackDailyOffHint" hidden>Daily is off — hidden from Home, Log, and History. Nothing already logged is lost; turn it back on to see it again.</p>
 
         <div id="dailyTrackedFields">
           <div class="section-head">
@@ -370,10 +358,10 @@
         <div class="card card-list">
           <div class="setting-row">
             <span class="setting-row-label"><span class="setting-icon" data-icon="measurements"></span><span>Track this</span></span>
-            <button type="button" class="switch" id="trackMeasurementsSwitch" role="switch" aria-checked="false" aria-label="Track measurements"><span class="switch-track"><span class="switch-thumb"></span></span></button>
+            <button type="button" class="switch" id="trackMeasurementsSwitch" role="switch" aria-checked="false" aria-label="Track Body"><span class="switch-track"><span class="switch-thumb"></span></span></button>
           </div>
         </div>
-        <p class="muted-text" id="trackMeasurementsOffHint" hidden>Body is off — hidden from the dashboard, Log, and History. Nothing already logged is lost; turn it back on to see it again.</p>
+        <p class="muted-text" id="trackMeasurementsOffHint" hidden>Body is off — hidden from Home, Log, and History. Nothing already logged is lost; turn it back on to see it again.</p>
 
         <div id="measurementsTrackedFields">
           <div class="section-head">
@@ -392,14 +380,14 @@
             <button type="button" class="switch" id="trackWaterSwitch" role="switch" aria-checked="false" aria-label="Track water"><span class="switch-track"><span class="switch-thumb"></span></span></button>
           </div>
         </div>
-        <p class="muted-text" id="trackWaterOffHint" hidden>Water is off — hidden from the dashboard, Log, and History. Nothing already logged is lost; turn it back on to see it again.</p>
+        <p class="muted-text" id="trackWaterOffHint" hidden>Water is off — hidden from Home, Log, and History. Nothing already logged is lost; turn it back on to see it again.</p>
 
         <div id="waterTrackedFields">
           <div class="section-head"><h2>Daily water goal</h2></div>
           <div class="card form-card">
             <label class="field">
               <span class="field-label">Goal (<span id="waterGoalUnitLabel"></span>)</span>
-              <input type="number" step="any" min="0" id="waterGoalInput" />
+              <input type="number" step="any" min="0" id="waterGoalInput" data-enter-clicks="saveWaterGoalBtn" />
             </label>
             <button class="btn btn-secondary btn-sm" id="saveWaterGoalBtn">Save goal</button>
           </div>
@@ -418,10 +406,10 @@
             <button type="button" class="switch" id="trackFoodSwitch" role="switch" aria-checked="false" aria-label="Track food"><span class="switch-track"><span class="switch-thumb"></span></span></button>
           </div>
         </div>
-        <p class="muted-text" id="trackFoodOffHint" hidden>Food is off — hidden from the dashboard, Log, and History. Nothing already logged is lost; turn it back on to see it again.</p>
+        <p class="muted-text" id="trackFoodOffHint" hidden>Food is off — hidden from Home, Log, and History. Nothing already logged is lost; turn it back on to see it again.</p>
 
         <div id="foodTrackedFields">
-          <!-- Saved foods first — it's the feature actually used every day
+          <!-- Saved foods first - it's the feature actually used every day
                (one-tap re-logging), so it leads the panel instead of
                trailing after two setup-once sections. -->
           <div class="section-head">
@@ -435,13 +423,13 @@
 
           <div class="section-head"><h2>Tracked macros</h2></div>
           <p class="muted-text">Calories is always tracked and required to log an entry. Tap a macro below to also track it — tap again to stop; nothing already logged is lost either way.</p>
-          <!-- Populated by renderMacroTrackChips() — a compact chip per
+          <!-- Populated by renderMacroTrackChips() - a compact chip per
                non-calorie MACRO_KEYS entry, replacing what used to be a full
                toggle+label row per field; untracked chips get the shared
                .is-toggled-off dimming. -->
           <div class="chip-picker" id="macroTrackChips" role="group" aria-label="Tracked macros"></div>
 
-          <div class="section-head"><h2>Daily targets</h2></div>
+          <div class="section-head"><h2>Calorie target</h2></div>
           <p class="muted-text">How your calorie target is set. Calculator estimates it from your profile and activity, Manual is a number you type, and No Target hides the calorie ring and shows plain totals.</p>
           <div class="segmented segmented-fill" id="calorieModeSegmented" role="radiogroup" aria-label="Calorie target">
             <button type="button" data-calorie-mode="calc" role="radio">Calculator</button>
@@ -453,7 +441,7 @@
             <div id="nutritionCalcFields" hidden>
               <div class="field">
                 <span class="field-label">Activity level</span>
-                <select id="nutritionActivityLevel"></select>
+                <select id="nutritionActivityLevel" aria-label="Activity level"></select>
               </div>
               <div class="field">
                 <span class="field-label">Goal</span>
@@ -561,12 +549,12 @@
       <div class="section-head"><h2>Home screen</h2></div>
       <div class="card card-list">
         <div class="setting-row">
-          <span class="setting-row-label"><span class="setting-icon" data-icon="check"></span><span>Daily checklist <span class="muted-text">(targets and habits)</span></span></span>
-          <button type="button" class="switch" id="homeChecklistSwitch" role="switch" aria-checked="true" aria-label="Daily checklist"><span class="switch-track"><span class="switch-thumb"></span></span></button>
+          <span class="setting-row-label"><span class="setting-icon" data-icon="check"></span><span>Daily <span class="muted-text">(habits and reps)</span></span></span>
+          <button type="button" class="switch" id="homeChecklistSwitch" role="switch" aria-checked="true" aria-label="Daily"><span class="switch-track"><span class="switch-thumb"></span></span></button>
         </div>
         <div class="setting-row">
-          <span class="setting-row-label"><span class="setting-icon" data-icon="dumbbell"></span><span>Training today <span class="muted-text">(what you logged)</span></span></span>
-          <button type="button" class="switch" id="homeTrainingSwitch" role="switch" aria-checked="true" aria-label="Training today"><span class="switch-track"><span class="switch-thumb"></span></span></button>
+          <span class="setting-row-label"><span class="setting-icon" data-icon="dumbbell"></span><span>Workout today <span class="muted-text">(what you logged)</span></span></span>
+          <button type="button" class="switch" id="homeTrainingSwitch" role="switch" aria-checked="true" aria-label="Workout today"><span class="switch-track"><span class="switch-thumb"></span></span></button>
         </div>
         <div class="setting-row">
           <span class="setting-row-label"><span class="setting-icon" data-icon="apple"></span><span>Food today <span class="muted-text">(calories and macros)</span></span></span>
@@ -586,7 +574,7 @@
       <div class="section-head"><h2>Insights</h2></div>
       <div class="card card-list">
         <div class="setting-row">
-          <span class="setting-row-label"><span class="setting-icon" data-icon="chart"></span><span>Dashboard chart range</span></span>
+          <span class="setting-row-label"><span class="setting-icon" data-icon="chart"></span><span>Chart range</span></span>
           <div class="segmented" id="dashboardChartScaleSegmented" role="radiogroup" aria-label="Chart range">
             <button type="button" data-scale-choice="last10" role="radio">Last 10</button>
             <button type="button" data-scale-choice="all" role="radio">Lifetime</button>
@@ -630,7 +618,7 @@
           <button class="btn btn-secondary btn-icon-label" id="exportBtn"><span data-icon="download"></span>Export backup (.json)</button>
           <button class="btn btn-secondary btn-icon-label" id="importBtn"><span data-icon="upload"></span>Import backup</button>
         </div>
-        <input type="file" id="importFile" accept="application/json" hidden />
+        <input type="file" id="importFile" accept=".json,application/json" hidden />
       </div>
 
       <div class="section-head"><h2>Erase data</h2></div>
@@ -642,7 +630,7 @@
 
       <div class="section-head"><h2>About</h2></div>
       <div class="card">
-        <p class="muted-text">Fit Log v1.15 &middot; installed as a home-screen app, all data stored on-device.</p>
+        <p class="muted-text">Installed as a home-screen app. All data stays on this device.</p>
         <button type="button" class="setting-row row-switch" id="aboutNumbersBtn"><span class="row-lead"><b class="link-text">About the numbers</b><span class="muted-text">Every formula and reference behind your streak, sleep, strength, BMI and nutrition numbers</span></span></button>
       </div>
     </section>

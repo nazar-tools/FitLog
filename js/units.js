@@ -14,7 +14,7 @@
     const CM_PER_IN = 2.54;
     const ML_PER_FLOZ = 29.5735295625;
 
-    // Sanity bounds for profile fields — generous enough to cover every real
+    // Sanity bounds for profile fields -  generous enough to cover every real
     // human (and then some) while still catching fat-fingered or garbage
     // input like "999" years old or "40 ft" tall. Used by both the setup
     // wizard's About step and Settings' Profile card so the two can't drift.
@@ -23,8 +23,8 @@
     const MIN_HEIGHT_CM = 50;   // ~1'8"
     const MAX_HEIGHT_CM = 272;  // ~8'11"
 
-    // Data is saved in one fixed ("canonical") unit — pounds for weight, miles
-    // for distance/pace — regardless of the current Settings toggle. `Units`
+    // Data is saved in one fixed ("canonical") unit -  pounds for weight, miles
+    // for distance/pace -  regardless of the current Settings toggle. `Units`
     // is the only place that converts canonical to whichever unit is currently
     // selected for *display*. This split means the lb/kg or mi/km toggle can
     // only ever change presentation, never the logged history itself, and
@@ -43,7 +43,7 @@
       displaySecPerUnitToSecPerMi: (s) => (getSettings().distanceUnit === 'km' ? s * KM_PER_MI : s),
 
       // Body-measurement lengths (height, waist, bicep, ...) canonically in
-      // centimeters — a separate unit from running distance (miles/km above)
+      // centimeters -  a separate unit from running distance (miles/km above)
       // since inches/cm and miles/km are different scales for different things.
       cmToDisplay: (cm) => (getSettings().lengthUnit === 'cm' ? cm : cm / CM_PER_IN),
       displayToCm: (v) => (getSettings().lengthUnit === 'cm' ? v : v * CM_PER_IN),
@@ -60,12 +60,12 @@
       return Math.round(v * f) / f;
     }
 
-    // Splits a canonical height in cm into whole feet + inches for display —
+    // Splits a canonical height in cm into whole feet + inches for display - 
     // nobody knows their height as a single number of inches, so Profile's
     // imperial height field is feet-and-inches (see the Settings section
     // below), never the plain "in" a length tracker like Waist uses.
     function cmToFtIn(cm) {
-      const totalIn = cm / CM_PER_IN;
+      const totalIn = round(cm / CM_PER_IN, 1);
       const ft = Math.floor(totalIn / 12);
       return { ft, inch: round(totalIn - ft * 12, 1) };
     }
@@ -127,7 +127,7 @@
       return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${String(r).padStart(2, '0')}` : `${m}:${String(r).padStart(2, '0')}`;
     }
 
-    // A calendar day is a YYYY-MM-DD label, not a timestamp — reading it back
+    // A calendar day is a YYYY-MM-DD label, not a timestamp -  reading it back
     // off a Date's local getters (never .toISOString(), which reports UTC and
     // silently shifts the date by a day in any timezone ahead of UTC) is what
     // keeps "today," streaks, and trend windows agreeing with the calendar on

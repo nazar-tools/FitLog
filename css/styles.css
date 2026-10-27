@@ -1,12 +1,6 @@
-/* ============================================================================
-   FIT LOG - styles.css
-
-   Colors, radii, shadows, spacing and type sizes are declared once, as custom
-   properties, in the :root block below. Rules elsewhere use those names, not
-   literal values. :root holds the light theme; the two dark blocks after it
-   (prefers-color-scheme and [data-theme="dark"]) override the same colour
-   names and must stay identical. tests/consistency.test.js checks that.
-   ============================================================================ */
+/* Fit Log styles. Colors, radii, shadows, spacing and type sizes are custom properties in the
+   :root block; rules below use those names, not literals. :root is the light theme and the two
+   dark blocks (prefers-color-scheme and [data-theme="dark"]) override the same names. */
 :root {
   color-scheme: light;
   --page:            #f9f9f7;   /* the page background behind every card */
@@ -17,9 +11,10 @@
   --muted:           #6f6e69;   /* least prominent text (timestamps, hints); 4.5:1 or better on every surface */
   --gridline:        #e1e0d9;   /* hairline dividers between rows */
   --baseline:        #c3c2b7;   /* chart axis lines, goal reference line */
+  --border-strong:   #b4b3a8;   /* control borders that must stay visible on a surface (checkboxes) */
   --border:          rgba(11,11,11,0.10); /* the subtle 1px border every card uses */
 
-  --accent:          #2570cc;   /* THE app color — meter fill, links, active tab */
+  --accent:          #2570cc;   /* THE app color  -  meter fill, links, active tab */
   --accent-fill:     #2570cc;   /* behind white text (buttons, selected day); 4.5:1 or better with --on-accent */
   --accent-track:    #b7d3f6;   /* the unfilled part of a progress meter (a lighter step of --accent) */
   --accent-strong:   #184f95;   /* a darker step of --accent: text and icons sitting on --accent-soft */
@@ -29,13 +24,14 @@
   --good-bg:         #e3f3ea;   /* unused background tint for --good, kept for future use */
   --warning:         #fab219;   /* the BMI standards table's "Overweight" category dot */
   --warn-bg:         #fdf1d4;   /* soft amber background for "over a limit" tags and notes (never red) */
-  --warning-ink:     #8a5a00;   /* readable text/icon color on --warn-bg */
+  --warning-ink:     #8a5a00;   /* readable amber text/icon on --warn-bg or a surface (trend moving away from a goal) */
   --critical:        #d03b3b;   /* delete/danger buttons */
   --critical-bg:     #fbe7e6;   /* the soft red background behind a danger button */
   --critical-fill:   #c62f2f;   /* solid red for the one irreversible action (Erase all data) */
   --on-critical:     #ffffff;
   --dot-body:        #8b5cf6;   /* History calendar's "body measurement logged" dot (workout reuses --good, water reuses --accent) */
   --dot-food:        #d9852b;   /* History calendar's "food logged" dot */
+  --dot-daily:       #e87ba4;   /* History calendar's "daily check-in logged" dot (checked against the other dots for colour-blind separation) */
   --streak:          #e8622c;   /* the Home streak card's flame, number and glow */
 
   --radius-sm: 10px;  /* inputs, small buttons */
@@ -74,6 +70,7 @@
     --muted:           #9a988f;
     --gridline:        #2c2c2a;
     --baseline:        #383835;
+    --border-strong:   #5c5c58;
     --border:          rgba(255,255,255,0.10);
 
     --accent:          #3987e5;
@@ -92,6 +89,7 @@
     --critical-fill:   #c62f2f;
     --dot-body:        #a78bfa;
     --dot-food:        #e69a4a;
+    --dot-daily:       #d55181;
     --streak:          #e8622c;
   }
 }
@@ -105,6 +103,7 @@
   --muted:           #9a988f;
   --gridline:        #2c2c2a;
   --baseline:        #383835;
+  --border-strong:   #5c5c58;
   --border:          rgba(255,255,255,0.10);
 
   --accent:          #3987e5;
@@ -123,10 +122,10 @@
   --critical-fill:   #c62f2f;
   --dot-body:        #a78bfa;
   --dot-food:        #e69a4a;
+  --dot-daily:       #d55181;
   --streak:          #e8622c;
 }
 
-/* ============ Base ============ */
 * { box-sizing: border-box; }
 /* The native `hidden` attribute is UA-stylesheet [hidden]{display:none}, which
    loses to any author rule setting `display` at equal specificity (.view,
@@ -159,7 +158,6 @@ button { font-family: inherit; }
   padding-bottom: calc(64px + env(safe-area-inset-bottom));
 }
 
-/* ============ Topbar ============ */
 .topbar {
   display: flex;
   align-items: center;
@@ -168,20 +166,11 @@ button { font-family: inherit; }
   background: var(--page);
 }
 .brand { font-size: var(--fs-xl); letter-spacing: -0.01em; }
-/* 44px is the common minimum comfortable touch target — this is a
+/* 44px is the common minimum comfortable touch target. This is a
    phone-first app people tap while standing between sets, so every button
    that isn't purely decorative aims for it even when the icon inside it
    stays small. */
-.icon-btn {
-  border: none;
-  background: var(--surface-2);
-  color: var(--text-primary);
-  width: 44px; height: 44px;
-  border-radius: 999px;
-  display: flex; align-items: center; justify-content: center;
-  cursor: pointer;
-}
-.icon { width: 18px; height: 18px; }
+.icon-btn,
 .icon-btn-sm {
   border: none;
   background: var(--surface-2);
@@ -191,9 +180,9 @@ button { font-family: inherit; }
   display: flex; align-items: center; justify-content: center;
   cursor: pointer;
 }
+.icon { width: 18px; height: 18px; }
 .icon-btn-sm .icon { width: 16px; height: 16px; }
 
-/* ============ Main / views ============ */
 #main { flex: 1; padding: var(--sp-4) var(--gutter) var(--sp-24); }
 /* With the topbar hidden (setup wizard, recovery screen) #main must clear the
    iOS status bar itself. */
@@ -230,17 +219,18 @@ button { font-family: inherit; }
   /* Sits close to the block it introduces: --stack-gap minus --sp-6. This is
      the one deliberate negative margin left in the stylesheet. */
   margin-bottom: calc(var(--sp-6) * -1);
+  flex-wrap: wrap;
+  gap: var(--sp-4) var(--sp-8);
 }
 /* A new section starts a little further from whatever precedes it. A heading
    with nothing visible before it needs no offset, so no first-child rule. */
 :not([hidden]) ~ .section-head { margin-top: var(--sp-8); }
-.section-head { flex-wrap: wrap; gap: var(--sp-4) var(--sp-8); }
 .section-head h2 { font-size: var(--fs-input); font-weight: 700; overflow-wrap: normal; }
 .section-head .head-actions .btn { white-space: nowrap; }
 /* Home: "Today" and the date sit just under the title, on the left; the streak card follows with more room. */
 .section-head.home-head { justify-content: flex-start; gap: var(--sp-8); margin-bottom: 0; }
 
-/* ============ Domain tabs (Workout / Daily / Body / Water / Food) ============
+/* Domain tabs (Workout / Daily / Body / Water / Food)
    Full-width row under the title so it cannot overflow. Flex, because Log and
    History show only the tracked areas (0 to 5) while Manage always shows all 5. */
 .domain-tabs { display: flex; gap: var(--sp-4); }
@@ -259,17 +249,12 @@ button { font-family: inherit; }
 
 /* Setup wizard interest tiles: fixed 3-column grid; each tile toggles on its own,
    so state is aria-pressed rather than aria-checked. */
-.interest-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--sp-8); }
-.interest-tile { padding: var(--sp-16) var(--sp-4); }
-.interest-tile .icon { width: 24px; height: 24px; }
-.interest-tile .name { font-size: var(--fs-xs); font-weight: 600; }
-.interest-tile[aria-pressed="true"] { background: var(--accent-track); border-color: var(--accent); color: var(--on-accent-track); }
 
-/* ============ Toggled-off / not-tracked state ============
+/* Toggled-off / not-tracked state
    Dimmed only; the element stays tappable so it can be switched back on. */
 .is-toggled-off { opacity: 0.5; }
 
-/* ============ Item icon ============
+/* Item icon
    The small monochrome circle in front of an exercise, tracker, cup or
    saved food. Which glyph it shows is the user's choice in Manage (see
    ITEM_ICONS in app.js); a plain 36px circle in Home's rows, 28px (-sm)
@@ -279,7 +264,7 @@ button { font-family: inherit; }
 .item-icon-sm { width: 28px; height: 28px; }
 .item-icon-sm .icon { width: 16px; height: 16px; }
 
-/* ============ Home: streak card ============
+/* Home: streak card
    One button for the streak and the last 7 days; opens History. Lit with a
    warm glow while a streak is alive, plain gray at zero. */
 .streak-card { display: block; width: 100%; margin-top: var(--sp-8); padding: var(--sp-20) var(--sp-16) var(--sp-16); text-align: left; font: inherit; color: inherit; cursor: pointer; background: var(--surface-1); border: 1px solid var(--border); border-radius: var(--radius-lg); }
@@ -302,7 +287,7 @@ button { font-family: inherit; }
 .streak-dot.on { background: var(--accent-fill); border-color: var(--accent-fill); color: var(--on-accent); }
 .streak-dot .icon { width: 14px; height: 14px; }
 
-/* ============ Home: glance rows ============
+/* Home: glance rows
    Every Home section is one card of compact rows: icon, name, value, a thin
    meter, and an optional action. Reaching the goal turns the row green;
    the action stays so more can still be logged. */
@@ -310,8 +295,6 @@ button { font-family: inherit; }
 .glance-row + .glance-row { border-top: 1px solid var(--gridline); }
 .glance-open { display: flex; flex: 1; align-items: center; gap: var(--sp-12); min-width: 0; }
 .glance-open[role="button"] { cursor: pointer; }
-.glance-row-stack { flex-direction: column; align-items: stretch; gap: var(--sp-12); }
-.glance-head { display: flex; align-items: center; gap: var(--sp-12); }
 .glance-main { flex: 1; min-width: 0; }
 .glance-line { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 0 var(--sp-8); }
 .glance-name { min-width: 0; flex: 1 1 auto; overflow-wrap: normal; font-size: var(--fs-base); font-weight: 600; }
@@ -319,29 +302,15 @@ button { font-family: inherit; }
 .glance-row .glance-value .muted-text { display: inline; font-size: var(--fs-sm); font-weight: 400; }
 .glance-value .icon { width: 14px; height: 14px; }
 .glance-sub { font-size: var(--fs-sm); color: var(--text-secondary); }
-.glance-macros { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-4) var(--sp-20); margin-top: var(--sp-8); font-size: var(--fs-sm); }
-.glance-macro { display: flex; align-items: baseline; justify-content: space-between; gap: var(--sp-8); min-width: 0; }
-.glance-macro-name { color: var(--text-secondary); }
-.glance-macro-val { font-weight: 600; white-space: nowrap; }
 .glance-row.is-complete .glance-value { color: var(--good); }
 .glance-open > .icon { flex: none; width: 16px; height: 16px; color: var(--muted); }
 .glance-btn { position: relative; flex: none; min-width: 56px; min-height: 36px; padding: 0 var(--sp-16); }
 .glance-btn::after { content: ''; position: absolute; inset: -4px; }
-.glance-actions { display: flex; flex-wrap: wrap; gap: var(--sp-8); }
-.glance-actions .btn { flex: 1 1 auto; min-height: 40px; padding: 0 var(--sp-8); font-size: var(--fs-sm); white-space: nowrap; }
 .meter-sm { height: 6px; margin-top: var(--sp-8); }
-/* ============ Log -> Daily ============
+/* Log -> Daily
    The summary card, then Habits (tap the box to check one off) and Daily reps (meter and Log
    button, the Home row). */
 .daily-panel { display: flex; flex-direction: column; gap: var(--sp-16); }
-.daily-summary { display: flex; flex-direction: column; gap: var(--sp-4); }
-.daily-summary-top { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-12); }
-.daily-eyebrow { font-size: var(--fs-xs); font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
-.daily-big { font-size: var(--fs-display); font-weight: 800; line-height: 1.1; font-variant-numeric: tabular-nums; }
-.daily-big > span { font-size: var(--fs-md); font-weight: 700; color: var(--text-secondary); }
-.daily-streak { display: inline-flex; align-items: center; gap: var(--sp-4); flex: none; white-space: nowrap; font-size: var(--fs-sm); font-weight: 700; color: var(--muted); }
-.daily-streak .icon { width: 16px; height: 16px; }
-.daily-streak.is-hot { color: var(--streak); }
 .daily-head .muted-text { font-variant-numeric: tabular-nums; }
 .daily-cb { position: relative; flex: none; width: 28px; height: 28px; padding: 0; display: grid; place-items: center; border-radius: var(--sp-8); border: 2px solid var(--baseline); background: none; color: var(--on-accent); cursor: pointer; }
 .daily-cb::after { content: ''; position: absolute; inset: -8px; }
@@ -360,7 +329,7 @@ button { font-family: inherit; }
 .meter-seg.on { background: var(--accent); }
 .is-complete .meter-seg.on { background: var(--good); }
 
-/* ============ Option list ============
+/* Option list
    Radio rows for a choice of four or more (a segmented control gets busy
    past three); each row can carry a one-line hint. */
 .option-list { border: 1px solid var(--border); border-radius: var(--radius-md); overflow: hidden; }
@@ -373,7 +342,7 @@ button { font-family: inherit; }
 .option-radio { flex: none; width: 20px; height: 20px; border-radius: 50%; border: 2px solid var(--muted); }
 .option-row[aria-checked="true"] .option-radio { border: 6px solid var(--accent); background: var(--on-accent); }
 
-/* ============ Icon field and picker ============
+/* Icon field and picker
    "Icon" in the Add/Edit forms: a row showing the current icon that opens
    a grid to choose another. */
 .name-icon-row { display: flex; align-items: center; gap: var(--sp-12); }
@@ -385,7 +354,7 @@ button { font-family: inherit; }
 .itile-badge { position: absolute; right: -6px; bottom: -6px; display: flex; align-items: center; justify-content: center; width: 22px; height: 22px; color: var(--text-primary); background: var(--surface-1); border: 1px solid var(--border); border-radius: 50%; box-shadow: var(--shadow-1); }
 .itile-badge .icon { width: 12px; height: 12px; }
 .itile:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.field-hint { font-size: var(--fs-xs); color: var(--muted); }
+.field-hint { font-size: var(--fs-xs); color: var(--muted); margin-top: var(--sp-2); }
 .icon-picker { display: flex; flex-direction: column; gap: var(--sp-12); }
 .icon-picker > .segmented { display: flex; }
 .icon-picker > .segmented button { flex: 1 1 0; min-width: 0; min-height: 44px; padding: var(--sp-8); }
@@ -394,7 +363,6 @@ button { font-family: inherit; }
 .icon-cell .icon { width: 22px; height: 22px; }
 .icon-cell[aria-checked="true"] { color: var(--on-accent-track); background: var(--accent-track); border: 2px solid var(--accent); }
 
-/* ============ Habit (Log screen) ============ */
 .habit-panel { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-12); padding: var(--sp-8) 0 var(--sp-12); }
 .habit-hint { margin-top: var(--sp-8); text-align: center; }
 .habit-count { font-size: var(--fs-2xl); font-weight: 800; line-height: 1.2; }
@@ -405,7 +373,6 @@ button { font-family: inherit; }
 /* A habit is logged with the one Done button, so the Log form drops its date, note and Save. */
 #logForm.is-habit #logFields > .field, #logForm.is-habit > [type="submit"] { display: none; }
 
-/* ============ Card grid / exercise cards ============ */
 .card-grid { display: flex; flex-direction: column; gap: var(--sp-12); }
 .card {
   background: var(--surface-1);
@@ -440,7 +407,7 @@ button { font-family: inherit; }
   white-space: nowrap;
 }
 /* Used when a badge sits on its own line (exercise detail modal) instead of
-   inside a flex row (dashboard card) — layout only, no visual/color change. */
+   inside a flex row (dashboard card)  -  layout only, no visual/color change. */
 .badge-standalone { display: inline-block; margin-bottom: var(--sp-8); }
 .ex-card-values { display: flex; align-items: baseline; gap: var(--sp-6); margin-top: var(--sp-6); }
 .ex-card-current { font-size: var(--fs-2xl); font-weight: 600; }
@@ -456,7 +423,7 @@ button { font-family: inherit; }
 }
 .meter-fill {
   /* --fill is the one thing app.js sets inline on this element, and it's a
-     data value (current progress %), not a design choice — every visual
+     data value (current progress %), not a design choice  -  every visual
      property (color, thickness, corner radius, animation) is defined here
      in CSS, driven by `--accent` above. */
   --fill: 0%;
@@ -474,20 +441,21 @@ button { font-family: inherit; }
 .ex-card-chart { margin-top: var(--sp-8); }
 
 /* The optional trend-delta badge on the Body Weight card ("+4.8 lb in 3
-   months") — sentiment color follows the tracker's own goal direction
+   months")  -  sentiment color follows the tracker's own goal direction
    (see deltaSentiment() in app.js), so it's neutral whenever that isn't
    set rather than guessing whether a change is good news. */
 .ex-card-delta { font-size: var(--fs-sm); font-weight: 600; white-space: nowrap; color: var(--text-secondary); }
 .ex-card-delta.is-good { color: var(--good); }
-.ex-card-delta.is-bad { color: var(--critical); }
+/* Moving away from a goal is a heads-up, not an error: amber text, never the delete red. */
+.ex-card-delta.is-bad { color: var(--warning-ink); }
 
-/* A one-line optional-insight readout under a card's chart — BMI, a
+/* A one-line optional-insight readout under a card's chart  -  BMI, a
    strength-vs-bodyweight ratio, a pace level, or (in muted-text) a prompt
    for the Profile fact it still needs. */
 .insight-line { font-size: var(--fs-sm); margin-top: var(--sp-8); }
 
 /* A cardio exercise with both a distance and a pace goal renders one of
-   these per goal, stacked, inside the same card/detail view — one logged
+   these per goal, stacked, inside the same card/detail view  -  one logged
    run updates both blocks from the same entry. Single-goal cardio and every
    non-cardio kind render just one plain .ex-card-values/.meter, unwrapped. */
 .ex-card-metric + .ex-card-metric { margin-top: var(--sp-12); }
@@ -499,18 +467,17 @@ button { font-family: inherit; }
   letter-spacing: 0.03em;
 }
 
-/* ============ Suggestion card (progressive overload) ============ */
 .suggestion-card { background: var(--surface-2); border: none; cursor: pointer; }
 .suggestion-label { font-size: var(--fs-xs); font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--accent); margin-bottom: var(--sp-4); }
 .suggestion-headline { font-size: var(--fs-input); font-weight: 600; }
 .suggestion-detail { font-size: var(--fs-sm); color: var(--text-secondary); margin-top: var(--sp-4); }
 .suggestion-method { font-size: var(--fs-xs); color: var(--muted); margin-top: var(--sp-8); line-height: 1.5; }
-/* The one-tap "at a glance headline only" affordance — the full detail
+/* The one-tap "at a glance headline only" affordance  -  the full detail
    sentence, method note, and general explanation live in
    openSuggestionInfoModal() instead of always being visible here. */
 .suggestion-tap-hint { font-size: var(--fs-xs); font-weight: 600; color: var(--accent); margin-top: var(--sp-6); }
 
-/* ============ Tier bar (Strength level / Pace level detail) ============
+/* Tier bar (Strength level / Pace level detail)
    One segment per tier with the current one highlighted; the caption below lists
    each tier's threshold. */
 .tier-bar { display: flex; gap: var(--sp-4); margin-top: var(--sp-8); }
@@ -523,9 +490,9 @@ button { font-family: inherit; }
 }
 .tier-bar-caption { font-size: var(--fs-xs); margin-top: var(--sp-6); line-height: 1.5; }
 
-/* ============ Category dot (BMI standards-preview row) ============
+/* Category dot (BMI standards-preview row)
    A small colored dot before a .standards-preview-row's label, naming
-   which zone that row is without needing a separate legend — reused
+   which zone that row is without needing a separate legend  -  reused
    wherever a table row stands for a named category rather than a plain
    number (currently just BMI's table in bmiDetailHtml()). */
 .category-dot { width: 8px; height: 8px; border-radius: 999px; display: inline-block; margin-right: var(--sp-6); }
@@ -544,7 +511,7 @@ button { font-family: inherit; }
 .modal-back-link .icon { width: 16px; height: 16px; flex: none; }
 
 /* Plain-language reference content (e.g. "how progression decisions work")
-   inside a modal — ordinary prose with small subheadings, not a card. */
+   inside a modal  -  ordinary prose with small subheadings, not a card. */
 .info-block h3 { font-size: var(--fs-md); margin: var(--sp-12) 0 var(--sp-4); }
 .info-block p { font-size: var(--fs-sm); color: var(--text-secondary); line-height: 1.5; margin: 0 0 var(--sp-4); }
 
@@ -564,7 +531,7 @@ button { font-family: inherit; }
 .card > .standards-preview:last-child { border-bottom: 0; }
 .card:has(> .standards-preview:last-child) { overflow: hidden; padding-bottom: 0; }
 .card > .standards-preview .standards-preview-row { padding: var(--sp-8) var(--sp-16); }
-/* Daily-value guidance table (openFoodDetail) — a row past its DV for
+/* Daily-value guidance table (openFoodDetail)  -  a row past its DV for
    Sugar/Sodium/Caffeine (see MACRO_DV_OVER_FLAGS) gets its whole value
    column in red, not just the "% DV" part, per the user's request to
    highlight the number itself. */
@@ -576,7 +543,6 @@ button { font-family: inherit; }
 .food-dv-note { margin: 0; }
 .standards-preview-row.over .pct { font-weight: 700; }
 
-.is-over-dv { color: var(--critical); }
 
 .empty-state {
   text-align: center;
@@ -588,19 +554,17 @@ button { font-family: inherit; }
   align-items: center;
 }
 
-/* ============ Forms ============ */
 .form-card { display: flex; flex-direction: column; gap: var(--sp-12); }
 /* A lone `.setting-row` in a form card (a switch) takes its spacing from the card's gap, not its own padding. */
 .form-card .setting-row { padding: 0; }
 #logFoodDynamicFields { display: flex; flex-direction: column; gap: var(--sp-12); }
 .field { display: flex; flex-direction: column; gap: var(--sp-6); }
 .field-label { font-size: var(--fs-sm); color: var(--text-secondary); font-weight: 500; }
-/* Required-field marker — currently just Calories in the food log/edit
+/* Required-field marker  -  currently just Calories in the food log/edit
    forms (see handleLogFoodSubmit). */
 /* A short explainer line under a field's control, e.g. the Section picker's
    "shown as a full progress card..." text. */
-.field-hint { margin-top: var(--sp-2); }
-/* Two number inputs side by side (minutes+seconds, etc.) — anywhere a field
+/* Two number inputs side by side (minutes+seconds, etc.)  -  anywhere a field
    needs a horizontal pair instead of stacking, use this instead of an
    inline style. */
 .inline-time-fields { display: flex; gap: var(--sp-6); }
@@ -632,15 +596,22 @@ input, select {
   width: 100%;
 }
 input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* Desktop spin buttons eat a third of a narrow number field; phones never show them. */
+input[type="number"] { -moz-appearance: textfield; appearance: textfield; }
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
 
 .set-row {
   display: grid;
-  grid-template-columns: 1fr 1fr auto;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
   column-gap: var(--sp-6);
   align-items: end;
 }
-.set-row.set-row-3 { grid-template-columns: 1fr 1fr 1fr auto; }
-.set-row.set-row-3[data-primary] { grid-template-columns: 1fr 1fr 1fr auto auto; }
+/* minmax(0, ...) lets the inputs shrink below their intrinsic width; the weight column gets the
+   most room because it holds the longest numbers (137.5). */
+.set-row.set-row-3 { grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr) minmax(0, 1fr) auto; }
+.set-row.set-row-3[data-primary] { grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr) minmax(0, 1fr) auto auto; }
+.set-row input { padding-inline: var(--sp-8); }
 .set-row .field { gap: var(--sp-4); }
 /* Only the first set row shows column labels. Later rows keep them in the DOM but
    clip them (sr-only technique) so screen readers still hear them. */
@@ -663,7 +634,6 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 1p
 .sets-container { display: flex; flex-direction: column; gap: var(--sp-12); }
 .sets-label { display: flex; align-items: center; justify-content: space-between; }
 
-/* ============ Buttons ============ */
 .btn {
   border: none;
   border-radius: var(--radius-sm);
@@ -683,7 +653,7 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 1p
 .danger-zone .danger-title .icon { width: 18px; height: 18px; flex: none; }
 .btn-block { width: 100%; }
 .btn-sm { padding: var(--sp-6) var(--sp-12); font-size: var(--fs-sm); }
-/* "+ Add exercise / tracker / cup" — a real Lucide `plus` icon in place of
+/* "+ Add exercise / tracker / cup"  -  a real Lucide `plus` icon in place of
    the old literal "+" character, vertically centered against the label. */
 .btn-icon-label { display: inline-flex; align-items: center; gap: var(--sp-4); }
 .btn-icon-label .icon { width: 14px; height: 14px; }
@@ -709,7 +679,6 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 1p
   cursor: pointer;
 }
 
-/* ============ Segmented control ============ */
 /* Label on the left, control on the right. If a wide control doesn't fit beside
    the label, it drops to its own line instead of being clipped. */
 .setting-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--sp-6) var(--sp-12); padding: var(--sp-8) 0; }
@@ -736,7 +705,7 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 1p
 .field > #exGoalTierSegmented button { font-size: var(--fs-sm); }
 .form-card > .segmented button, .field > .segmented button { flex: 1 1 0; min-width: 0; min-height: 44px; padding: var(--sp-8); white-space: normal; line-height: 1.2; }
 
-/* ============ Switch (on/off) ============
+/* Switch (on/off)
    One button, role="switch". The ::after widens the tap area to 44px
    without making the control itself any bigger. */
 .switch { position: relative; flex: none; border: none; background: none; padding: 0; cursor: pointer; }
@@ -784,7 +753,7 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 1p
 .profile-edit input { background: var(--surface-1); }
 .profile-note { margin: 0; font-size: var(--fs-xs); }
 
-/* ============ List card ============
+/* List card
    A card made of rows (Settings lists, Manage's "Track this", macro goals).
    No card padding, so each row's divider runs edge to edge; the row carries
    the padding itself. */
@@ -797,7 +766,7 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 1p
 #nutritionCalcFields { padding: var(--sp-16) var(--sp-16) var(--sp-16); border-top: 1px solid var(--gridline); }
 
 
-/* Chip picker — a row of discrete-choice tap targets (e.g. a 1-5 rating,
+/* Chip picker  -  a row of discrete-choice tap targets (e.g. a 1-5 rating,
    or which macros are tracked in Manage → Food) in place of a number input
    or a full toggle row, sized like the other touch targets on this page
    rather than a compact segmented control. */
@@ -808,7 +777,6 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 1p
   border-radius: var(--radius-sm); font-size: var(--fs-base); font-weight: 600; cursor: pointer;
 }
 
-/* ============ Entry list ============ */
 /* One card per list, hairline rows inside. Rows never get their own border or
    card, so a list never nests cards inside a card and every row keeps the full
    width. A list that already sits in a card drops its own chrome. */
@@ -843,7 +811,6 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 1p
 
 .muted-text { color: var(--text-secondary); font-size: var(--fs-sm); line-height: 1.5; }
 
-/* ============ Calendar (History tab) ============ */
 .calendar-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--sp-8); }
 .calendar-month-label { font-size: var(--fs-base); font-weight: 600; }
 .calendar-weekdays {
@@ -854,7 +821,7 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 1p
   color: var(--muted);
   margin-bottom: var(--sp-4);
 }
-.calendar-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: var(--sp-2); }
+.calendar-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: var(--sp-2); }
 .calendar-day {
   aspect-ratio: 1;
   display: flex;
@@ -867,6 +834,8 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 1p
   cursor: pointer;
   background: transparent;
   border: none;
+  padding: 0;
+  min-width: 0;
   color: var(--text-primary);
   font-family: inherit;
 }
@@ -876,10 +845,15 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 1p
 .calendar-day.is-selected.is-today { box-shadow: inset 0 0 0 2px var(--surface-1); }
 .calendar-day-dots { display: flex; gap: var(--sp-2); height: 5px; }
 .cal-dot { width: 5px; height: 5px; border-radius: 999px; display: inline-block; }
+/* Each area keeps its own slot in the row, so position tells the dots apart as well as colour. */
+.cal-dot.is-empty { visibility: hidden; }
+/* Five slots must fit a day cell on a 320px screen. */
+@media (max-width: 359px) { .calendar-day-dots .cal-dot { width: 4px; height: 4px; } }
 .cal-dot-workout { background: var(--good); }
 .cal-dot-water { background: var(--accent); }
 .cal-dot-body { background: var(--dot-body); }
 .cal-dot-food { background: var(--dot-food); }
+.cal-dot-daily { background: var(--dot-daily); }
 .calendar-legend {
   display: flex;
   flex-wrap: wrap;
@@ -893,7 +867,6 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 1p
 .calendar-legend span { display: inline-flex; align-items: center; gap: var(--sp-4); }
 .calendar-legend .cal-dot { width: 7px; height: 7px; }
 
-/* ============ Tab bar ============ */
 .tabbar {
   position: fixed;
   bottom: 0; left: 0; right: 0;
@@ -922,7 +895,6 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 1p
 .tab-log-badge { display: flex; align-items: center; justify-content: center; position: absolute; top: calc(var(--sp-20) * -1); left: 50%; transform: translateX(-50%); width: 52px; height: 52px; border-radius: 50%; background: var(--accent-fill); color: var(--on-accent); border: 4px solid var(--surface-1); }
 .tab-log .icon { width: 24px; height: 24px; }
 
-/* ============ Modal ============ */
 .modal-root { position: fixed; inset: 0; z-index: 50; }
 .modal-backdrop { position: absolute; inset: 0; background: var(--overlay); }
 .modal-sheet {
@@ -970,14 +942,13 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 1p
 .modal-title-row h2 { font-size: var(--fs-lg); }
 .title-with-icon { display: flex; align-items: center; gap: var(--sp-8); }
 /* Groups the title row's action icons (Edit, then ✕) so a detail modal
-   can offer Edit right where the title already is — the "more convenient
-   place" for it than a full-width button buried below the fold — without
+   can offer Edit right where the title already is  -  the "more convenient
+   place" for it than a full-width button buried below the fold  -  without
    the two buttons touching or wrapping oddly at 44px each. */
 .modal-title-actions { display: flex; align-items: center; gap: var(--sp-8); flex-shrink: 0; }
 /* Muted line of context under a modal title. Spacing comes from the sheet's gap. */
 .modal-close { border: none; background: var(--surface-2); width: 44px; height: 44px; border-radius: 999px; color: var(--text-primary); cursor: pointer; display: flex; align-items: center; justify-content: center; }
 
-/* ============ Toast ============ */
 .toast {
   position: fixed;
   bottom: calc(78px + env(safe-area-inset-bottom));
@@ -994,7 +965,6 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 1p
 
 .toast-action { margin-left: var(--sp-12); border: 0; background: transparent; color: inherit; font: inherit; font-weight: 700; text-decoration: underline; cursor: pointer; padding: 0; }
 
-/* ============ Charts (SVG, per dataviz mark specs) ============ */
 /* Wrapper for an injected Charts.lineChart() SVG, a direct .modal-sheet child, so
    spacing comes from the sheet's gap. The SVG fills the wrapper's width. */
 .chart-wrap {}
@@ -1005,7 +975,6 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 1p
 .chart-axis-text { fill: var(--muted); font-size: var(--fs-xs); }
 .chart-empty { color: var(--muted); font-size: var(--fs-sm); text-align: center; padding: var(--sp-24) 0; }
 
-/* ============ Misc ============ */
 /* Two PR tiles side by side. A direct .modal-sheet child; the gap is between tiles. */
 .pr-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: var(--sp-8); }
 .pr-tile { background: var(--surface-2); border-radius: var(--radius-md); padding: var(--sp-12) var(--sp-12); }
@@ -1014,7 +983,7 @@ input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 1p
 
 ::selection { background: var(--accent-track); }
 
-/* ============ Organization: favorites, search, filter chips, groups ============
+/* Organization: favorites, search, filter chips, groups
    Shared by the Log and Manage pickers and lists. A row of filter chips that can
    scroll sideways gets .f-scroll: a right-edge fade and arrow, removed (.at-end)
    at the end. */
@@ -1134,7 +1103,7 @@ button.row-switch { width: 100%; border: 0; background: none; font: inherit; col
 .cat-row.is-toggled-off { opacity: .6; cursor: default; }
 .cat-check {
   flex: none; width: 24px; height: 24px; border-radius: 8px;
-  border: 2px solid var(--border-strong, var(--border)); background: var(--surface-1);
+  border: 2px solid var(--border-strong); background: var(--surface-1);
   display: inline-flex; align-items: center; justify-content: center; color: var(--on-accent);
 }
 .cat-check svg { width: 16px; height: 16px; }
@@ -1145,10 +1114,8 @@ button.row-switch { width: 100%; border: 0; background: none; font: inherit; col
 .chip-option.is-added { opacity: .65; cursor: default; }
 .cat-tier {
   font-size: var(--fs-xs); font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
-  color: var(--muted); padding: var(--sp-12) var(--sp-2) var(--sp-4);
+  color: var(--muted); padding: var(--sp-8) var(--sp-2) 0;
 }
-.cat-packs { display: flex; flex-direction: column; gap: var(--sp-8); margin: var(--sp-4) 0 var(--sp-8); }
-.cat-packs .btn { align-self: flex-start; }
 .chip-option.is-active.is-added { background: var(--accent-soft); color: var(--accent-strong); border-color: transparent; }
 
 /* ---------- Home sections ---------- */
@@ -1191,6 +1158,7 @@ button.row-switch { width: 100%; border: 0; background: none; font: inherit; col
 .spark { width: 100%; height: 34px; }
 .mini-delta { font-size: var(--fs-xs); color: var(--text-secondary); }
 .mini-delta.is-good { color: var(--good); }
+.mini-delta.is-bad { color: var(--warning-ink); }
 .segmented-fill + #progressGoals, #progressSeg + div { margin-top: var(--sp-12); }
 #goalsGroups, #progressGoals, #progressCharts { display: flex; flex-direction: column; gap: var(--sp-12); }
 #goalsGroups .section-head { margin-top: var(--sp-4); }
@@ -1242,18 +1210,11 @@ button.row-switch { width: 100%; border: 0; background: none; font: inherit; col
 .cat-variants .chip-option { min-width: 0; height: 38px; padding: 0 var(--sp-16); font-size: var(--fs-md); }
 .cat-pack-note { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-8); flex-wrap: wrap; font-size: var(--fs-sm); }
 .cat-pack-note .muted-text { flex: 1 1 180px; }
-.cat-tier { padding: var(--sp-8) var(--sp-2) 0; }
 .cat-row .entry-row-title { overflow-wrap: anywhere; }
 .cat-row .entry-row-sub { white-space: normal; }
 .chip-lead { flex: none; align-self: center; font-size: var(--fs-xs); font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); padding-right: var(--sp-2); }
 
 /* ---------- Log > Food (matches the Food boards) ---------- */
-.today-bar { display: flex; flex-direction: column; gap: var(--sp-8); padding: var(--sp-12) var(--sp-16); background: var(--surface-1); border: 1px solid var(--border); border-radius: var(--radius-md); }
-.today-bar-top { display: flex; justify-content: space-between; align-items: baseline; gap: var(--sp-8); }
-.today-bar-top b { font-size: var(--fs-lg); font-variant-numeric: tabular-nums; }
-.today-bar .meter-fill { background: var(--accent); }
-#foodTodayBar .meter-fill { background: var(--dot-food); }
-.today-bar .meter-fill.is-over { background: var(--warning); }
 .add-btn { flex: none; width: 44px; height: 44px; border-radius: 50%; border: 0; background: var(--accent-fill); color: var(--on-accent); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; }
 .add-btn svg { width: 20px; height: 20px; }
 .add-btn:active { transform: scale(.94); }
@@ -1356,10 +1317,9 @@ button.row-switch { width: 100%; border: 0; background: none; font: inherit; col
 .pick-chip.is-on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-strong); }
 .pick-chip.is-fixed { opacity: .8; cursor: default; }
 
-.last-time { display: flex; flex-direction: column; gap: var(--sp-6); padding: var(--sp-12) var(--sp-16); border-radius: var(--radius-md); background: var(--surface-2); }
+.last-time { display: flex; flex-direction: column; gap: var(--sp-6); padding: var(--sp-12) var(--sp-16); margin-bottom: var(--sp-8); border-radius: var(--radius-md); background: var(--surface-2); }
 .last-time-head { display: flex; justify-content: space-between; align-items: center; gap: var(--sp-8); }
 .last-time-sets { font-weight: 700; font-size: var(--fs-base); overflow-wrap: anywhere; }
-.last-time { margin-bottom: var(--sp-8); }
 /* "Last time" is a full-width band across the top of the fields card, not a box inside it. */
 #logFields .last-time { margin: 0 calc(var(--card-pad) * -1) var(--sp-4); border-radius: 0; border-block: 1px solid var(--gridline); }
 #logForm > .log-head.card { padding: var(--sp-12) var(--sp-16); }
@@ -1373,3 +1333,39 @@ button.row-switch { width: 100%; border: 0; background: none; font: inherit; col
 
 .detail-actions { margin-top: 0; }
 .detail-actions .btn { flex: 1 1 0; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { transition: none !important; animation: none !important; scroll-behavior: auto !important; }
+}
+
+/* Log glance card: the small two-line summary at the top of every Log tab. */
+.log-glance { display: flex; flex-direction: column; gap: var(--sp-8); padding: var(--sp-12) var(--sp-16); }
+.lg-r1 { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-8); }
+.lg-ev { display: flex; align-items: baseline; gap: var(--sp-8); min-width: 0; }
+.lg-eb { font-size: var(--fs-2xs); font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lg-v { font-size: var(--fs-xl); font-weight: 800; line-height: 1.1; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.lg-u { font-size: var(--fs-sm); font-weight: 700; color: var(--text-secondary); }
+.lg-v.is-empty { font-size: var(--fs-lg); color: var(--muted); }
+.lg-st { display: inline-flex; align-items: center; gap: var(--sp-4); flex: none; white-space: nowrap; font-size: var(--fs-sm); font-weight: 800; color: var(--streak); }
+.lg-st .icon { width: 16px; height: 16px; }
+.lg-st.is-off { color: var(--muted); font-weight: 700; }
+.lg-r2 { display: flex; align-items: center; gap: var(--sp-8); min-height: 20px; }
+.lg-r2 .meter { flex: 1 1 0; min-width: 40px; margin-top: 0; }
+.lg-tx { font-size: var(--fs-sm); color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.lg-r2 > .lg-tx:first-child { flex: 1 1 auto; }
+.lg-r2 .link-btn { flex: none; font-size: var(--fs-sm); }
+.lg-dots { display: flex; gap: var(--sp-6); flex: 1 1 0; }
+.lg-dots i { width: 12px; height: 12px; border-radius: 999px; background: var(--surface-2); border: 1px solid var(--border); }
+.lg-dots i.on { background: var(--accent); border-color: var(--accent); }
+.lg-dots i.is-today { box-shadow: 0 0 0 2px var(--surface-1), 0 0 0 4px var(--accent); }
+.log-glance .meter-fill.is-over { background: var(--warning); }
+
+/* Body quick entry: the value between - and + buttons, date and note folded away. */
+.meas-stepper { display: flex; align-items: stretch; gap: var(--sp-8); }
+.meas-stepper .step-btn { flex: none; width: 52px; min-height: 52px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--surface-2); color: var(--text-primary); font-size: var(--fs-xl); font-family: inherit; cursor: pointer; }
+.meas-value { flex: 1 1 0; min-width: 0; display: flex; align-items: center; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--surface-2); padding-right: var(--sp-12); }
+.meas-value:focus-within { outline: 2px solid var(--accent); outline-offset: 1px; }
+.meas-value input { border: 0; background: transparent; text-align: center; font-size: var(--fs-2xl); font-weight: 800; font-variant-numeric: tabular-nums; min-width: 0; padding-inline: var(--sp-8); }
+.meas-value input:focus { outline: none; }
+.meas-unit { flex: none; font-size: var(--fs-sm); font-weight: 600; color: var(--muted); }
+.meas-meta { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-12); }

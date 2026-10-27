@@ -13,8 +13,6 @@
 
   const LB_PER_KG = 0.45359237;
 
-  /* ---- Strength --------------------------------------------------------- */
-
   // Tier names, lowest first. "Untrained" is the band under the Beginner line.
   const TIER_LABELS = ['Untrained', 'Beginner', 'Novice', 'Intermediate', 'Advanced', 'Elite'];
 
@@ -116,8 +114,6 @@
     return { value: weight * (1 + reps / 30), method: 'estimated' };
   }
 
-  /* ---- Running ---------------------------------------------------------- */
-
   // Running Level's 5K finish times (seconds) by age for [Beginner, Novice, Intermediate,
   // Advanced, Elite] (runninglevel.com/running-times/5k-times, captured 20 Oct 2026; the
   // site's own data runs to October 2026). Same percentile scale as the lifts: stronger
@@ -162,8 +158,6 @@
     return { equivalentSec: eq, tier, thresholds };
   }
 
-  /* ---- Body ------------------------------------------------------------- */
-
   // CDC adult categories (age 20+). BMI ignores muscle mass, so it can read
   // high for people who lift.
   const BMI_CATEGORIES = [
@@ -174,8 +168,6 @@
   ];
   function bmiFromKgCm(kg, cm) { const m = cm / 100; return kg / (m * m); }
   function bmiCategory(bmi) { return BMI_CATEGORIES.find((c) => bmi < c.max).label; }
-
-  /* ---- Sleep ------------------------------------------------------------ */
 
   // Adults: 7 to 9 hours a night is the recommended range (NSF); 7 or more is
   // the AASM/SRS minimum. The app labels a night average against that range.
@@ -190,8 +182,6 @@
     ],
   };
   function sleepCategory(hours) { return SLEEP.categories.find((c) => hours < c.max); }
-
-  /* ---- Nutrition -------------------------------------------------------- */
 
   // Multipliers on resting energy (Mifflin-St Jeor). Standard "activity
   // factor" values; the choice of level is yours, so results are estimates.
@@ -235,8 +225,6 @@
   const DV_OVER_FLAGS = ['sodium', 'caffeine'];
   const DEFAULT_WATER_GOAL_ML = 2000; // app assumption; see REFERENCES
 
-  /* ---- Water guide (setup) ---------------------------------------------- */
-
   // Drinking-water guide from body size. Body surface area (Mosteller: sqrt(cm x kg / 3600))
   // times ML_PER_M2 gives a baseline; an activity level then adds to it. 1,500 ml per m2
   // reproduces the NASEM beverage figures at the reference adults (about 3.0 L for a
@@ -262,11 +250,7 @@
     return { ml, bsa: Math.round(bsa * 100) / 100 };
   }
 
-  /* ---- Streak ----------------------------------------------------------- */
-
   const STREAK_RULE = 'A day counts when you log anything in a section you track: a workout or habit, food, water or a body entry.';
-
-  /* ---- References shown to the user -------------------------------------- */
 
   const REFERENCES = [
     { id: 'streak', title: 'Day streak', kind: 'assumption',
