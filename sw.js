@@ -3,7 +3,7 @@
 // online users get new files anyway; the bump gives the new worker a fresh cache and drops
 // the old one, which is what makes the "new version is ready" prompt appear.
 const CACHE_PREFIX = 'fitlog-';
-const CACHE_VERSION = 'fitlog-v64';
+const CACHE_VERSION = 'fitlog-v67';
 const APP_SHELL = [
   './',
   './index.html',

@@ -109,14 +109,9 @@
       </div>
 
       <div id="progressCharts" hidden>
-        <div id="exerciseCards" class="card-grid"></div>
-
-        <div class="section-head" id="bodySectionHead" hidden><h2>Body &amp; wellness</h2></div>
-        <div id="bodyCards" class="card-grid" hidden></div>
-
+        <div id="chartsOverview" class="charts-overview"></div>
         <div id="dashboardEmpty" class="empty-state" hidden>
-          <p>No exercises yet.</p>
-          <button class="btn btn-primary" data-action="add-exercise">Add your first exercise</button>
+          <p>Nothing to chart yet. Turn on an area in Manage and log something, and its chart shows up here.</p>
         </div>
       </div>
     </section>
@@ -276,13 +271,7 @@
           <span>S</span><span>M</span><span>T</span><span>W</span><span>T</span><span>F</span><span>S</span>
         </div>
         <div class="calendar-grid" id="calendarGrid"></div>
-        <div class="calendar-legend">
-          <span data-legend-area="workout"><i class="cal-dot cal-dot-workout"></i>Workout</span>
-          <span data-legend-area="daily"><i class="cal-dot cal-dot-daily"></i>Daily</span>
-          <span data-legend-area="water"><i class="cal-dot cal-dot-water"></i>Water goal</span>
-          <span data-legend-area="food"><i class="cal-dot cal-dot-food"></i>Food</span>
-          <span data-legend-area="measurements"><i class="cal-dot cal-dot-body"></i>Body</span>
-        </div>
+        <div class="calendar-legend" id="calendarLegend"></div>
       </div>
 
       <div class="section-head">

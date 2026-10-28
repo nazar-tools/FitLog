@@ -59,6 +59,20 @@
     return streak;
   }
 
+  /** The longest run of consecutive days (or Monday-to-Sunday weeks) in `dates`. */
+  function longestStreak(dates, unit = 'day') {
+    const keys = [...new Set([...dates].map((d) => (unit === 'week' ? weekStartISO(d) : d)))].sort();
+    const step = unit === 'week' ? 7 : 1;
+    let best = 0;
+    let run = 0;
+    keys.forEach((k, i) => {
+      const gap = i ? Math.round((new Date(k + 'T00:00:00') - new Date(keys[i - 1] + 'T00:00:00')) / 86400000) : null;
+      run = gap === step ? run + 1 : 1;
+      best = Math.max(best, run);
+    });
+    return best;
+  }
+
   /** 'week' when entries are usually 4 or more days apart (a weekly tape measure),
    *  otherwise 'day'. Looks at the last 6 gaps; fewer than 3 entries counts as daily. */
   function loggingRhythm(dates) {
@@ -70,6 +84,46 @@
     }
     gaps.sort((a, b) => a - b);
     return gaps[Math.floor(gaps.length / 2)] >= 4 ? 'week' : 'day';
+  }
+
+  function addDaysISO(iso, n) {
+    const d = new Date(iso + 'T00:00:00');
+    d.setDate(d.getDate() + n);
+    return localDateISO(d);
+  }
+
+  /** Mondays from the week holding `fromIso` through the week holding `toIso`. */
+  function weekStarts(fromIso, toIso) {
+    const out = [];
+    for (let w = weekStartISO(fromIso), end = weekStartISO(toIso); w <= end; w = addDaysISO(w, 7)) out.push(w);
+    return out;
+  }
+
+  /** For each of the date-sorted `points` ({ date, value }), the mean of every point
+   *  in the `days` days ending on its date. */
+  function trailingAverage(points, days) {
+    return points.map((p) => {
+      const from = addDaysISO(p.date, 1 - days);
+      const win = points.filter((q) => q.date >= from && q.date <= p.date);
+      return { date: p.date, value: win.reduce((t, q) => t + q.value, 0) / win.length };
+    });
+  }
+
+  /** Least-squares change per day over `points`, and the fitted value on the last
+   *  date. Null with fewer than 3 points or under a week between first and last. */
+  function linearTrend(points) {
+    if (points.length < 3) return null;
+    const t0 = new Date(points[0].date + 'T00:00:00').getTime();
+    const xs = points.map((p) => (new Date(p.date + 'T00:00:00').getTime() - t0) / 86400000);
+    if (xs[xs.length - 1] - xs[0] < 7) return null;
+    const n = points.length;
+    const mx = xs.reduce((a, b) => a + b, 0) / n;
+    const my = points.reduce((a, p) => a + p.value, 0) / n;
+    let sxy = 0;
+    let sxx = 0;
+    xs.forEach((x, i) => { sxy += (x - mx) * (points[i].value - my); sxx += (x - mx) ** 2; });
+    const slope = sxy / sxx;
+    return { slope, last: my + slope * (xs[n - 1] - mx) };
   }
 
   /** `list` is one tracker's measurements. Two views of the same data:
@@ -184,7 +238,7 @@
     return { key, label: std.label, group: std.group, load: std.load, metric: std.metric, results, best };
   }
 
-  const api = { localDateISO, activityDays, computeStreak, computeWeekStreak, loggingRhythm, sleepInsights, bestEstimatedOneRM, bestReps, bestAddedOneRM, strengthLevel };
+  const api = { localDateISO, addDaysISO, weekStarts, trailingAverage, linearTrend, activityDays, computeStreak, computeWeekStreak, longestStreak, weekStartISO, loggingRhythm, sleepInsights, bestEstimatedOneRM, bestReps, bestAddedOneRM, strengthLevel };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.FitCalc = api;
 })(typeof window !== 'undefined' ? window : globalThis);

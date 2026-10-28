@@ -1719,29 +1719,6 @@
       </div>`;
   }
 
-  function goalCardHtml(ex) {
-    const entries = entriesFor(ex.id).slice().sort((a, c) => a.date.localeCompare(c.date));
-    const cardioMetrics = ex.kind === 'cardio' ? cardioMetricsOf(ex) : null;
-    const trendMetric = cardioMetrics ? cardioMetrics[0] : undefined;
-    const progressHtml = cardioMetrics
-      ? (cardioMetrics.length
-          ? cardioMetrics.map((m) => progressBlockHtml(ex, m, { labeled: cardioMetrics.length > 1 })).join('')
-          : progressBlockHtml(ex, 'distance'))
-      : progressBlockHtml(ex);
-    const chartPoints = chartPointsFor(entries, (e) => entryValue(ex, e, trendMetric));
-    const chartGoal = cardioMetrics ? (trendMetric ? cardioGoalFor(ex, trendMetric) : null) : ex.goal;
-    // Strength and Pace level are detail-on-demand (see openExerciseDetail), not shown here.
-    return `
-      <div class="card ex-card" data-exercise-id="${ex.id}">
-        <div class="ex-card-top">
-          <div class="ex-card-name">${exerciseIconHtml(ex, true)}${exerciseLabelHtml(ex)}</div>
-          <div class="ex-card-badge">${kindBadge(ex)}</div>
-        </div>
-        ${progressHtml}
-        ${chartPoints.length >= 2 ? `<div class="ex-card-chart">${Charts.lineChart(chartPoints, { goal: chartGoal, width: 300, height: 96, formatValue: (v) => formatValueForExercise(ex, v, trendMetric) })}</div>` : ''}
-      </div>`;
-  }
-
   /* Home rows
      Every Home section is a card of `.glance-row`s: icon, name, value, meter, optional action. */
 
@@ -1807,68 +1784,6 @@
   function deltaSentiment(tracker, delta) {
     if (!tracker.direction || delta === 0) return 'neutral';
     return (tracker.direction === 'down' ? delta < 0 : delta > 0) ? 'good' : 'bad';
-  }
-
-  // A tracker's dashboard card, shaped like goalCardHtml. The Weight tracker also
-  // gets a trend badge when "Body weight insights" is on.
-  function trackerCardHtml(tracker) {
-    const isSleep = tracker.kind === 'sleep';
-    // Sleep is a per-night reading, so its headline value is today's entry only (a
-    // dash if none). Other trackers show the latest value ever logged.
-    const todayEntry = isSleep ? state.measurements.find((m) => m.trackerId === tracker.id && m.date === todayISO()) : null;
-    const latest = isSleep ? todayEntry : latestMeasurement(tracker.id);
-    const value = latest ? latest.value : null;
-    const { pct, achieved } = trackerProgressPct(tracker, value);
-    const fillPct = Math.min(100, pct);
-    const history = measurementsFor(tracker.id).slice().sort((a, c) => a.date.localeCompare(c.date));
-    const chartPoints = chartPointsFor(history, (m) => m.value);
-    const insights = (tracker.id === BODY_WEIGHT_TRACKER_ID && state.settings.showWeightInsights) ? weightInsights() : null;
-    // insights.trend.delta is in lb (the storage unit); convert it to the display
-    // unit shown next to the label.
-    const deltaDisplay = insights && insights.trend ? Units.lbToDisplay(insights.trend.delta) : null;
-    const deltaBadge = insights && insights.trend
-      ? `<div class="ex-card-delta is-${deltaSentiment(tracker, insights.trend.delta)}">${deltaDisplay > 0 ? '+' : ''}${round(deltaDisplay, 1)} ${Units.weightUnitLabel()} in ${humanizeDays(insights.trend.days)}</div>`
-      : '';
-    // BMI is not shown here (see bmiDetailHtml()); Sleep gets a short average badge
-    // instead (full breakdown: sleepInsightDetailHtml()).
-    const sleep = (isSleep && state.settings.showSleepInsights) ? sleepInsights() : null;
-    const sleepBadge = sleep ? `<div class="ex-card-delta">${sleep.window.nights ? `Avg ${round(sleep.window.avgHours, 1)}h &middot; ${sleep.window.nights} of ${sleep.window.days} nights` : `Last ${sleep.recent.nights} logged: avg ${round(sleep.recent.avgHours, 1)}h`}</div>` : '';
-    const qualityLine = isSleep && latest && latest.quality != null
-      ? `<div class="insight-line">Quality ${fmtQuality(latest.quality)}</div>` : '';
-    // With a goal but no reading (never logged, or Sleep not logged today), show no
-    // meter: trackerProgressPct() returns 0, which would read as "measured zero".
-    const hasProgress = tracker.goal != null && value != null;
-    return `
-      <div class="card ex-card" data-tracker-id="${tracker.id}">
-        <div class="ex-card-top">
-          <div class="ex-card-name">${trackerIconHtml(tracker, true)}${escapeHtml(tracker.name)}</div>
-          ${deltaBadge}${sleepBadge}
-        </div>
-        <div class="ex-card-values">
-          <div class="ex-card-current">${fmtTrackerValue(tracker, value)}</div>
-          ${tracker.goal != null ? `<div class="ex-card-goal">/ ${trackerGoalLabel(tracker).replace('Goal ', '')}</div>` : ''}
-        </div>
-        ${hasProgress ? `
-          <div class="meter"><div class="meter-fill ${achieved ? 'is-complete' : ''}" style="--fill:${fillPct}%"></div></div>
-          <div class="ex-card-foot"><span class="ex-card-pct ${achieved ? 'is-complete' : ''}">${achieved ? '✓ Goal reached' : `${Math.round(pct)}%`}</span></div>
-          ${!achieved && trackerProgressDeltaText(tracker, value) ? `<div class="insight-line muted-text">${trackerProgressDeltaText(tracker, value)}</div>` : ''}` : ''}
-        ${tracker.goal != null && value == null ? `<p class="muted-text field-hint">${isSleep ? 'Not logged today.' : 'Log a value to see your progress.'}</p>` : ''}
-        ${chartPoints.length >= 2 ? `<div class="ex-card-chart">${Charts.lineChart(chartPoints, { goal: tracker.goal, width: 300, height: 96, formatValue: (v) => fmtTrackerValue(tracker, v) })}</div>` : ''}
-        ${qualityLine}
-      </div>`;
-  }
-
-  function renderBodySection() {
-    // Manage lists every tracker; hiding one from the dashboard (showOnDashboard)
-    // does not archive it. Body switched off in Manage hides this whole section.
-    const trackers = domainTracked('measurements') ? activeTrackers().filter((t) => t.showOnDashboard !== false) : [];
-    document.getElementById('bodySectionHead').hidden = trackers.length === 0;
-    const wrap = document.getElementById('bodyCards');
-    wrap.hidden = trackers.length === 0;
-    wrap.innerHTML = trackers.map(trackerCardHtml).join('');
-    wrap.querySelectorAll('[data-tracker-id]').forEach((card) => {
-      wireOpenable(card, () => openTrackerDetail(card.getAttribute('data-tracker-id')));
-    });
   }
 
   function cupButtonsHtml() {
@@ -2317,22 +2232,941 @@
     wrap.querySelectorAll('[data-goal-idx]').forEach((row) => wireOpenable(row.querySelector('.glance-open'), flat[Number(row.dataset.goalIdx)].open));
   }
 
+  /* Progress charts
+     Charts leads with one card per tracked area, all scoped by one range: the last 4, 12, 26
+     or 52 weeks, Monday to Sunday. Details opens a sheet per area with the same range. Today
+     and this week are drawn but not judged: they stay out of averages and on-target counts
+     until they are over, and a day with nothing logged is left out rather than counted as 0. */
+  const CHART_RANGES = [
+    ['4w', '4W', 4, '4 weeks', 'the last 4 weeks'], ['12w', '12W', 12, '12 weeks', 'the last 12 weeks'],
+    ['6m', '6M', 26, '6 months', 'the last 6 months'], ['1y', '1Y', 52, 'a year', 'the last year'],
+  ];
+  let chartRange = '12w';
+  // Charts showing their table instead, by card id. Kept while the app is open.
+  const chartTables = new Set();
+  const ALERT_ICON_SVG = '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>';
+
+  const rangeInfo = () => CHART_RANGES.find((r) => r[0] === chartRange);
+  const addDays = (iso, n) => window.FitCalc.addDaysISO(iso, n);
+  const weekOf = (iso) => window.FitCalc.weekStartISO(iso);
+  function rangeWeeks() {
+    const n = rangeInfo()[2];
+    const cur = weekOf(todayISO());
+    return Array.from({ length: n }, (_, i) => addDays(cur, -7 * (n - 1 - i)));
+  }
+  const rangeFrom = () => rangeWeeks()[0];
+  // Daily columns only fit the 4-week range; longer ranges group days into weeks.
+  const rangeIsDaily = () => chartRange === '4w';
+  function daysBetween(from, to) {
+    const out = [];
+    for (let d = from; d <= to; d = addDays(d, 1)) out.push(d);
+    return out;
+  }
+  const fmtInt = (n) => Math.round(n).toLocaleString();
+  const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+  const signed = (n, dp = 1) => `${n < 0 ? '−' : n > 0 ? '+' : ''}${Math.abs(round(n, dp))}`;
+  const mean = (list) => (list.length ? list.reduce((a, b) => a + b, 0) / list.length : null);
+  const chartDay = (iso) => new Date(iso + 'T00:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  const weekLabel = (w) => (w === weekOf(todayISO()) ? 'This week' : chartDay(w));
+  const dayTitle = (d) => (d === todayISO() ? 'Today' : chartDay(d));
+
+  function rangeSegHtml() {
+    return `<div class="segmented segmented-fill seg-sm chart-range" role="radiogroup" aria-label="Chart range">${segHtml(CHART_RANGES.map((r) => [r[0], r[1]]), chartRange)}</div>`;
+  }
+
+  function chartTableHtml(t) {
+    return `<div class="cc-table-scroll"><table class="data-table">
+      <thead><tr>${t.head.map((h) => `<th scope="col">${h}</th>`).join('')}</tr></thead>
+      <tbody>${t.rows.map((r) => `<tr>${r.map((v, i) => (i ? `<td>${v}</td>` : `<th scope="row">${v}</th>`)).join('')}</tr>`).join('')}</tbody>
+    </table></div>`;
+  }
+
+  // One chart card: { id, icon, name, sub, open, extra, plot, table, legend, note, empty: { text, have, need } }.
+  function chartCardHtml(c) {
+    const asTable = !!c.table && chartTables.has(c.id);
+    const head = `
+      <div class="cc-head">
+        ${c.icon || ''}
+        <div class="cc-titles"><div class="cc-name">${c.name}</div>${c.sub ? `<div class="cc-sub">${c.sub}</div>` : ''}</div>
+        ${c.open ? `<button type="button" class="link-btn cc-more" data-cc-open>Details${CHEVRON_RIGHT_SVG}</button>` : ''}
+      </div>`;
+    if (c.empty) {
+      const { text, have, need } = c.empty;
+      return `<div class="card chart-card" data-chart-card="${c.id}">${head}${c.extra || ''}
+        <div class="cc-empty"><p>${text}</p>${need ? `<div class="meter meter-sm"><div class="meter-fill" style="--fill:${Math.min(100, (have / need) * 100)}%"></div></div><p class="muted-text">${have} of ${need} logged</p>` : ''}</div>
+      </div>`;
+    }
+    return `<div class="card chart-card" data-chart-card="${c.id}">${head}${c.extra || ''}
+      <div class="cc-plot"${asTable ? ' hidden' : ''}>${c.plot}</div>
+      ${c.table ? `<div class="cc-table"${asTable ? '' : ' hidden'}>${chartTableHtml(c.table)}</div>` : ''}
+      ${c.legend || c.table ? `<div class="cc-foot"><div class="cc-key">${c.legend || ''}</div>${c.table ? `<button type="button" class="link-btn" data-cc-table aria-pressed="${asTable}">${asTable ? 'Show chart' : 'Show table'}</button>` : ''}</div>` : ''}
+      ${c.note ? `<p class="cc-note">${c.note}</p>` : ''}
+    </div>`;
+  }
+
+  function wireChartCards(root, cards) {
+    cards.forEach((c) => {
+      const el = root.querySelector(`[data-chart-card="${c.id}"]`);
+      if (!el) return;
+      const more = el.querySelector('[data-cc-open]');
+      if (more && c.open) more.addEventListener('click', c.open);
+      const tbl = el.querySelector('[data-cc-table]');
+      if (tbl) tbl.addEventListener('click', () => {
+        const on = !chartTables.has(c.id);
+        if (on) chartTables.add(c.id); else chartTables.delete(c.id);
+        el.querySelector('.cc-plot').hidden = on;
+        el.querySelector('.cc-table').hidden = !on;
+        tbl.setAttribute('aria-pressed', String(on));
+        tbl.textContent = on ? 'Show chart' : 'Show table';
+      });
+    });
+    Charts.wire(root);
+  }
+
+  const keyItem = (swatch, text) => `<span><i class="${swatch}"></i>${text}</span>`;
+
+  function kpiRowHtml(tiles) {
+    if (!tiles.length) return '';
+    return `<div class="kpi-row">${tiles.map((t) => `<div class="kpi"><b>${t.value}${t.unit ? ` <small>${t.unit}</small>` : ''}</b><span>${t.label}</span></div>`).join('')}</div>`;
+  }
+
+  /* Workout */
+
+  function workoutWeekRows(weeks) {
+    const rows = Object.fromEntries(weeks.map((w) => [w, { week: w, dates: new Set(), logged: 0 }]));
+    state.entries.forEach((e) => {
+      if (isDailyEntry(e) || e.date > todayISO()) return;
+      const row = rows[weekOf(e.date)];
+      if (row) { row.dates.add(e.date); row.logged++; }
+    });
+    return weeks.map((w) => ({ ...rows[w], days: rows[w].dates.size }));
+  }
+
+  function workoutOverviewCard() {
+    if (!domainTracked('workout')) return null;
+    const base = { id: 'workout', icon: itemIconHtml('dumbbell'), name: 'Workout', open: () => openWorkoutCharts() };
+    if (!state.entries.some((e) => !isDailyEntry(e))) return { ...base, empty: { text: 'Log a workout and your weeks show up here.' } };
+    const rows = workoutWeekRows(rangeWeeks());
+    const firstWeek = weekOf(state.entries.filter((e) => !isDailyEntry(e)).map((e) => e.date).sort()[0]);
+    const done = rows.slice(0, -1).filter((r) => r.week >= firstWeek);
+    const cur = rows[rows.length - 1];
+    const avg = mean(done.map((r) => r.days)) || 0;
+    const best = Math.max(0, ...done.map((r) => r.days));
+    const bestIdx = best ? done.map((r) => r.days).lastIndexOf(best) : -1;
+    const bars = rows.map((r, i) => {
+      const now = i === rows.length - 1;
+      return {
+        value: r.days,
+        tone: now ? 'now' : '',
+        label: i === bestIdx ? `${r.days} best` : now && r.days ? String(r.days) : '',
+        tip: { title: now ? 'This week, so far' : `Week of ${chartDay(r.week)}`, rows: [['Workout days', String(r.days)], ['Exercises logged', String(r.logged)]] },
+      };
+    });
+    return {
+      ...base,
+      sub: done.some((r) => r.days) ? `${round(avg, 1)} ${round(avg, 1) === 1 ? 'day' : 'days'} a week on average` : `${plural(cur.days, 'day')} this week so far`,
+      plot: Charts.columns(bars, { max: 7, height: 116, first: chartDay(rows[0].week), last: 'This week, so far', label: `Workout days per week over ${rangeInfo()[3]}: ${round(avg, 1)} on average, best ${best}, this week ${cur.days} so far` }),
+      table: { head: ['Week of', 'Days', 'Exercises'], rows: rows.map((r) => [weekLabel(r.week), r === cur ? `${r.days} so far` : String(r.days), String(r.logged)]) },
+    };
+  }
+
+  // One value per session date for a lift or bodyweight movement: { date, value, detail }.
+  // Values are in display units so the axis and the readout agree.
+  function sessionSeries(ex, metric) {
+    const byDate = {};
+    entriesFor(ex.id).forEach((e) => { (byDate[e.date] = byDate[e.date] || []).push(...(e.sets || [])); });
+    const out = [];
+    Object.keys(byDate).sort().forEach((date) => {
+      const sets = byDate[date];
+      if (ex.kind === 'weight') {
+        const done = sets.filter((st) => st.reps > 0 && st.weight != null);
+        if (!done.length) return;
+        if (metric === 'vol') {
+          const v = done.reduce((t, st) => t + st.weight * st.reps, 0);
+          out.push({ date, value: Units.lbToDisplay(v), detail: plural(done.length, 'set') });
+        } else if (metric === '1rm') {
+          let best = null;
+          done.forEach((st) => { const e = S.estimateOneRM(st.weight, st.reps); if (e && (!best || e.value > best.value)) best = { value: e.value, st }; });
+          if (best) out.push({ date, value: Units.lbToDisplay(best.value), detail: `from ${fmtWeight(best.st.weight)} × ${best.st.reps}` });
+        } else {
+          const top = done.reduce((a, b) => (b.weight > a.weight || (b.weight === a.weight && b.reps > a.reps) ? b : a));
+          out.push({ date, value: Units.lbToDisplay(top.weight), detail: `× ${top.reps}` });
+        }
+      } else if (ex.kind === 'reps') {
+        const reps = sets.map((st) => st.reps).filter((r) => r > 0);
+        if (!reps.length) return;
+        out.push(metric === 'vol'
+          ? { date, value: reps.reduce((a, b) => a + b, 0), detail: plural(reps.length, 'set') }
+          : { date, value: Math.max(...reps), detail: '' });
+      }
+    });
+    return out;
+  }
+
+  // Cardio entries keep distance and time on the entry, not in sets.
+  function cardioSeries(ex, metric) {
+    const byDate = {};
+    entriesFor(ex.id).forEach((e) => { (byDate[e.date] = byDate[e.date] || []).push(e); });
+    const out = [];
+    Object.keys(byDate).sort().forEach((date) => {
+      const vals = byDate[date].map((e) => entryValue(ex, e, metric)).filter((v) => v != null);
+      if (!vals.length) return;
+      const v = metric === 'pace' ? Math.min(...vals) : Math.max(...vals);
+      out.push({ date, value: metric === 'pace' ? Units.secPerMiToDisplaySecPerUnit(v) : Units.miToDisplay(v), raw: v, detail: '' });
+    });
+    return out;
+  }
+
+  function movementMetrics(ex) {
+    if (ex.kind === 'weight') return [['1rm', 'Est. 1RM'], ['top', 'Top set'], ['vol', 'Volume']];
+    if (ex.kind === 'reps') return isTimed(ex) ? [['top', 'Longest'], ['vol', 'Total time']] : [['top', 'Best set'], ['vol', 'Total reps']];
+    const hasPace = entriesFor(ex.id).some((e) => entryValue(ex, e, 'pace') != null);
+    return hasPace ? [['dist', 'Distance'], ['pace', 'Pace']] : [['dist', 'Distance']];
+  }
+
+  // How a display-unit value reads for this movement and metric.
+  function movementFormat(ex, metric) {
+    if (ex.kind === 'weight') return (v) => `${round(v, 1)} ${Units.weightUnitLabel()}`;
+    if (ex.kind === 'reps') return (v) => fmtCount(ex, v);
+    if (metric === 'pace') return (v) => `${Math.floor(v / 60)}:${String(Math.round(v % 60)).padStart(2, '0')} /${Units.distanceUnitLabel()}`;
+    return (v) => `${round(v, 2)} ${Units.distanceUnitLabel()}`;
+  }
+
+  // Whether a goal sits close enough to the data to draw without squashing the line.
+  function goalFits(goal, values) {
+    const lo = Math.min(...values);
+    const hi = Math.max(...values);
+    const span = Math.max(hi - lo, Math.abs(hi) * 0.04, 1);
+    return goal >= lo - span * 2 && goal <= hi + span * 2;
+  }
+
+  function movementCard(ex, metric) {
+    const from = rangeFrom();
+    const all = ex.kind === 'cardio' ? cardioSeries(ex, metric) : sessionSeries(ex, metric);
+    const pts = all.filter((p) => p.date >= from);
+    const fmt = movementFormat(ex, metric);
+    const metrics = movementMetrics(ex);
+    const extra = metrics.length > 1 ? `<div class="segmented segmented-fill seg-sm cc-metric" role="radiogroup" aria-label="Measure">${segHtml(metrics, metric)}</div>` : '';
+    const base = { id: `mv-${metric}`, name: exerciseLabelHtml(ex), extra };
+    if (all.length < 2) return { ...base, empty: { text: 'Log a second session to draw a line.', have: all.length, need: 2 } };
+    if (pts.length < 2) return { ...base, sub: `Last session ${chartDay(all[all.length - 1].date)}`, empty: { text: `Fewer than 2 sessions in ${rangeInfo()[4]}. Try a longer range.` } };
+    const subs = [];
+    let band = null;
+    const showsLoad = ex.kind === 'weight' && metric !== 'vol';
+    const lvl = ex.kind === 'weight' ? strengthLevelInfo(ex) : null;
+    const res = lvl && !lvl.missing && lvl.results.find((r) => r.mode === '1rm');
+    if (res && res.value != null) {
+      const t = res.tier;
+      const lo = t ? res.thresholds[t - 1] : 0;
+      const hi = t < 5 ? res.thresholds[t] : null;
+      subs.push(hi != null ? `${S.TIER_LABELS[t]} now, ${fmtWeight(hi - res.value)} to ${S.TIER_LABELS[t + 1]}` : `${S.TIER_LABELS[t]} now`);
+      if (metric === '1rm') {
+        const vals = pts.map((p) => p.value);
+        const pad = Math.max((Math.max(...vals) - Math.min(...vals)) * 0.6, Math.max(...vals) * 0.05);
+        const blo = Math.max(Units.lbToDisplay(lo), Math.min(...vals) - pad);
+        const bhi = Math.min(hi != null ? Units.lbToDisplay(hi) : Infinity, Math.max(...vals) + pad);
+        if (bhi > blo) band = { lo: blo, hi: bhi, text: S.TIER_LABELS[t] };
+      }
+    }
+    let goal = null;
+    if (showsLoad && ex.goal) {
+      const g = Units.lbToDisplay(ex.goal);
+      if (goalFits(g, pts.map((p) => p.value))) goal = g;
+      else subs.push(`Goal ${fmtWeight(ex.goal)} ${g > pts[pts.length - 1].value ? 'above' : 'below'}`);
+    }
+    const name = metrics.find((m) => m[0] === metric)[1];
+    return {
+      ...base,
+      sub: subs.join(' · '),
+      plot: Charts.line({
+        from, to: todayISO(), dots: pts, connect: true, goal, goalText: goal != null ? `Goal ${round(goal, 1)}` : '', band,
+        format: metric === 'pace' ? (v) => `${Math.floor(v / 60)}:${String(Math.round(v % 60)).padStart(2, '0')}` : Charts.compact,
+        tipRows: (d) => { const p = pts.find((q) => q.date === d); return [[name, `${fmt(p.value)}${p.detail ? ` ${p.detail}` : ''}`]]; },
+        label: `${exerciseLabel(ex)}, ${name} over ${rangeInfo()[3]}: from ${fmt(pts[0].value)} to ${fmt(pts[pts.length - 1].value)}`,
+      }),
+      legend: band ? keyItem('sw band', 'Your strength level') : '',
+      table: { head: ['Date', name], rows: pts.map((p) => [chartDay(p.date), `${fmt(p.value)}${p.detail ? ` ${p.detail}` : ''}`]) },
+    };
+  }
+
+  function movementTiles(ex) {
+    const from = rangeFrom();
+    const entries = entriesFor(ex.id).filter((e) => e.date >= from && e.date <= todayISO());
+    const sessions = new Set(entries.map((e) => e.date)).size;
+    const tiles = [];
+    if (ex.kind === 'weight') {
+      const orm = sessionSeries(ex, '1rm').filter((p) => p.date >= from);
+      if (orm.length) {
+        const last = orm[orm.length - 1].value;
+        const change = last - orm[0].value;
+        tiles.push({ value: round(last, 1), unit: Units.weightUnitLabel(), label: orm.length > 1 && Math.abs(change) >= 0.05 ? `Est. 1RM, ${change > 0 ? 'up' : 'down'} ${Math.abs(round(change, 1))}` : 'Est. 1RM' });
+      }
+      const sets = entries.flatMap((e) => e.sets || []).filter((st) => st.reps > 0 && st.weight != null);
+      if (sets.length) {
+        const top = sets.reduce((a, b) => (b.weight > a.weight || (b.weight === a.weight && b.reps > a.reps) ? b : a));
+        tiles.push({ value: `${round(Units.lbToDisplay(top.weight), 1)} × ${top.reps}`, label: 'Heaviest set' });
+      }
+    } else if (ex.kind === 'reps') {
+      const pts = sessionSeries(ex, 'top').filter((p) => p.date >= from);
+      const tot = sessionSeries(ex, 'vol').filter((p) => p.date >= from);
+      if (pts.length) tiles.push({ value: fmtCount(ex, Math.max(...pts.map((p) => p.value))), label: isTimed(ex) ? 'Longest hold' : 'Best set' });
+      if (tot.length) tiles.push({ value: fmtCount(ex, tot.reduce((t, p) => t + p.value, 0)), label: isTimed(ex) ? 'Total time' : 'Total reps' });
+    } else {
+      const dist = cardioSeries(ex, 'dist').filter((p) => p.date >= from);
+      const pace = cardioSeries(ex, 'pace').filter((p) => p.date >= from);
+      if (dist.length) tiles.push({ value: fmtDistance(Math.max(...dist.map((p) => p.raw))), label: 'Longest' });
+      if (pace.length) tiles.push({ value: fmtPace(Math.min(...pace.map((p) => p.raw))), label: 'Best pace' });
+    }
+    tiles.push({ value: String(sessions), label: sessions === 1 ? 'Session' : 'Sessions' });
+    return tiles;
+  }
+
+  function weeklyVolumeCard() {
+    const weeks = rangeWeeks();
+    const vol = Object.fromEntries(weeks.map((w) => [w, 0]));
+    state.entries.forEach((e) => {
+      const ex = exerciseById(e.exerciseId);
+      if (!ex || ex.kind !== 'weight' || isDailyEx(ex) || e.date > todayISO() || !(weekOf(e.date) in vol)) return;
+      (e.sets || []).forEach((st) => { if (st.reps > 0 && st.weight != null) vol[weekOf(e.date)] += st.weight * st.reps; });
+    });
+    const vals = weeks.map((w) => Units.lbToDisplay(vol[w]));
+    if (!vals.some((v) => v > 0)) return null;
+    const done = vals.slice(0, -1);
+    const best = Math.max(0, ...done);
+    const bestIdx = best ? done.lastIndexOf(best) : -1;
+    const unit = Units.weightUnitLabel();
+    const bars = vals.map((v, i) => {
+      const now = i === vals.length - 1;
+      return { value: v, tone: now ? 'now' : '', label: i === bestIdx || (now && v) ? Charts.compact(v) : '', tip: { title: now ? 'This week, so far' : `Week of ${chartDay(weeks[i])}`, rows: [['Volume', `${fmtInt(v)} ${unit}`]] } };
+    });
+    return {
+      id: 'volume', name: 'Weekly volume', sub: `All lifts, weight × reps, ${unit}`,
+      plot: Charts.columns(bars, { height: 112, first: chartDay(weeks[0]), last: 'This week, so far', label: `Weekly lifting volume over ${rangeInfo()[3]}, best week ${fmtInt(best)} ${unit}` }),
+      table: { head: ['Week of', `Volume, ${unit}`], rows: weeks.map((w, i) => [weekLabel(w), `${fmtInt(vals[i])}${i === weeks.length - 1 ? ' so far' : ''}`]) },
+    };
+  }
+
+  // All-time records for one movement: [{ label, sub, value }].
+  function movementRecords(ex) {
+    const out = [];
+    const sets = [];
+    entriesFor(ex.id).forEach((e) => (e.sets || []).forEach((st) => sets.push({ ...st, date: e.date })));
+    const pick = (list, better) => list.reduce((a, b) => (better(b, a) ? b : a));
+    if (ex.kind === 'weight') {
+      const done = sets.filter((st) => st.reps > 0 && st.weight != null);
+      if (!done.length) return out;
+      const heavy = pick(done, (b, a) => b.weight > a.weight || (b.weight === a.weight && b.reps > a.reps));
+      out.push({ label: 'Heaviest', sub: fmtDateShort(heavy.date), value: `${fmtWeight(heavy.weight)} × ${heavy.reps}` });
+      const ests = done.map((st) => ({ st, e: S.estimateOneRM(st.weight, st.reps) })).filter((x) => x.e);
+      if (ests.length) {
+        const b = pick(ests, (x, y) => x.e.value > y.e.value);
+        out.push({ label: 'Est. 1RM', sub: `${fmtDateShort(b.st.date)} · from ${fmtWeight(b.st.weight)} × ${b.st.reps}`, value: fmtWeight(b.e.value) });
+      }
+      const most = pick(done, (b, a) => b.reps > a.reps || (b.reps === a.reps && b.weight > a.weight));
+      out.push({ label: 'Most reps', sub: `${fmtDateShort(most.date)} · at ${fmtWeight(most.weight)}`, value: `${most.reps} reps` });
+    } else if (ex.kind === 'reps') {
+      const done = sets.filter((st) => st.reps > 0);
+      if (!done.length) return out;
+      const most = pick(done, (b, a) => b.reps > a.reps);
+      out.push({ label: isTimed(ex) ? 'Longest hold' : 'Most in a set', sub: fmtDateShort(most.date), value: fmtCount(ex, most.reps) });
+      const tot = sessionSeries(ex, 'vol');
+      const bestDay = pick(tot, (b, a) => b.value > a.value);
+      out.push({ label: isTimed(ex) ? 'Most in a day' : 'Most in a day', sub: fmtDateShort(bestDay.date), value: fmtCount(ex, bestDay.value) });
+    } else {
+      const dist = cardioSeries(ex, 'dist');
+      const pace = cardioSeries(ex, 'pace');
+      if (dist.length) { const b = pick(dist, (x, y) => x.raw > y.raw); out.push({ label: 'Longest', sub: fmtDateShort(b.date), value: fmtDistance(b.raw) }); }
+      if (pace.length) { const b = pick(pace, (x, y) => x.raw < y.raw); out.push({ label: 'Fastest pace', sub: fmtDateShort(b.date), value: fmtPace(b.raw) }); }
+    }
+    return out;
+  }
+
+  function openWorkoutCharts(exId) {
+    const movements = activeExercises()
+      .filter((ex) => !isDailyEx(ex) && entriesFor(ex.id).length)
+      .sort((a, b) => entriesFor(b.id).length - entriesFor(a.id).length);
+    let selId = movements.some((m) => m.id === exId) ? exId : movements[0] && movements[0].id;
+    const metricFor = {};
+    openChartSheet('Workout', itemIconHtml('dumbbell'), (body, repaint) => {
+      const ex = exerciseById(selId);
+      const cards = [];
+      let html = '';
+      if (ex) {
+        const metrics = movementMetrics(ex);
+        if (!metricFor[ex.id] || !metrics.some((m) => m[0] === metricFor[ex.id])) {
+          metricFor[ex.id] = ex.kind === 'weight' && !(strengthLevelInfo(ex) || {}).results ? 'top' : metrics[0][0];
+        }
+        const card = movementCard(ex, metricFor[ex.id]);
+        cards.push(card);
+        const recs = movementRecords(ex);
+        html += `
+          <div class="f-scroll"><div class="f-chips" id="chartMoveChips" role="radiogroup" aria-label="Movement">${movements.map((m) => chipHtml(m.id, exerciseLabelHtml(m), null, m.id === selId)).join('')}</div></div>
+          ${chartCardHtml(card)}
+          ${kpiRowHtml(movementTiles(ex))}`;
+        const vol = weeklyVolumeCard();
+        if (vol) { cards.push(vol); html += chartCardHtml(vol); }
+        if (recs.length) {
+          html += `<div class="section-head"><h2>Records</h2><span class="muted-text">${exerciseLabelHtml(ex)}</span></div>
+            <div class="card card-list">${recs.map((r) => `<div class="entry-row rec-row"><div class="entry-row-main"><div class="entry-row-title">${r.label}</div><div class="entry-row-sub">${r.sub}</div></div><div class="rec-value">${r.value}</div></div>`).join('')}</div>`;
+        }
+      } else {
+        const vol = weeklyVolumeCard();
+        if (vol) { cards.push(vol); html += chartCardHtml(vol); }
+        html += '<div class="empty-state"><p>Log a lift, a bodyweight exercise or a run and its chart shows up here.</p></div>';
+      }
+      body.innerHTML = html;
+      const chips = body.querySelector('#chartMoveChips');
+      if (chips) {
+        wireFScroll(chips);
+        refreshFScroll(chips);
+        chips.addEventListener('click', (ev) => { const b = ev.target.closest('[data-chip]'); if (b) { selId = b.dataset.chip; repaint(); } });
+        const on = chips.querySelector('[aria-checked="true"]');
+        if (on) chips.scrollLeft = Math.max(0, on.offsetLeft - 20);
+      }
+      const seg = body.querySelector('.cc-metric');
+      if (seg) seg.addEventListener('click', (ev) => { const b = ev.target.closest('[data-seg]'); if (b) { metricFor[selId] = b.dataset.seg; repaint(); } });
+      wireChartCards(body, cards);
+    });
+  }
+
+  /* Daily */
+
+  const DAILY_STATE_LABELS = { done: 'Done', part: 'Partly', miss: 'Missed', off: 'Not due', open: 'Not yet' };
+
+  // One item's square for one day. Every-other-day and weekly items are only due once
+  // enough days have passed since they were last done, and nothing is due before the
+  // first check-in.
+  function dailyCellState(ex, iso, byDate, firstDate) {
+    const list = byDate[iso] || [];
+    const goal = ex.kind === 'habit' ? ex.goal || 1 : ex.goal;
+    const amount = ex.kind === 'habit' ? list.length : list.reduce((t, e) => t + (e.sets || []).reduce((m, st) => m + (st.reps || 0), 0), 0);
+    if (list.length) return !goal || amount >= goal ? 'done' : 'part';
+    if (iso === todayISO()) return 'open';
+    if (!firstDate || iso < firstDate) return 'off';
+    const gap = ex.kind === 'habit' ? habitRepeatDays(ex) : 1;
+    if (gap > 1) {
+      const prev = Object.keys(byDate).filter((d) => d < iso).sort().pop();
+      if (prev && dayGap(prev, iso) < gap) return 'off';
+    }
+    return 'miss';
+  }
+
+  function dailyOverviewCard() {
+    if (!domainTracked('daily')) return null;
+    const items = activeExercises().filter(isDailyEx);
+    if (!items.length) return null;
+    const base = { id: 'daily', icon: `<span class="item-icon" aria-hidden="true">${STATIC_ICONS.daily}</span>`, name: 'Daily', open: () => { historyCategory = 'daily'; switchTab('history'); } };
+    if (!items.some((ex) => entriesFor(ex.id).length)) return { ...base, empty: { text: 'Check in on a Daily item and your days show up here.' } };
+    const dates = daysBetween(addDays(todayISO(), -13), todayISO());
+    const rows = items.map((ex) => {
+      const byDate = {};
+      entriesFor(ex.id).forEach((e) => { (byDate[e.date] = byDate[e.date] || []).push(e); });
+      const first = Object.keys(byDate).sort()[0];
+      const cells = dates.map((d) => dailyCellState(ex, d, byDate, first));
+      const past = cells.slice(0, -1);
+      return { name: exerciseLabel(ex), cells, done: past.filter((c) => c === 'done').length, part: past.filter((c) => c === 'part').length, miss: past.filter((c) => c === 'miss').length };
+    });
+    const ranked = rows.slice().sort((a, b) => b.done - a.done);
+    let sub;
+    if (rows.length === 1) sub = `Done ${rows[0].done} of the last 13 days`;
+    else if (!ranked[0].done) sub = 'Nothing checked in the last 2 weeks';
+    else if (ranked[1].done === ranked[0].done || ranked[1].done >= 9) sub = `${escapeHtml(ranked[0].name)} and ${escapeHtml(ranked[1].name)} are the steadiest`;
+    else sub = `${escapeHtml(ranked[0].name)} is the steadiest`;
+    const tips = dates.map((d, i) => ({ title: dayTitle(d), rows: rows.map((r) => ['', `${r.name}: ${DAILY_STATE_LABELS[r.cells[i]]}`]) }));
+    return {
+      ...base,
+      sub,
+      plot: Charts.heatmap(rows, dates, tips, `Daily items over the last 14 days: ${rows.map((r) => `${r.name} done ${r.done} of 13`).join(', ')}`),
+      legend: ['done', 'part', 'miss', 'off'].map((k) => keyItem(`sw hm-${k}`, DAILY_STATE_LABELS[k])).join(''),
+      note: 'Weekly items only get a square on the days they are due. Today stays open until midnight.',
+      table: { head: ['Item', 'Done', 'Partly', 'Missed'], rows: rows.map((r) => [escapeHtml(r.name), String(r.done), String(r.part), String(r.miss)]) },
+    };
+  }
+
+  /* Body */
+
+  // A tracker's readings in display units, one per day (the last one logged that day).
+  function trackerPoints(t) {
+    const byDate = {};
+    measurementsFor(t.id).filter((m) => m.value != null).sort((a, b) => (a.date + a.id).localeCompare(b.date + b.id)).forEach((m) => { byDate[m.date] = m; });
+    return Object.keys(byDate).sort().map((d) => ({ date: d, value: Number(trackerDisplayFromCanonical(t, byDate[d].value)) }));
+  }
+  const trackerFmt = (t) => (v) => `${round(v, 1)}${trackerUnitLabel(t) ? ` ${trackerUnitLabel(t)}` : ''}`;
+  const trackerNoun = (t) => (t.id === BODY_WEIGHT_TRACKER_ID ? ['weigh-in', 'weigh-ins'] : t.unitKind === 'hours' ? ['night', 'nights'] : ['entry', 'entries']);
+  const SLEEP_BAND = { lo: 7, hi: 9 };
+
+  // The trend pieces a Body chart and its tiles share: points in range, the 7-day average
+  // (daily trackers only), the change over the range and the pace toward the goal.
+  function trackerTrend(t) {
+    const all = trackerPoints(t);
+    const from = rangeFrom();
+    const pts = all.filter((p) => p.date >= from && p.date <= todayISO());
+    const daily = window.FitCalc.loggingRhythm(all.map((p) => p.date)) === 'day';
+    const avg = daily ? window.FitCalc.trailingAverage(all, 7).filter((p) => p.date >= from && p.date <= todayISO()) : pts;
+    const goal = t.goal != null ? Number(trackerDisplayFromCanonical(t, t.goal)) : null;
+    const last = avg.length ? avg[avg.length - 1].value : null;
+    const recent = all.filter((p) => p.date >= addDays(todayISO(), -27));
+    const trend = window.FitCalc.linearTrend(recent);
+    let weeksToGoal = null;
+    if (trend && goal != null && last != null && Math.abs(trend.slope) > 1e-6) {
+      const days = (goal - last) / trend.slope;
+      if (days > 0) weeksToGoal = days / 7;
+    }
+    const reached = goal != null && last != null && (t.direction === 'down' ? last <= goal : last >= goal);
+    return { all, pts, avg, daily, goal, last, trend, weeksToGoal: reached ? null : weeksToGoal, reached };
+  }
+
+  function sleepColumnsCard(t, base) {
+    const all = trackerPoints(t);
+    const from = rangeFrom();
+    const byDate = Object.fromEntries(all.map((p) => [p.date, p.value]));
+    const fmt = trackerFmt(t);
+    const isSleep = t.kind === 'sleep';
+    const goal = t.goal != null ? Number(t.goal) : null;
+    const inRange = all.filter((p) => p.date >= from && p.date <= todayISO());
+    const avgAll = mean(inRange.map((p) => p.value));
+    const under = inRange.filter((p) => p.value < SLEEP_BAND.lo).length;
+    let bars;
+    let table;
+    let first;
+    if (rangeIsDaily()) {
+      const dates = daysBetween(from, todayISO());
+      const lastLogged = inRange.length ? inRange[inRange.length - 1].date : null;
+      bars = dates.map((d) => ({ value: byDate[d] || 0, tone: d === lastLogged ? 'now' : '', label: d === lastLogged ? round(byDate[d], 1) : '', tip: byDate[d] != null ? { title: dayTitle(d), rows: [[t.name, fmt(byDate[d])]] } : { title: dayTitle(d), rows: [['', 'Nothing logged']] } }));
+      first = chartDay(dates[0]);
+      table = { head: ['Date', 'Hours'], rows: inRange.map((p) => [chartDay(p.date), fmt(p.value)]) };
+    } else {
+      const weeks = rangeWeeks();
+      const avgs = weeks.map((w) => mean(inRange.filter((p) => weekOf(p.date) === w).map((p) => p.value)));
+      bars = weeks.map((w, i) => ({ value: avgs[i] || 0, tone: i === weeks.length - 1 ? 'now' : '', tip: { title: i === weeks.length - 1 ? 'This week, so far' : `Week of ${chartDay(w)}`, rows: [[avgs[i] != null ? 'a night on average' : '', avgs[i] != null ? fmt(avgs[i]) : 'Nothing logged']] } }));
+      first = chartDay(weeks[0]);
+      table = { head: ['Week of', 'Average'], rows: weeks.map((w, i) => [weekLabel(w), avgs[i] != null ? fmt(avgs[i]) : '—']) };
+    }
+    return {
+      ...base,
+      sub: avgAll != null ? `${round(avgAll, 1)} hr average${isSleep ? `, ${under} of ${plural(inRange.length, 'night')} under 7 hr` : ''}` : '',
+      plot: Charts.columns(bars, {
+        height: 124, max: Math.max(10, Charts.niceMax(Math.max(...bars.map((b) => b.value), goal || 0))), goal: isSleep ? null : goal,
+        band: isSleep ? { ...SLEEP_BAND, text: '7–9 hr guideline for adults' } : null,
+        first, last: rangeIsDaily() ? 'Last night' : 'This week', label: `${t.name} over ${rangeInfo()[3]}${avgAll != null ? `, ${round(avgAll, 1)} hours on average` : ''}`,
+      }),
+      legend: isSleep ? keyItem('sw band', '7–9 hr guideline') : '',
+      table,
+    };
+  }
+
+  function trackerChartCard(t, { withEstimate = false, open } = {}) {
+    const base = { id: `trk-${t.id}`, name: escapeHtml(t.name), open };
+    const [one, many] = trackerNoun(t);
+    const all = trackerPoints(t);
+    const need = t.unitKind === 'hours' ? 1 : 3;
+    if (all.length < need) return { ...base, empty: { text: `Log ${need} ${need === 1 ? one : many} to see a trend.`, have: all.length, need } };
+    if (t.unitKind === 'hours') return sleepColumnsCard(t, base);
+    const tr = trackerTrend(t);
+    const fmt = trackerFmt(t);
+    const unit = trackerUnitLabel(t);
+    if (tr.pts.length < 2) {
+      const last = all[all.length - 1];
+      return { ...base, sub: `Last ${fmt(last.value)} on ${chartDay(last.date)}`, empty: { text: `Fewer than 2 ${many} in ${rangeInfo()[4]}. Try a longer range.` } };
+    }
+    const vals = [...tr.pts, ...tr.avg].map((p) => p.value);
+    const goalOn = tr.goal != null && goalFits(tr.goal, vals);
+    const change = tr.avg[tr.avg.length - 1].value - tr.avg[0].value;
+    const span = tr.avg[0].date > addDays(rangeFrom(), 7) ? `since ${chartDay(tr.avg[0].date)}` : `in ${rangeInfo()[3]}`;
+    const subs = [Math.abs(change) < 0.05 ? `Steady ${span}` : `${change < 0 ? 'Down' : 'Up'} ${round(Math.abs(change), 1)}${unit ? ` ${unit}` : ''} ${span}`];
+    if (tr.goal != null) subs.push(tr.reached ? 'goal reached' : `${round(Math.abs(tr.goal - tr.last), 1)}${unit ? ` ${unit}` : ''} to goal${goalOn ? '' : ` (${tr.goal > tr.last ? 'above' : 'below'})`}`);
+    let estimate = null;
+    if (withEstimate && tr.weeksToGoal != null && goalOn) {
+      const lastDate = tr.avg[tr.avg.length - 1].date;
+      const ext = Math.max(1, Math.min(tr.weeksToGoal * 7, rangeInfo()[2] * 7 * 0.25));
+      estimate = [{ date: lastDate, value: tr.last }, { date: addDays(lastDate, Math.round(ext)), value: tr.last + tr.trend.slope * Math.round(ext) }];
+    }
+    const avgByDate = Object.fromEntries(tr.avg.map((p) => [p.date, p.value]));
+    const dotNoun = one[0].toUpperCase() + one.slice(1);
+    return {
+      ...base,
+      sub: subs.join(', '),
+      plot: Charts.line({
+        from: rangeFrom(), to: todayISO(), dots: tr.pts, avg: tr.daily ? tr.avg : null, connect: !tr.daily,
+        goal: goalOn ? tr.goal : null, goalText: goalOn ? `Goal ${round(tr.goal, 1)}` : '', estimate,
+        tipRows: (d) => {
+          const p = tr.pts.find((q) => q.date === d);
+          const rows = p ? [[one, fmt(p.value), 'dot']] : [];
+          if (tr.daily && avgByDate[d] != null) rows.push(['7-day average', fmt(avgByDate[d]), 'line']);
+          return rows;
+        },
+        label: `${t.name} over ${rangeInfo()[3]}: ${subs.join(', ')}`,
+      }),
+      legend: tr.daily
+        ? [keyItem('dt', `${dotNoun}s`), keyItem('ln', '7-day average'), estimate ? keyItem('ln est', 'Estimate') : ''].join('')
+        : estimate ? keyItem('ln est', 'Estimate') : '',
+      table: { head: tr.daily ? ['Date', dotNoun, '7-day avg'] : ['Date', dotNoun], rows: tr.pts.map((p) => (tr.daily ? [chartDay(p.date), fmt(p.value), fmt(avgByDate[p.date])] : [chartDay(p.date), fmt(p.value)])) },
+      note: estimate && tr.weeksToGoal <= 104 ? `Estimate: about ${new Date(addDays(todayISO(), Math.round(tr.weeksToGoal * 7)) + 'T00:00:00').toLocaleDateString(undefined, { month: 'short', year: 'numeric' })} at the pace of the last 4 weeks.` : '',
+    };
+  }
+
+  function trackerTiles(t) {
+    const fmt = trackerFmt(t);
+    const unit = trackerUnitLabel(t);
+    const from = rangeFrom();
+    if (t.unitKind === 'hours') {
+      const pts = trackerPoints(t).filter((p) => p.date >= from && p.date <= todayISO());
+      if (!pts.length) return [];
+      const tiles = [{ value: round(mean(pts.map((p) => p.value)), 1), unit, label: 'Average' }];
+      if (t.kind === 'sleep') tiles.push({ value: `${pts.filter((p) => p.value < SLEEP_BAND.lo).length}`, label: 'Nights under 7 hr' });
+      tiles.push({ value: round(pts[pts.length - 1].value, 1), unit, label: `Last, ${chartDay(pts[pts.length - 1].date)}` });
+      return tiles;
+    }
+    const tr = trackerTrend(t);
+    if (!tr.pts.length) return [];
+    const tiles = [{ value: round(tr.last, 1), unit, label: tr.daily ? '7-day average' : 'Latest' }];
+    if (tr.trend) tiles.push({ value: signed(tr.trend.slope * 7), unit, label: 'a week, last 4 weeks' });
+    if (tr.goal != null) {
+      if (tr.reached) tiles.push({ value: fmt(tr.goal), label: 'Goal reached' });
+      else if (tr.weeksToGoal != null && tr.weeksToGoal <= 104) tiles.push({ value: `~${Math.max(1, Math.round(tr.weeksToGoal))}`, unit: 'wk', label: 'to goal at this pace' });
+      else tiles.push({ value: round(Math.abs(tr.goal - tr.last), 1), unit, label: 'to goal' });
+    }
+    return tiles;
+  }
+
+  function bodyOverviewCard() {
+    if (!domainTracked('measurements')) return null;
+    const trackers = activeTrackers();
+    if (!trackers.length) return null;
+    const t = trackers.find((x) => x.id === BODY_WEIGHT_TRACKER_ID && measurementsFor(x.id).length)
+      || trackers.find((x) => measurementsFor(x.id).length) || trackers[0];
+    const card = trackerChartCard(t, { open: () => openBodyCharts(t.id) });
+    const sub = t.id === BODY_WEIGHT_TRACKER_ID || !card.sub ? card.sub : `${escapeHtml(t.name)}: ${card.sub.charAt(0).toLowerCase()}${card.sub.slice(1)}`;
+    return { ...card, id: 'body', name: 'Body', icon: itemIconHtml('scale'), sub };
+  }
+
+  function bodyNoteHtml(t) {
+    if (t.unitKind === 'hours') return '';
+    const parts = [];
+    if (trackerTrend(t).daily) parts.push('Dots are single readings; the line is the 7-day average, so one odd day does not move it.');
+    if (t.goal != null) parts.push('The estimate only shows when the last 4 weeks move toward the goal.');
+    return parts.length ? `<p class="cc-note">${parts.join(' ')}</p>` : '';
+  }
+
+  function openBodyCharts(trackerId) {
+    const trackers = activeTrackers();
+    let selId = trackers.some((t) => t.id === trackerId) ? trackerId : trackers[0] && trackers[0].id;
+    openChartSheet('Body', itemIconHtml('scale'), (body, repaint) => {
+      const t = trackerById(selId);
+      if (!t) { body.innerHTML = '<div class="empty-state"><p>Add a tracker in Manage, Body, and its chart shows up here.</p></div>'; return; }
+      const card = trackerChartCard(t, { withEstimate: true });
+      body.innerHTML = `
+        <div class="f-scroll"><div class="f-chips" id="chartTrackerChips" role="radiogroup" aria-label="Tracker">${trackers.map((x) => chipHtml(x.id, escapeHtml(x.name), null, x.id === selId)).join('')}</div></div>
+        ${chartCardHtml(card)}
+        ${card.empty ? '' : kpiRowHtml(trackerTiles(t))}
+        ${card.empty ? '' : bodyNoteHtml(t)}`;
+      const chips = body.querySelector('#chartTrackerChips');
+      wireFScroll(chips);
+      refreshFScroll(chips);
+      chips.addEventListener('click', (ev) => { const b = ev.target.closest('[data-chip]'); if (b) { selId = b.dataset.chip; repaint(); } });
+      wireChartCards(body, [card]);
+    });
+  }
+
+  /* Water */
+
+  function waterByDate() {
+    const out = {};
+    state.waterEntries.forEach((w) => { out[w.date] = (out[w.date] || 0) + w.amountMl; });
+    return out;
+  }
+  const waterShown = (ml) => round(Units.mlToDisplay(ml), state.settings.volumeUnit === 'mL' ? 0 : 1);
+
+  function waterOverviewCard() {
+    if (!domainTracked('water')) return null;
+    const base = { id: 'water', icon: itemIconHtml('droplets'), name: 'Water', open: () => openFoodCharts('water') };
+    const byDate = waterByDate();
+    if (!Object.keys(byDate).length) return { ...base, empty: { text: 'Log water and your weeks show up here.' } };
+    const goal = state.water.goalMl;
+    const weeks = rangeWeeks();
+    const unit = Units.volumeUnitLabel();
+    const rows = weeks.map((w) => {
+      const days = daysBetween(w, addDays(w, 6)).filter((d) => d <= todayISO() && byDate[d]);
+      return { week: w, met: goal ? days.filter((d) => byDate[d] >= goal).length : 0, logged: days.length, avg: mean(days.map((d) => byDate[d])) };
+    });
+    const firstWeek = weekOf(Object.keys(byDate).sort()[0]);
+    const done = rows.slice(0, -1).filter((r) => r.week >= firstWeek);
+    if (goal) {
+      const avg = mean(done.map((r) => r.met)) || 0;
+      return {
+        ...base,
+        sub: `Goal met ${round(avg, 1)} ${round(avg, 1) === 1 ? 'day' : 'days'} a week`,
+        plot: Charts.columns(rows.map((r, i) => {
+          const now = i === rows.length - 1;
+          return { value: r.met, tone: now ? 'now' : '', label: now && r.met ? String(r.met) : '', tip: { title: now ? 'This week, so far' : `Week of ${chartDay(r.week)}`, rows: [['days at goal', String(r.met)], ['days logged', String(r.logged)]] } };
+        }), { max: 7, height: 110, first: chartDay(weeks[0]), last: 'This week, so far', label: `Days the water goal was met each week over ${rangeInfo()[3]}, ${round(avg, 1)} on average` }),
+        table: { head: ['Week of', 'Days at goal', 'Days logged'], rows: rows.map((r, i) => [weekLabel(r.week), `${r.met}${i === rows.length - 1 ? ' so far' : ''}`, String(r.logged)]) },
+      };
+    }
+    const avg = mean(done.map((r) => r.avg).filter((v) => v != null));
+    return {
+      ...base,
+      sub: avg != null ? `Average ${fmtVolume(avg)} a day` : '',
+      plot: Charts.columns(rows.map((r, i) => ({ value: r.avg ? waterShown(r.avg) : 0, tone: i === rows.length - 1 ? 'now' : '', tip: { title: i === rows.length - 1 ? 'This week, so far' : `Week of ${chartDay(r.week)}`, rows: [['a day on average', r.avg ? fmtVolume(r.avg) : '—']] } })), { height: 110, first: chartDay(weeks[0]), last: 'This week, so far', label: `Average water a day, by week, over ${rangeInfo()[3]}` }),
+      table: { head: ['Week of', `Average, ${unit}`], rows: rows.map((r) => [weekLabel(r.week), r.avg ? String(waterShown(r.avg)) : '—']) },
+    };
+  }
+
+  function waterDetailCard() {
+    const byDate = waterByDate();
+    const base = { id: 'water-days', name: 'Water' };
+    if (!Object.keys(byDate).length) return { ...base, empty: { text: 'Log water and your days show up here.' } };
+    const goal = state.water.goalMl;
+    const from = rangeFrom();
+    const unit = Units.volumeUnitLabel();
+    const full = daysBetween(from, addDays(todayISO(), -1)).filter((d) => byDate[d]);
+    const met = goal ? full.filter((d) => byDate[d] >= goal).length : 0;
+    const today = byDate[todayISO()] || 0;
+    let bars;
+    let first;
+    let table;
+    if (rangeIsDaily()) {
+      const dates = daysBetween(from, todayISO());
+      bars = dates.map((d) => ({ value: byDate[d] ? waterShown(byDate[d]) : 0, tone: d === todayISO() ? 'open' : '', tip: { title: dayTitle(d), rows: [[d === todayISO() ? 'so far' : '', byDate[d] ? fmtVolume(byDate[d]) : 'Nothing logged']] } }));
+      first = chartDay(dates[0]);
+      table = { head: ['Date', unit], rows: dates.filter((d) => byDate[d]).map((d) => [dayTitle(d), `${waterShown(byDate[d])}${d === todayISO() ? ' so far' : ''}`]) };
+    } else {
+      const weeks = rangeWeeks();
+      const avgs = weeks.map((w) => mean(full.filter((d) => weekOf(d) === w).map((d) => byDate[d])));
+      bars = weeks.map((w, i) => ({ value: avgs[i] ? waterShown(avgs[i]) : 0, tone: i === weeks.length - 1 ? 'now' : '', tip: { title: i === weeks.length - 1 ? 'This week, so far' : `Week of ${chartDay(w)}`, rows: [['a day on average', avgs[i] ? fmtVolume(avgs[i]) : '—']] } }));
+      first = chartDay(weeks[0]);
+      table = { head: ['Week of', `Average, ${unit}`], rows: weeks.map((w, i) => [weekLabel(w), avgs[i] ? String(waterShown(avgs[i])) : '—']) };
+    }
+    return {
+      ...base,
+      sub: goal ? `Goal met ${met} of the last ${plural(full.length, 'full day')}` : `Average ${fmtVolume(mean(full.map((d) => byDate[d])) || 0)} on full days`,
+      plot: Charts.columns(bars, { height: 116, goal: goal ? waterShown(goal) : null, goalText: goal ? String(Math.round(waterShown(goal))) : '', first, last: rangeIsDaily() ? 'Today' : 'This week', label: `Water ${rangeIsDaily() ? 'per day' : 'per day, weekly average'} over ${rangeInfo()[3]}${goal ? `, goal met ${met} of ${full.length} full days` : ''}` }),
+      legend: [goal ? keyItem('ln goal', `Goal ${fmtVolume(goal)}`) : '', rangeIsDaily() && today ? keyItem('sw open', `Today, ${fmtVolume(today)} so far`) : ''].join(''),
+      table,
+    };
+  }
+
+  /* Food */
+
+  function foodCaloriesByDate() {
+    const out = {};
+    state.food.entries.forEach((e) => { if (e.calories != null) out[e.date] = (out[e.date] || 0) + e.calories; });
+    return out;
+  }
+  const calorieTarget = () => (macroGoalInfo('calories').enabled && macroGoalInfo('calories').goal ? macroGoalInfo('calories').goal : null);
+  const onTarget = (kcal, target) => Math.abs(kcal - target) <= target * 0.1;
+
+  // Full days are days before today with calories logged.
+  function foodRangeStats() {
+    const byDate = foodCaloriesByDate();
+    const target = calorieTarget();
+    const full = daysBetween(rangeFrom(), addDays(todayISO(), -1)).filter((d) => byDate[d] != null);
+    return { byDate, target, full, avg: mean(full.map((d) => byDate[d])), onTarget: target ? full.filter((d) => onTarget(byDate[d], target)).length : null };
+  }
+
+  function caloriesCard(open) {
+    const base = { id: open ? 'food' : 'food-cal', icon: open ? itemIconHtml('apple') : '', name: open ? 'Food' : 'Calories', open };
+    const st = foodRangeStats();
+    const fullEver = Object.keys(st.byDate).filter((d) => d < todayISO()).length;
+    if (fullEver < 7) return { ...base, empty: { text: 'Log 7 full days to see a trend.', have: fullEver, need: 7 } };
+    const { byDate, target, full } = st;
+    const over = (kcal) => target && kcal > target * 1.1;
+    const today = byDate[todayISO()];
+    let bars;
+    let first;
+    let table;
+    if (rangeIsDaily()) {
+      const dates = daysBetween(rangeFrom(), todayISO());
+      bars = dates.map((d) => {
+        const v = byDate[d] || 0;
+        const isToday = d === todayISO();
+        const rows = v ? [['kcal', `${fmtInt(v)}${isToday ? ' so far' : ''}`]] : [['', 'Nothing logged']];
+        if (v && target && !isToday) rows.push(['', onTarget(v, target) ? 'On target' : over(v) ? 'Over by 10%+' : 'Under by 10%+']);
+        return { value: v, tone: isToday ? 'open' : over(v) ? 'over' : '', tip: { title: dayTitle(d), rows } };
+      });
+      first = chartDay(dates[0]);
+      table = { head: target ? ['Date', 'kcal', 'Target'] : ['Date', 'kcal'], rows: dates.filter((d) => byDate[d] != null).map((d) => {
+        const row = [dayTitle(d), `${fmtInt(byDate[d])}${d === todayISO() ? ' so far' : ''}`];
+        if (target) row.push(d === todayISO() ? '—' : onTarget(byDate[d], target) ? 'On' : over(byDate[d]) ? 'Over' : 'Under');
+        return row;
+      }) };
+    } else {
+      const weeks = rangeWeeks();
+      const avgs = weeks.map((w) => mean(full.filter((d) => weekOf(d) === w).map((d) => byDate[d])));
+      bars = weeks.map((w, i) => ({ value: avgs[i] || 0, tone: i === weeks.length - 1 ? 'now' : avgs[i] && over(avgs[i]) ? 'over' : '', tip: { title: i === weeks.length - 1 ? 'This week, so far' : `Week of ${chartDay(w)}`, rows: [['kcal a day', avgs[i] ? fmtInt(avgs[i]) : '—']] } }));
+      first = chartDay(weeks[0]);
+      table = { head: ['Week of', 'kcal a day'], rows: weeks.map((w, i) => [weekLabel(w), avgs[i] ? fmtInt(avgs[i]) : '—']) };
+    }
+    return {
+      ...base,
+      sub: target ? `On target ${st.onTarget} of the last ${plural(full.length, 'full day')}` : st.avg != null ? `${fmtInt(st.avg)} kcal a day on full days` : 'No full days in this range',
+      plot: Charts.columns(bars, { height: 120, goal: target, goalText: target ? fmtInt(target) : '', first, last: rangeIsDaily() ? 'Today' : 'This week', label: `Calories ${rangeIsDaily() ? 'per day' : 'per day, weekly average'} over ${rangeInfo()[3]}${target ? `, target ${fmtInt(target)}, on target ${st.onTarget} of ${full.length} full days` : ''}` }),
+      legend: [
+        target ? keyItem('ln goal', `Target ${fmtInt(target)}`) : '',
+        bars.some((x) => x.tone === 'over') ? `<span><i class="sw over"></i>${ALERT_ICON_SVG}Over by 10%+</span>` : '',
+        rangeIsDaily() && today ? keyItem('sw open', `Today, ${fmtInt(today)} so far`) : '',
+      ].join(''),
+      table,
+    };
+  }
+
+  // Protein per full day against its goal, in the Food colour.
+  function proteinCard() {
+    if (!macroTracked('protein')) return null;
+    const byDate = {};
+    state.food.entries.forEach((e) => { if (e.protein != null) byDate[e.date] = (byDate[e.date] || 0) + e.protein; });
+    const pts = daysBetween(rangeFrom(), addDays(todayISO(), -1)).filter((d) => byDate[d] != null).map((d) => ({ date: d, value: byDate[d] }));
+    if (pts.length < 2) return null;
+    const pg = macroGoalInfo('protein');
+    const goal = pg.goal || null;
+    const avg = mean(pts.map((p) => p.value));
+    const week = window.FitCalc.trailingAverage(pts, 7);
+    const weekBy = Object.fromEntries(week.map((p) => [p.date, p.value]));
+    const hit = goal ? pts.filter((p) => p.value >= goal).length : 0;
+    return {
+      id: 'protein', name: 'Protein',
+      sub: goal ? `Goal hit on ${hit} of ${plural(pts.length, 'day')}, average ${Math.round(avg)} g` : `Average ${Math.round(avg)} g a day`,
+      plot: `<div class="is-food">${Charts.line({
+        from: rangeFrom(), to: todayISO(), dots: pts, avg: week, goal, goalText: goal ? `Goal ${Math.round(goal)} g` : '', height: 116, format: (v) => String(Math.round(v)),
+        tipRows: (d) => [['protein', `${Math.round(byDate[d])} g`, 'dot food'], ['7-day average', `${Math.round(weekBy[d])} g`, 'line food']],
+        label: `Protein per full day over ${rangeInfo()[3]}, average ${Math.round(avg)} grams`,
+      })}</div>`,
+      legend: keyItem('dt food', 'Days') + keyItem('ln food', '7-day average'),
+      table: { head: ['Date', 'Protein', '7-day avg'], rows: pts.map((p) => [chartDay(p.date), `${Math.round(p.value)} g`, `${Math.round(weekBy[p.date])} g`]) },
+    };
+  }
+
+  // Share of calories from protein, carbs and fat over the last 7 days with any of them logged.
+  function macroSplitCard() {
+    if (!['protein', 'carbs', 'fat'].every(macroTracked)) return null;
+    const sums = { protein: 0, carbs: 0, fat: 0 };
+    const days = new Set();
+    state.food.entries.forEach((e) => {
+      if (e.date >= todayISO() || e.date < addDays(todayISO(), -7)) return;
+      ['protein', 'carbs', 'fat'].forEach((k) => { if (e[k] != null) { sums[k] += e[k]; days.add(e.date); } });
+    });
+    if (!days.size) return null;
+    const kcal = { protein: sums.protein * 4, carbs: sums.carbs * 4, fat: sums.fat * 9 };
+    const total = kcal.protein + kcal.carbs + kcal.fat;
+    if (!total) return null;
+    const parts = ['protein', 'carbs', 'fat'].map((k, i) => ({ k, label: MACRO_LABELS[k], pct: Math.round((kcal[k] / total) * 100), g: sums[k] / days.size, cls: `m${i + 1}` }));
+    return {
+      id: 'macros', name: 'Where calories came from', sub: `Last 7 days, ${plural(days.size, 'day')} logged`,
+      plot: `<div class="split-bar" role="img" aria-label="${parts.map((p) => `${p.label} ${p.pct}%`).join(', ')}">${parts.map((p) => `<span class="${p.cls}" style="flex:${Math.max(p.pct, 1)} 1 0"></span>`).join('')}</div>
+        <div class="split-key">${parts.map((p) => `<div><i class="sw ${p.cls}"></i><span>${p.label}</span><b>${p.pct}%</b><span class="muted-text">${Math.round(p.g)} g a day</span></div>`).join('')}</div>`,
+      table: { head: ['Macro', 'g a day', 'Share'], rows: parts.map((p) => [p.label, String(Math.round(p.g)), `${p.pct}%`]) },
+    };
+  }
+
+  function openFoodCharts(focus) {
+    const food = domainTracked('food');
+    const water = domainTracked('water');
+    const title = food && water ? 'Food and water' : food ? 'Food' : 'Water';
+    openChartSheet(title, itemIconHtml(food ? 'apple' : 'droplets'), (body) => {
+      const cards = [];
+      let html = '';
+      if (food) {
+        const cal = caloriesCard();
+        cards.push(cal);
+        html += chartCardHtml(cal);
+        const st = foodRangeStats();
+        if (!cal.empty && st.full.length) {
+          html += kpiRowHtml([
+            st.target ? { value: `${st.onTarget} of ${st.full.length}`, label: 'Days on target (within 10%)' } : null,
+            { value: fmtInt(st.avg), label: 'Average kcal, full days' },
+          ].filter(Boolean));
+        }
+        [proteinCard(), macroSplitCard()].filter(Boolean).forEach((c) => { cards.push(c); html += chartCardHtml(c); });
+      }
+      if (water) { const w = waterDetailCard(); cards.push(w); html += chartCardHtml(w); }
+      body.innerHTML = `${html}<p class="cc-note">A day counts once it is over. Days with nothing logged are left out of averages rather than counted as zero.</p>`;
+      wireChartCards(body, cards);
+    });
+    if (focus === 'water' && food) {
+      const el = modalSheet().querySelector('[data-chart-card="water-days"]');
+      if (el) el.scrollIntoView({ block: 'start' });
+    }
+  }
+
+  /* Overview and sheets */
+
+  function overviewTiles() {
+    const from = rangeFrom();
+    const tiles = [];
+    if (domainTracked('workout')) {
+      const days = new Set(state.entries.filter((e) => !isDailyEntry(e) && e.date >= from && e.date <= todayISO()).map((e) => e.date)).size;
+      if (state.entries.some((e) => !isDailyEntry(e))) tiles.push({ value: String(days), label: 'Workout days' });
+    }
+    const wt = trackerById(BODY_WEIGHT_TRACKER_ID);
+    if (domainTracked('measurements') && wt && !wt.archived) {
+      const tr = trackerTrend(wt);
+      if (tr.avg.length >= 2) tiles.push({ value: signed(tr.avg[tr.avg.length - 1].value - tr.avg[0].value), unit: Units.weightUnitLabel(), label: 'Weight change' });
+    }
+    if (domainTracked('food')) {
+      const st = foodRangeStats();
+      if (st.avg != null) tiles.push({ value: fmtInt(st.avg), label: 'Avg kcal, full days' });
+    }
+    if (domainTracked('water') && state.water.goalMl && state.waterEntries.length && tiles.length < 3) {
+      const byDate = waterByDate();
+      const met = daysBetween(from, addDays(todayISO(), -1)).filter((d) => byDate[d] >= state.water.goalMl).length;
+      tiles.push({ value: String(met), label: 'Days at water goal' });
+    }
+    return tiles.slice(0, 3);
+  }
+
+  // A card's inner width inside `el`, or inside the page when `el` is not laid out yet.
+  function chartWidthIn(el) {
+    const outer = el && el.clientWidth ? el.clientWidth : document.getElementById('main').clientWidth - 40;
+    return outer - 34;
+  }
+
+  function renderProgressCharts() {
+    const wrap = document.getElementById('chartsOverview');
+    Charts.setWidth(chartWidthIn(wrap));
+    chartsDrawnAt = wrap.clientWidth;
+    const cards = [workoutOverviewCard(), dailyOverviewCard(), bodyOverviewCard(), waterOverviewCard(), domainTracked('food') ? caloriesCard(() => openFoodCharts()) : null].filter(Boolean);
+    document.getElementById('dashboardEmpty').hidden = cards.length > 0;
+    wrap.innerHTML = cards.length ? `${rangeSegHtml()}${kpiRowHtml(overviewTiles())}${cards.map(chartCardHtml).join('')}` : '';
+    if (!cards.length) return;
+    wrap.querySelector('.chart-range').addEventListener('click', (ev) => { const b = ev.target.closest('[data-seg]'); if (b) { chartRange = b.dataset.seg; renderProgressCharts(); } });
+    wireChartCards(wrap, cards);
+  }
+
+  // Redraw the overview when the page width changes (rotation, a resized window).
+  let chartsDrawnAt = 0;
+  window.addEventListener('resize', () => {
+    const wrap = document.getElementById('chartsOverview');
+    if (!wrap || !wrap.clientWidth || Math.abs(wrap.clientWidth - chartsDrawnAt) < 8) return;
+    renderProgressCharts();
+  });
+
+  // A tall sheet with the shared range on top. `paint(body, repaint)` fills the body; a
+  // range change repaints it (and the overview behind it) without reopening the sheet.
+  function openChartSheet(title, iconHtml, paint) {
+    openModal(`
+      <div class="modal-title-row"><h2 class="title-with-icon">${iconHtml}${title}</h2><button class="modal-close" data-action="close-modal" aria-label="Close">${CLOSE_ICON_SVG}</button></div>
+      ${rangeSegHtml()}
+      <div class="chart-sheet" id="chartSheetBody"></div>`, { tall: true });
+    const sheet = modalSheet();
+    const body = sheet.querySelector('#chartSheetBody');
+    const repaint = () => { Charts.setWidth(chartWidthIn(body)); paint(body, repaint); };
+    sheet.querySelector('.chart-range').addEventListener('click', (ev) => {
+      const b = ev.target.closest('[data-seg]');
+      if (!b) return;
+      chartRange = b.dataset.seg;
+      sheet.querySelectorAll('.chart-range [data-seg]').forEach((x) => x.setAttribute('aria-checked', String(x.dataset.seg === chartRange)));
+      repaint();
+      if (!document.getElementById('progressCharts').hidden) renderProgressCharts();
+    });
+    repaint();
+  }
+
   function renderProgress() {
     document.querySelectorAll('#progressSeg [data-progress-seg]').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.progressSeg === progressSeg)));
     document.getElementById('progressGoals').hidden = progressSeg !== 'goals';
     document.getElementById('progressCharts').hidden = progressSeg !== 'charts';
-    renderProgressGoals();
-    const all = activeExercises();
-    const goalList = all.filter((e) => sectionOf(e) === 'goal');
-    document.getElementById('dashboardEmpty').hidden = !(domainTracked('workout') || domainTracked('daily')) || (goalList.length + all.filter((e) => sectionOf(e) === 'daily').length) > 0;
-
-    const cardsWrap = document.getElementById('exerciseCards');
-    cardsWrap.innerHTML = goalList.map(goalCardHtml).join('');
-    cardsWrap.querySelectorAll('.ex-card[data-exercise-id]').forEach((card) => {
-      wireOpenable(card, () => openExerciseDetail(card.getAttribute('data-exercise-id')));
-    });
-
-    renderBodySection();
+    if (progressSeg === 'goals') renderProgressGoals();
+    else renderProgressCharts();
   }
 
   // Daily {date, value} points for one macro, for the Food detail Trend chart.
@@ -3822,8 +4656,8 @@
   }
 
   /* Log -> Daily
-     Habits and daily-rep targets, one screen (today's count and streak are in the glance
-     card above it): a tap-to-check list of the habits due today, then the daily rep targets with a meter and a Log
+     Habits and daily-rep targets, one screen (today's count is in the glance card above
+     it): a tap-to-check list of the habits due today, then the daily rep targets with a meter and a Log
      button (which opens the same rep form as Workout). Nothing here is new data: it is
      the Home "Daily targets" list, given its own home. */
   function dailyItemsToday() {
@@ -4271,11 +5105,9 @@
   }
 
   /* Log glance card
-     Every Log tab opens with the same small two-line card: the number with the area's
-     streak, then a thin meter (week dots for Workout), one short status and one link.
-     Each area counts its streak in its own rhythm: days for Daily, Water and Food, weeks
-     with at least one workout for Workout, and days or weeks for a Body tracker depending
-     on how often it is usually logged (FitCalc.loggingRhythm). */
+     Every Log tab opens with the same small two-line card: the number, then a thin meter
+     (week dots for Workout), one short status and one link. Streaks live in the History
+     calendar's legend (calendarStreaks), so Log stays about logging. */
   function relDay(iso) {
     const gap = dayGap(iso, todayISO());
     if (gap === 0) return 'today';
@@ -4285,14 +5117,10 @@
   function glanceMeter(pct, fillClass = '') {
     return `<div class="meter meter-sm"><div class="meter-fill${fillClass}" style="--fill:${Math.max(0, Math.min(100, pct))}%"></div></div>`;
   }
-  function glanceHtml({ eyebrow, value, unit, empty, streak, streakUnit, row2 }) {
-    const st = streak > 0
-      ? `<span class="lg-st">${FLAME_ICON_SVG}${streak} ${streakUnit} streak</span>`
-      : `<span class="lg-st is-off">${FLAME_ICON_SVG}No streak yet</span>`;
+  function glanceHtml({ eyebrow, value, unit, empty, row2 }) {
     return `
       <div class="lg-r1">
         <div class="lg-ev"><span class="lg-eb">${eyebrow}</span>${empty ? '<span class="lg-v is-empty">None yet</span>' : `<span class="lg-v">${value} <span class="lg-u">${unit}</span></span>`}</div>
-        ${st}
       </div>
       <div class="lg-r2">${row2}</div>`;
   }
@@ -4307,7 +5135,7 @@
     const last = [...dates].sort().pop();
     const dots = `<div class="lg-dots" aria-label="${week.filter((d) => dates.has(d)).length} workout days this week">${week.map((d) => `<i class="${dates.has(d) ? 'on' : ''}${d === today ? ' is-today' : ''}"></i>`).join('')}</div>`;
     return {
-      html: glanceHtml({ eyebrow: 'This week', value: week.filter((d) => dates.has(d)).length, unit: 'of 7 days', streak: window.FitCalc.computeWeekStreak(dates, today), streakUnit: 'week',
+      html: glanceHtml({ eyebrow: 'This week', value: week.filter((d) => dates.has(d)).length, unit: 'of 7 days',
         row2: `${dots}<span class="lg-tx">${last ? `Last: ${relDay(last)}` : 'No workouts yet'}</span>` }),
     };
   }
@@ -4315,10 +5143,9 @@
     const { habits, reps } = dailyItemsToday();
     const all = habits.concat(reps);
     const done = all.filter(dailyComplete).length;
-    const dates = new Set(state.entries.filter(isDailyEntry).map((e) => e.date));
     const left = all.length - done;
     return {
-      html: glanceHtml({ eyebrow: 'Today', value: done, unit: `of ${all.length} done`, streak: window.FitCalc.computeStreak(dates, todayISO()), streakUnit: 'day',
+      html: glanceHtml({ eyebrow: 'Today', value: done, unit: `of ${all.length} done`,
         row2: `${glanceMeter(all.length ? (done / all.length) * 100 : 0, all.length && !left ? ' is-complete' : '')}<span class="lg-tx">${!all.length ? 'Nothing due' : left ? `${left} left` : 'All done'}</span>` }),
     };
   }
@@ -4327,10 +5154,7 @@
     if (!t) return null;
     const list = measurementsFor(t.id).sort((a, b) => (a.date + a.id).localeCompare(b.date + b.id));
     const latest = list[list.length - 1];
-    const dates = list.map((m) => m.date);
-    const weekly = window.FitCalc.loggingRhythm(dates) === 'week';
-    const streak = weekly ? window.FitCalc.computeWeekStreak(new Set(dates), todayISO()) : window.FitCalc.computeStreak(new Set(dates), todayISO());
-    const base = { eyebrow: escapeHtml(t.name), streak, streakUnit: weekly ? 'week' : 'day' };
+    const base = { eyebrow: escapeHtml(t.name) };
     if (!latest) {
       return { html: glanceHtml({ ...base, empty: true, row2: `${glanceMeter(0)}<span class="lg-tx">Log your first entry to start</span>${glanceLink(t.goal != null ? 'Goal' : 'Set goal')}` }), link: () => openTrackerForm(t.id) };
     }
@@ -4355,13 +5179,9 @@
     const total = waterTotalForDate(todayISO());
     const unit = Units.volumeUnitLabel();
     const show = (ml) => round(Units.mlToDisplay(ml), 0);
-    const byDate = {};
-    state.waterEntries.forEach((w) => { byDate[w.date] = (byDate[w.date] || 0) + w.amountMl; });
-    // With a goal, a day counts once the goal is met; without one, any water counts.
-    const dates = new Set(Object.keys(byDate).filter((d) => !goal || byDate[d] >= goal));
     const status = !goal ? 'No daily goal' : total >= goal ? 'Goal met' : `${show(goal - total)} to go of ${show(goal)} ${unit}`;
     return {
-      html: glanceHtml({ eyebrow: 'Today', value: show(total), unit, streak: window.FitCalc.computeStreak(dates, todayISO()), streakUnit: 'day',
+      html: glanceHtml({ eyebrow: 'Today', value: show(total), unit,
         row2: `${goal ? glanceMeter((total / goal) * 100, total >= goal ? ' is-complete' : '') : ''}<span class="lg-tx">${status}</span>${glanceLink(goal ? 'Goal' : 'Set goal')}` }),
       link: () => openManageCategory('water'),
     };
@@ -4371,10 +5191,9 @@
     const cal = macroGoalInfo('calories');
     const goal = cal.enabled && cal.goal != null ? cal.goal : null;
     const fmt = (n) => Math.round(n).toLocaleString();
-    const dates = new Set(state.food.entries.map((e) => e.date));
     const status = goal == null ? 'No calorie target' : eaten > goal ? `${fmt(eaten - goal)} over ${fmt(goal)}` : `${fmt(goal - eaten)} left of ${fmt(goal)}`;
     return {
-      html: glanceHtml({ eyebrow: 'Today', value: fmt(eaten), unit: 'kcal', streak: window.FitCalc.computeStreak(dates, todayISO()), streakUnit: 'day',
+      html: glanceHtml({ eyebrow: 'Today', value: fmt(eaten), unit: 'kcal',
         row2: `${goal != null ? glanceMeter((eaten / goal) * 100, eaten > goal ? ' is-over' : '') : ''}<span class="lg-tx">${status}</span>${glanceLink('Day')}` }),
       link: () => openFoodDetail(),
     };
@@ -4693,6 +5512,37 @@
     return { workout, daily, body, waterHit, food };
   }
 
+  /* Calendar streaks
+     Each legend entry carries its area's current streak, counted on the same days its dot
+     marks: weeks for workouts (rest days never break it), days for Daily, Water goal and
+     Food, and days or weeks for Body depending on how often it is logged
+     (FitCalc.loggingRhythm). Today may still be empty without breaking a streak. */
+  const CAL_AREA_NAMES = { workout: 'Workout', daily: 'Daily', water: 'Water goal', food: 'Food', measurements: 'Body' };
+  function calendarStreaks() {
+    const C = window.FitCalc;
+    const dates = { workout: new Set(), daily: new Set(), water: new Set(), food: new Set(), measurements: new Set() };
+    state.entries.forEach((e) => (isDailyEntry(e) ? dates.daily : dates.workout).add(e.date));
+    state.measurements.forEach((m) => dates.measurements.add(m.date));
+    state.food.entries.forEach((f) => dates.food.add(f.date));
+    const goal = state.water.goalMl;
+    if (goal) Object.entries(waterByDate()).forEach(([d, ml]) => { if (ml >= goal) dates.water.add(d); });
+    const out = {};
+    Object.entries(dates).forEach(([area, set]) => {
+      const unit = area === 'workout' || (area === 'measurements' && C.loggingRhythm([...set]) === 'week') ? 'week' : 'day';
+      out[area] = { unit, current: unit === 'week' ? C.computeWeekStreak(set, todayISO()) : C.computeStreak(set, todayISO()), best: C.longestStreak(set, unit) };
+    });
+    return out;
+  }
+
+  function renderCalendarLegend() {
+    const streaks = calendarStreaks();
+    document.getElementById('calendarLegend').innerHTML = CAL_DOT_SLOTS.filter(([area]) => domainTracked(area)).map(([area, cls]) => {
+      const { unit, current, best } = streaks[area];
+      const count = current ? `<span class="cal-streak">${FLAME_ICON_SVG}${plural(current, unit)}<span class="sr-only"> in a row, best ${plural(best, unit)}</span></span>` : '';
+      return `<span class="cal-key"><i class="cal-dot ${cls}"></i>${CAL_AREA_NAMES[area]}${count}</span>`;
+    }).join('');
+  }
+
   function renderHistoryCalendar() {
     const year = calendarMonth.getFullYear();
     const month = calendarMonth.getMonth();
@@ -4718,7 +5568,7 @@
         </button>`;
     }
     document.getElementById('calendarGrid').innerHTML = html;
-    document.querySelectorAll('[data-legend-area]').forEach((el) => { el.hidden = !domainTracked(el.dataset.legendArea); });
+    renderCalendarLegend();
     document.querySelectorAll('#calendarGrid .calendar-day[data-date]').forEach((btn) => {
       btn.addEventListener('click', () => {
         const date = btn.dataset.date;
