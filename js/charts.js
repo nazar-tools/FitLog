@@ -172,7 +172,7 @@ const Charts = (() => {
     [0, top].forEach((t) => {
       const ty = y(t);
       out += `<line class="${t ? 'cg' : 'cb'}" x1="${padL}" x2="${VBW - padR}" y1="${r1(ty)}" y2="${r1(ty)}"></line>`;
-      if (goalY == null || Math.abs(goalY - ty) > 10) out += `<text class="ct" x="${padL - 6}" y="${r1(ty + 4)}" text-anchor="end">${fmt(t)}</text>`;
+      if (goalY == null || Math.abs(goalY - ty) > 14) out += `<text class="ct" x="${padL - 6}" y="${r1(ty + 4)}" text-anchor="end">${fmt(t)}</text>`;
     });
     const tips = [];
     bars.forEach((b, i) => {

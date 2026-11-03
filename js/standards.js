@@ -298,12 +298,17 @@
       caveat: 'The 1,500 ml per m2 scale matches the NASEM beverage figures for reference adults; the activity add-ons and the 2,000 ml default are the app\'s own. Total water needs include food and vary with heat, health and pregnancy.' },
   ];
 
+  // A standard barbell and the common plate sets, heaviest first, in each weight unit.
+  // The plate calculator loads each side from these.
+  const BAR_WEIGHT = { lb: 45, kg: 20 };
+  const PLATES = { lb: [45, 35, 25, 10, 5, 2.5], kg: [25, 20, 15, 10, 5, 2.5, 1.25] };
+
   const S = {
     version: '2.0.0',
     reviewed: '2026-10-20',
     LB_PER_KG,
     TIER_LABELS, STRENGTH, STRENGTH_KEYS, strengthThresholds, tierIndex, CATALOG_STANDARDS, standardKeyFor,
-    ONE_RM_MAX_REPS, estimateOneRM,
+    ONE_RM_MAX_REPS, estimateOneRM, BAR_WEIGHT, PLATES,
     RUN_TIER_LABELS, RUN_5K, RUN_MIN_MI, RUN_MAX_MI, DEFAULT_RUN_AGE, fiveKEquivalentSec, runThresholds, runLevel,
     BMI_CATEGORIES, bmiFromKgCm, bmiCategory,
     SLEEP, sleepCategory,

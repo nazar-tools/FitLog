@@ -1275,15 +1275,20 @@
     return toCanon(v);
   }
   const setRowKind = (ex) => (isTimed(ex) ? 'timed' : ex.kind);
-  function setRowHtml(kind, idx, set) {
+  function setRowHtml(kind, idx, set, plates) {
     set = set || {};
     const timed = kind === 'timed';
     if (kind === 'weight') {
       const w = set.weight != null ? round(Units.lbToDisplay(set.weight), 2) : '';
+      const label = `Weight (${Units.weightUnitLabel()})`;
+      const input = `<input type="number" step="any" inputmode="decimal" class="set-weight" value="${w}"${canonAttr(set.weight)} placeholder="0"${plates ? ` aria-label="${label}"` : ''} />`;
+      // The plates button sits beside the input, outside the <label>, so tapping it never focuses the field.
+      const weightField = plates
+        ? `<div class="field"><span class="field-label" aria-hidden="true">${label}</span><div class="weight-plates">${input}<button type="button" class="plates-btn" data-action="plates" aria-label="Plate calculator" title="Plate calculator">${PLATES_ICON_SVG}</button></div></div>`
+        : `<label class="field"><span class="field-label">${label}</span>${input}</label>`;
       return `
-        <div class="set-row set-row-3" data-set-idx="${idx}" data-primary="${set.primary ? '1' : '0'}">
-          <label class="field"><span class="field-label">Weight (${Units.weightUnitLabel()})</span>
-            <input type="number" step="any" inputmode="decimal" class="set-weight" value="${w}"${canonAttr(set.weight)} placeholder="0" /></label>
+        <div class="set-row set-row-3${plates ? ' has-plates' : ''}" data-set-idx="${idx}" data-primary="${set.primary ? '1' : '0'}">
+          ${weightField}
           <label class="field"><span class="field-label">Reps</span>
             <input type="number" step="1" min="1" inputmode="numeric" class="set-reps" value="${set.reps ?? ''}" placeholder="0" /></label>
           <label class="field"><span class="field-label">RPE</span>
@@ -1327,6 +1332,166 @@
         <input type="number" step="0.5" min="1" max="10" inputmode="decimal" id="cardioRpe" value="${entry.rpe ?? ''}" placeholder="How hard did that feel?" /></label>`;
   }
 
+  /* Plate calculator
+     Barbell lifts get a plates button beside each set's weight. The sheet draws one side of a
+     standard bar (45 lb or 20 kg, following the weight unit), adds plates in pairs, and can work
+     back from a typed total. Use fills that set's weight. It is a <dialog>, so it opens above the
+     Edit entry sheet as well as the Log form without replacing either. */
+  const PLATES_ICON_SVG = '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12h2M7 12h1M10.5 12h3M16 12h1M20 12h2"/><rect x="4" y="5" width="3" height="14" rx="1"/><rect x="8" y="7.5" width="2.5" height="9" rx="1"/><rect x="13.5" y="7.5" width="2.5" height="9" rx="1"/><rect x="17" y="5" width="3" height="14" rx="1"/></svg>';
+  // [height, width] of each plate in the drawing, so bigger plates read as bigger.
+  const PLATE_SIZE = {
+    lb: { 45: [104, 24], 35: [94, 22], 25: [82, 20], 10: [64, 16], 5: [52, 14], 2.5: [44, 12] },
+    kg: { 25: [104, 26], 20: [100, 24], 15: [94, 22], 10: [82, 20], 5: [64, 16], 2.5: [52, 14], 1.25: [44, 12] },
+  };
+  const PLATE_MAX_TOTAL = { lb: 1000, kg: 450 };
+
+  // A guess for exercises that never had the switch set: barbell equipment, a catalog movement
+  // done on a barbell by default, or an older name like "Bench Press" or "Barbell Row".
+  function looksLikeBarbell(ex) {
+    if (ex.equipment) return ex.equipment === 'barbell';
+    const mv = ex.catalogId && Object.hasOwn(MOVEMENTS, ex.catalogId) && MOVEMENTS[ex.catalogId];
+    if (mv) return mv.defaultEquipment === 'barbell';
+    const name = (ex.name || '').toLowerCase();
+    if (EQUIPMENT_WORDS.some(([id, re]) => id !== 'barbell' && re.test(name))) return false;
+    return /\b(barbell|bb|bench press|squats?|deadlifts?|overhead press|military press|power clean)\b/.test(name)
+      || ['bench', 'squat', 'deadlift'].includes(ex.liftType);
+  }
+  function usesPlates(ex) {
+    if (!ex || ex.kind !== 'weight') return false;
+    return typeof ex.plateCalc === 'boolean' ? ex.plateCalc : looksLikeBarbell(ex);
+  }
+
+  // The right-hand end of the bar: shaft, collar, then the sleeve the plates slide onto,
+  // heaviest against the collar. The collar moves left only when a long stack needs the room.
+  function plateBarSvg(perSide, unit, bar) {
+    const W = 300, H = 116, mid = H / 2, endGap = 14;
+    const sizes = perSide.map((p) => PLATE_SIZE[unit][p]);
+    const need = sizes.reduce((t, sz) => t + sz[1] + 2, 0);
+    // Leave a short bit of sleeve past the last plate, as on a loaded bar.
+    const collarX = Math.max(40, Math.min(210, W - endGap - 10 - need - 30));
+    const room = W - collarX - 10 - endGap;
+    const k = Math.min(1, room / Math.max(1, need));
+    let x = collarX + 12;
+    const platesSvg = perSide.map((p, i) => {
+      const [h, w0] = sizes[i];
+      const w = w0 * k;
+      const g = `<g class="pb-plate" data-plate-idx="${i}" role="button" tabindex="0" aria-label="Take a ${p} ${unit} plate off each side">
+        <rect x="${round(x, 1)}" y="${round(mid - h / 2, 1)}" width="${round(w, 1)}" height="${h}" rx="3"></rect>
+        ${w >= 11 ? `<text transform="translate(${round(x + w / 2, 1)} ${mid}) rotate(-90)" text-anchor="middle" dominant-baseline="central">${p}</text>` : ''}
+      </g>`;
+      x += w + 2;
+      return g;
+    }).join('');
+    return `<svg viewBox="0 0 ${W} ${H}" class="plate-svg" role="group" aria-label="${perSide.length ? `Each side: ${perSide.join(', ')} ${unit}` : 'Just the bar'}">
+      <rect class="pb-shaft" x="0" y="${mid - 4}" width="${collarX}" height="8" rx="2"></rect>
+      ${collarX >= 70 ? `<text class="pb-bar-label" x="${collarX / 2}" y="${mid - 12}" text-anchor="middle">Bar ${bar} ${unit}</text>` : ''}
+      <rect class="pb-collar" x="${collarX}" y="${mid - 15}" width="10" height="30" rx="2"></rect>
+      <rect class="pb-sleeve" x="${collarX + 10}" y="${mid - 7}" width="${W - collarX - 14}" height="14" rx="3"></rect>
+      ${platesSvg}
+    </svg>`;
+  }
+
+  let plateDialogEl = null;
+  function plateDialog() {
+    if (plateDialogEl) return plateDialogEl;
+    plateDialogEl = document.createElement('dialog');
+    plateDialogEl.className = 'plate-dialog';
+    plateDialogEl.setAttribute('aria-labelledby', 'plateTitle');
+    // Keys stay inside the calculator, so Escape or Tab never reaches a sheet underneath it.
+    plateDialogEl.addEventListener('keydown', (ev) => ev.stopPropagation());
+    plateDialogEl.addEventListener('click', (ev) => { if (ev.target === plateDialogEl) plateDialogEl.close(); });
+    document.body.appendChild(plateDialogEl);
+    return plateDialogEl;
+  }
+
+  function openPlateCalculator(row) {
+    const input = row.querySelector('.set-weight');
+    const unit = Units.weightUnitLabel() === 'kg' ? 'kg' : 'lb';
+    const bar = S.BAR_WEIGHT[unit];
+    const plates = S.PLATES[unit];
+    const C = window.FitCalc;
+    // Start from this set's weight, else the set above it, else the empty bar.
+    const above = row.previousElementSibling && row.previousElementSibling.querySelector('.set-weight');
+    const start = parseFloat(input.value) || (above && parseFloat(above.value)) || bar;
+    let perSide = C.platesPerSide(start, bar, plates).perSide;
+    const total = () => round(bar + 2 * perSide.reduce((t, p) => t + p, 0), 2);
+    const dlg = plateDialog();
+    dlg.innerHTML = `
+      <div class="plate-sheet">
+        <div class="modal-title-row"><h2 id="plateTitle">Plates</h2><button type="button" class="modal-close" data-plate="close" aria-label="Close">${CLOSE_ICON_SVG}</button></div>
+        <div class="plate-total" aria-live="polite"></div>
+        <div class="plate-bar"></div>
+        <div class="plate-add">
+          <span class="field-label">Add to each side</span>
+          <div class="plate-chips" style="--n:${plates.length}">${plates.map((p) => `<button type="button" class="plate-chip" data-add-plate="${p}" aria-label="Add a ${p} ${unit} plate to each side">${p}</button>`).join('')}</div>
+        </div>
+        <label class="field"><span class="field-label">Or type a total (${unit})</span>
+          <input type="number" step="any" inputmode="decimal" class="plate-typed" placeholder="${bar}" /></label>
+        <p class="plate-note" hidden></p>
+        <div class="btn-row plate-actions">
+          <button type="button" class="btn btn-secondary" data-plate="clear">Clear</button>
+          <button type="button" class="btn btn-primary" data-plate="use"></button>
+        </div>
+      </div>`;
+    const typed = dlg.querySelector('.plate-typed');
+    const note = dlg.querySelector('.plate-note');
+    const paint = () => {
+      const t = total();
+      const side = perSide.reduce((a, p) => a + p, 0);
+      dlg.querySelector('.plate-total').innerHTML = `<b class="num">${t}</b> <span class="plate-unit">${unit}</span>
+        <span class="plate-sub">${perSide.length ? `Bar ${bar} + ${round(side, 2)} each side` : `Just the bar, ${bar} ${unit}`}</span>`;
+      dlg.querySelector('.plate-bar').innerHTML = plateBarSvg(perSide, unit, bar);
+      dlg.querySelector('[data-plate="use"]').textContent = `Use ${t} ${unit}`;
+    };
+    const fromTyped = () => {
+      const v = parseFloat(typed.value);
+      if (Number.isNaN(v)) { note.hidden = true; return; }
+      const r = C.platesPerSide(Math.min(v, PLATE_MAX_TOTAL[unit]), bar, plates);
+      perSide = r.perSide;
+      note.hidden = !(v < bar || r.short > 0);
+      note.textContent = v < bar ? `The empty bar is ${bar} ${unit}.` : `Closest you can load is ${r.loaded} ${unit}, ${r.short} ${unit} short.`;
+      paint();
+    };
+    dlg.querySelector('.plate-chips').addEventListener('click', (ev) => {
+      const b = ev.target.closest('[data-add-plate]');
+      if (!b) return;
+      const p = Number(b.dataset.addPlate);
+      if (total() + 2 * p > PLATE_MAX_TOTAL[unit]) { toast(`That's more than ${PLATE_MAX_TOTAL[unit]} ${unit}.`); return; }
+      perSide = [...perSide, p].sort((a, c) => c - a);
+      typed.value = total();
+      note.hidden = true;
+      paint();
+    });
+    const takeOff = (el) => {
+      perSide.splice(Number(el.dataset.plateIdx), 1);
+      typed.value = perSide.length ? total() : '';
+      note.hidden = true;
+      paint();
+      const next = dlg.querySelector(`.pb-plate[data-plate-idx="${Math.min(Number(el.dataset.plateIdx), perSide.length - 1)}"]`);
+      (next || dlg.querySelector('.plate-chip')).focus();
+    };
+    const barEl = dlg.querySelector('.plate-bar');
+    barEl.addEventListener('click', (ev) => { const g = ev.target.closest('.pb-plate'); if (g) takeOff(g); });
+    barEl.addEventListener('keydown', (ev) => {
+      const g = ev.target.closest('.pb-plate');
+      if (g && (ev.key === 'Enter' || ev.key === ' ' || ev.key === 'Delete' || ev.key === 'Backspace')) { ev.preventDefault(); takeOff(g); }
+    });
+    typed.addEventListener('input', fromTyped);
+    dlg.querySelector('[data-plate="clear"]').addEventListener('click', () => { perSide = []; typed.value = ''; note.hidden = true; paint(); });
+    dlg.querySelector('[data-plate="close"]').addEventListener('click', () => dlg.close());
+    dlg.querySelector('[data-plate="use"]').addEventListener('click', () => {
+      input.value = String(total());
+      delete input.dataset.canon;
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      dlg.close();
+      const reps = row.querySelector('.set-reps');
+      (reps && !reps.value ? reps : input).focus();
+    });
+    paint();
+    if (start > bar) typed.value = total();
+    dlg.showModal();
+  }
+
   function renderDynamicFields(container, exercise, existingEntry) {
     const form = container.closest('#logForm');
     if (form) form.classList.toggle('is-habit', !!exercise && exercise.kind === 'habit');
@@ -1343,6 +1508,7 @@
       return;
     }
     const sets = (existingEntry && existingEntry.sets && existingEntry.sets.length) ? existingEntry.sets : [{}];
+    const plates = usesPlates(exercise);
     // "Last time": the previous session on this exact exercise, with a one-tap way
     // to start from the same sets.
     const lastEntry = existingEntry ? null : entriesFor(exercise.id).filter((en) => en.sets && en.sets.length).sort((a, b) => (b.date + b.id).localeCompare(a.date + a.id))[0];
@@ -1356,9 +1522,13 @@
       ${lastHtml}
       <div class="sets-wrap" data-kind="${exercise.kind}">
         <div class="sets-label"><span class="field-label">Sets</span><button type="button" class="btn-ghost" data-action="add-set">+ Add set</button></div>
-        <div class="sets-container">${sets.map((s, i) => setRowHtml(setRowKind(exercise), i, s)).join('')}</div>
+        <div class="sets-container">${sets.map((s, i) => setRowHtml(setRowKind(exercise), i, s, plates)).join('')}</div>
         ${exercise.kind === 'weight' ? '<div class="best-note" aria-live="polite"></div>' : ''}
       </div>`;
+    if (plates) container.querySelector('.sets-wrap').addEventListener('click', (ev) => {
+      const btn = ev.target.closest('[data-action="plates"]');
+      if (btn) openPlateCalculator(btn.closest('.set-row'));
+    });
     if (exercise.kind === 'weight') {
       const refresh = () => updateBestNote(container, exercise, existingEntry);
       container.querySelector('.sets-wrap').addEventListener('input', refresh);
@@ -1367,14 +1537,14 @@
     }
     const copyBtn = container.querySelector('[data-action="copy-last"]');
     if (copyBtn) copyBtn.addEventListener('click', () => {
-      container.querySelector('.sets-container').innerHTML = lastEntry.sets.map((st, i) => setRowHtml(setRowKind(exercise), i, { weight: st.weight, reps: st.reps, addedWeight: st.addedWeight })).join('');
+      container.querySelector('.sets-container').innerHTML = lastEntry.sets.map((st, i) => setRowHtml(setRowKind(exercise), i, { weight: st.weight, reps: st.reps, addedWeight: st.addedWeight }, plates)).join('');
       wireSetRemoveButtons(container); wireSetPrimaryButtons(container);
       if (exercise.kind === 'weight') updateBestNote(container, exercise, existingEntry);
     });
     container.querySelector('[data-action="add-set"]').addEventListener('click', () => {
       const wrap = container.querySelector('.sets-container');
       const idx = wrap.children.length;
-      wrap.insertAdjacentHTML('beforeend', setRowHtml(setRowKind(exercise), idx, {}));
+      wrap.insertAdjacentHTML('beforeend', setRowHtml(setRowKind(exercise), idx, {}, plates));
       wireSetRemoveButtons(container);
       wireSetPrimaryButtons(container);
     });
@@ -1532,7 +1702,7 @@
     card.innerHTML = `
       <span class="streak-top">
         <span class="streak-main">${FLAME_ICON_SVG}<span class="streak-num">${streak}</span><span class="streak-label">day streak</span></span>
-        <span class="streak-week-text">${week.filter((d) => d.on).length} of 7 days this week${CHEVRON_RIGHT_SVG}</span>
+        <span class="streak-week-text">${week.filter((d) => d.on).length} of 7 days${CHEVRON_RIGHT_SVG}</span>
       </span>
       <span class="streak-week">
         ${week.map((d) => `<span class="streak-day">${d.label}<span class="streak-dot${d.on ? ' on' : ''}">${d.on ? CHECK_ICON_SVG : ''}</span></span>`).join('')}
@@ -1970,7 +2140,7 @@
       const priorTop = prior.length ? (isLowerBetter(ex) ? Math.min(...prior) : Math.max(...prior)) : null;
       const isBest = val != null && priorTop != null && (isLowerBetter(ex) ? val < priorTop : val > priorTop);
       const tiesBest = val != null && priorTop != null && val === priorTop;
-      const topText = top && ex.kind === 'weight' ? ` · top ${fmtWeight(top.weight)} × ${top.reps}` : '';
+      const topText = top && ex.kind === 'weight' ? ` · top ${keepTogether(`${fmtWeight(top.weight)} × ${top.reps}`)}` : '';
       return `
         <div class="glance-row" data-exercise-id="${ex.id}">
           <div class="glance-open">
@@ -3053,7 +3223,7 @@
     return {
       id: 'macros', name: 'Where calories came from', sub: `Last 7 days, ${plural(days.size, 'day')} logged`,
       plot: `<div class="split-bar" role="img" aria-label="${parts.map((p) => `${p.label} ${p.pct}%`).join(', ')}">${parts.map((p) => `<span class="${p.cls}" style="flex:${Math.max(p.pct, 1)} 1 0"></span>`).join('')}</div>
-        <div class="split-key">${parts.map((p) => `<div><i class="sw ${p.cls}"></i><span>${p.label}</span><b>${p.pct}%</b><span class="muted-text">${Math.round(p.g)} g a day</span></div>`).join('')}</div>`,
+        <div class="split-key">${parts.map((p) => `<div><span class="split-name"><i class="sw ${p.cls}"></i>${p.label}</span><b>${p.pct}%</b><span class="muted-text">${Math.round(p.g)} g a day</span></div>`).join('')}</div>`,
       table: { head: ['Macro', 'g a day', 'Share'], rows: parts.map((p) => [p.label, String(Math.round(p.g)), `${p.pct}%`]) },
     };
   }
@@ -3374,10 +3544,13 @@
     return m;
   }
 
+  // A set like "165 lb × 5" wraps as one piece, never leaving the 5 on a line of its own.
+  const keepTogether = (text) => text.replace(/ /g, '\u00a0');
+
   function lastResultText(ex, entry) {
     if (ex.kind === 'habit') return 'done';
     const top = topSetOf(ex, entry);
-    if (ex.kind === 'weight' && top) return `${round(Units.lbToDisplay(top.weight), 1)} ${Units.weightUnitLabel()} × ${top.reps}`;
+    if (ex.kind === 'weight' && top) return keepTogether(`${round(Units.lbToDisplay(top.weight), 1)} ${Units.weightUnitLabel()} × ${top.reps}`);
     if (ex.kind === 'reps' && top) return isTimed(ex) ? fmtHold(top.reps) : `${top.reps} reps`;
     if (ex.kind === 'cardio') {
       const bits = [];
@@ -4789,7 +4962,8 @@
     if (!exercise) return '';
     if (exercise.kind === 'habit') return entry.time ? `Done · ${new Date(`2000-01-01T${entry.time}`).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}` : 'Done';
     if (exercise.kind === 'weight') {
-      return (entry.sets || []).map((s) => `${round(Units.lbToDisplay(s.weight), 1)}${Units.weightUnitLabel()}×${s.reps}`).join(', ');
+      const sets = (entry.sets || []).map((s) => keepTogether(`${round(Units.lbToDisplay(s.weight), 1)} × ${s.reps}`));
+      return sets.length ? `${sets.join(' · ')} ${Units.weightUnitLabel()}` : '';
     }
     if (exercise.kind === 'reps') {
       return (entry.sets || []).map((s) => `${isTimed(exercise) ? fmtHold(s.reps) : s.reps}${s.addedWeight ? ` (+${round(Units.lbToDisplay(s.addedWeight), 1)}${Units.weightUnitLabel()})` : ''}`).join(', ') + (isTimed(exercise) ? '' : ' reps');
@@ -5667,7 +5841,7 @@
       const dates = Object.keys(byDate).sort().reverse();
       wrap.innerHTML = dates.map((date) => {
         const dayEntries = byDate[date].sort((a, b) => b.id.localeCompare(a.id));
-        return `<div class="manage-group-label">${fmtDateShort(date)} — ${macroSummaryText(foodTotalsForDate(date))}</div>` +
+        return `<div class="manage-group-label">${fmtDateShort(date)} · ${macroSummaryText(foodTotalsForDate(date))}</div>` +
           dayEntries.map(foodEntryRowHtml).join('');
       }).join('');
       wireFoodEntryRowClicks(wrap);
@@ -5976,6 +6150,9 @@
         <div class="card card-list"><div class="setting-row">
           <span>Favorite<span class="muted-text">Shows under Favorites and at the top of the exercise list</span></span>
           ${switchHtml('id="exFavorite"', 'Favorite', false)}
+        </div><div class="setting-row" id="plateCalcRow" hidden>
+          <span>Plate calculator<span class="muted-text">A plates button beside the weight when you log a set</span></span>
+          ${switchHtml('id="exPlates"', 'Plate calculator', false)}
         </div></div>
 
         <div class="field">
@@ -6041,6 +6218,19 @@
     const favSwitch = document.getElementById('exFavorite');
     favSwitch.setAttribute('aria-checked', String(selectedFavorite));
     favSwitch.addEventListener('click', () => { selectedFavorite = !selectedFavorite; favSwitch.setAttribute('aria-checked', String(selectedFavorite)); });
+    // Plate calculator: the saved choice, else a guess from the name that follows typing
+    // until the switch is touched.
+    let selectedPlates = ex ? usesPlates(ex) : false;
+    let platesTouched = !!ex;
+    const platesSwitch = document.getElementById('exPlates');
+    const paintPlates = () => platesSwitch.setAttribute('aria-checked', String(selectedPlates));
+    paintPlates();
+    platesSwitch.addEventListener('click', () => { platesTouched = true; selectedPlates = !selectedPlates; paintPlates(); });
+    document.getElementById('exName').addEventListener('input', () => {
+      if (platesTouched) return;
+      selectedPlates = looksLikeBarbell({ name: document.getElementById('exName').value, kind: 'weight' });
+      paintPlates();
+    });
     // Goal style for a weight exercise with a lift type: 'fixed' (typed number) or
     // 'standard' (bodyweight tier; see computeStandardGoal). Defaults to the saved
     // value, else 'fixed', so an existing goal is never overwritten silently.
@@ -6177,6 +6367,7 @@
     function renderGoalField() {
       const wrap = document.getElementById('goalFieldWrap');
       document.getElementById('bodyRegionField').hidden = selectedKind !== 'weight';
+      document.getElementById('plateCalcRow').hidden = selectedKind !== 'weight';
       renderStandardField();
       if (selectedKind === 'weight') {
         wrap.innerHTML = weightGoalFieldHtml();
@@ -6276,6 +6467,7 @@
         ex.section = selectedSection;
         ex.group = selectedGroup;
         ex.favorite = selectedFavorite;
+        if (selectedKind === 'weight') ex.plateCalc = selectedPlates; else delete ex.plateCalc;
         if (selectedKind === 'weight') {
           ex.bodyRegion = selectedRegion;
           ex.goalMode = usingStandardGoal ? 'standard' : 'fixed';
@@ -6295,6 +6487,7 @@
       } else {
         const newEx = { id: genId('ex'), name, kind: selectedKind, section: selectedSection, group: selectedGroup, favorite: selectedFavorite, goal, goalMode: 'fixed', goalTier: null, archived: false, createdAt: new Date().toISOString() };
         if (selectedKind === 'weight') {
+          newEx.plateCalc = selectedPlates;
           newEx.bodyRegion = selectedRegion;
           newEx.goalMode = usingStandardGoal ? 'standard' : 'fixed';
           newEx.goalTier = usingStandardGoal ? selectedGoalTier : null;

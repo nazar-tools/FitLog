@@ -126,6 +126,19 @@
     return { slope, last: my + slope * (xs[n - 1] - mx) };
   }
 
+  /** Plates for one side of a bar that load `total` as closely as possible without going
+   *  over, heaviest first. `plates` is the set to use, heaviest first. Works in hundredths
+   *  so 1.25 kg plates add up exactly. Returns { perSide, loaded, short }, where `short` is
+   *  what could not be loaded (0 when the total is exact). */
+  function platesPerSide(total, bar, plates) {
+    const c = (v) => Math.round(v * 100);
+    let left = Math.floor(Math.max(0, c(total) - c(bar)) / 2);
+    const perSide = [];
+    plates.forEach((p) => { while (left >= c(p)) { perSide.push(p); left -= c(p); } });
+    const loaded = (c(bar) + 2 * perSide.reduce((t, p) => t + c(p), 0)) / 100;
+    return { perSide, loaded, short: Math.max(0, Math.round((c(total) - c(loaded))) / 100) };
+  }
+
   /** `list` is one tracker's measurements. Two views of the same data:
    *  `window` covers the last S.SLEEP.windowDays calendar nights and gets a
    *  category only with at least S.SLEEP.minNightsForLabel nights logged;
@@ -238,7 +251,7 @@
     return { key, label: std.label, group: std.group, load: std.load, metric: std.metric, results, best };
   }
 
-  const api = { localDateISO, addDaysISO, weekStarts, trailingAverage, linearTrend, activityDays, computeStreak, computeWeekStreak, longestStreak, weekStartISO, loggingRhythm, sleepInsights, bestEstimatedOneRM, bestReps, bestAddedOneRM, strengthLevel };
+  const api = { localDateISO, addDaysISO, platesPerSide, weekStarts, trailingAverage, linearTrend, activityDays, computeStreak, computeWeekStreak, longestStreak, weekStartISO, loggingRhythm, sleepInsights, bestEstimatedOneRM, bestReps, bestAddedOneRM, strengthLevel };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.FitCalc = api;
 })(typeof window !== 'undefined' ? window : globalThis);

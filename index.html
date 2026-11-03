@@ -5,7 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <!-- Two theme-color tags gated by media, so the OS repaints the status bar itself (a JS-driven
      change alone doesn't on Android). app.js only touches them when Appearance is forced to
-     Light or Dark. Keep the colors in sync with --page in css/styles.css. -->
+     Light or Dark. Keep the colors in sync with --page in css/styles.css.
+     manifest.json uses the dark page color for both its colors: an installed app on Android
+     paints the system navigation bar from the manifest, which holds one color, so a light one
+     left a white bar in dark mode. -->
 <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f9f9f7" />
 <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0d0d0d" />
 <title>Fit Log</title>
@@ -127,9 +130,9 @@
       </div>
 
       <!-- Log -> Daily: habits and daily rep targets (rendered by renderLogDailyPanel). -->
-      <div class="f-scroll pg" id="logTrackerChipsWrap" hidden><div class="f-chips" id="logTrackerChips" role="radiogroup" aria-label="Tracker"></div></div>
       <!-- The small two-line summary every Log tab opens with (renderLogGlance). -->
       <div id="logGlance" class="card log-glance" hidden></div>
+      <div class="f-scroll pg" id="logTrackerChipsWrap" hidden><div class="f-chips" id="logTrackerChips" role="radiogroup" aria-label="Tracker"></div></div>
       <div id="logDailyPanel" class="daily-panel" hidden></div>
 
       <!-- Log -> Workout. Nothing chosen yet (or "Switch exercise" tapped):

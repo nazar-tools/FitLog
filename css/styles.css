@@ -204,10 +204,12 @@ button { font-family: inherit; }
 /* Containers that stack blocks use the same --stack-gap as .view and .modal-sheet. */
 #setupContent,
 #manageExercisesPanel,
+#manageDailyPanel,
 #manageMeasurementsPanel,
 #manageWaterPanel,
 #manageFoodPanel,
 #workoutTrackedFields,
+#dailyTrackedFields,
 #measurementsTrackedFields,
 #waterTrackedFields,
 #foodTrackedFields {
@@ -286,12 +288,12 @@ button { font-family: inherit; }
   box-shadow: 0 0 28px color-mix(in srgb, var(--streak) 14%, transparent);
 }
 .streak-top { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-12); }
-.streak-main { display: flex; align-items: center; gap: var(--sp-8); }
+.streak-main { display: flex; align-items: center; gap: var(--sp-8); flex: none; }
 .streak-main .icon { width: 30px; height: 30px; color: var(--muted); }
-.streak-num { font-size: var(--fs-display); font-weight: 800; line-height: 1; color: var(--muted); }
-.streak-label { font-size: var(--fs-md); font-weight: 600; color: var(--text-secondary); }
+.streak-num { font-size: var(--fs-display); font-weight: 800; line-height: 1; color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.streak-label { font-size: var(--fs-md); font-weight: 600; color: var(--text-secondary); white-space: nowrap; }
 .is-hot .streak-main .icon, .is-hot .streak-num { color: var(--streak); }
-.streak-week-text { display: flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-sm); color: var(--text-secondary); }
+.streak-week-text { display: flex; align-items: center; justify-content: flex-end; gap: var(--sp-2); min-width: 0; font-size: var(--fs-sm); color: var(--text-secondary); text-align: right; overflow-wrap: normal; }
 .streak-week-text .icon { width: 16px; height: 16px; color: var(--muted); }
 .streak-week { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: var(--sp-4); margin-top: var(--sp-12); text-align: center; }
 .streak-day { display: flex; flex-direction: column; align-items: center; gap: var(--sp-6); font-size: var(--fs-xs); color: var(--text-secondary); }
@@ -529,6 +531,8 @@ button { font-family: inherit; }
 
 .manage-group-label { font-size: var(--fs-xs); font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin: var(--sp-12) 0 var(--sp-2); }
 .manage-group-label:first-child { margin-top: 0; }
+.entry-list > .manage-group-label { margin: 0; padding: var(--sp-12) var(--sp-16) var(--sp-4); font-size: var(--fs-sm); font-weight: 600; text-transform: none; letter-spacing: 0; color: var(--text-secondary); }
+.entry-list > .manage-group-label:not(:first-child) { border-top: 1px solid var(--gridline); }
 
 /* The Beginner..Elite bodyweight-standard preview shown alongside tier
    selection, both in the setup wizard and Manage -> Exercises. */
@@ -814,7 +818,8 @@ input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; marg
 .entry-row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .entry-row-main { display: flex; flex: 1; flex-direction: column; gap: var(--sp-2); min-width: 0; }
 .entry-row-title { font-size: var(--fs-md); font-weight: 600; }
-.entry-row-sub { font-size: var(--fs-xs); color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Up to two lines, so "· today" or a set's last number is not cut off on a narrow phone. */
+.entry-row-sub { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; font-size: var(--fs-xs); color: var(--text-secondary); overflow-wrap: normal; }
 .entry-row-date { font-size: var(--fs-xs); color: var(--muted); white-space: nowrap; }
 .entry-row.is-manage { cursor: default; }
 .entry-row-actions { display: flex; gap: var(--sp-6); }
@@ -1397,7 +1402,7 @@ button.row-switch { width: 100%; border: 0; background: none; font: inherit; col
 
 .kpi-row { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: var(--sp-8); }
 .kpi { display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; padding: var(--sp-12); background: var(--surface-1); border: 1px solid var(--border); border-radius: var(--radius-md); }
-.kpi b { font-size: var(--fs-lg); font-weight: 800; line-height: 1.2; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.kpi b { font-size: var(--fs-lg); font-weight: 800; line-height: 1.2; font-variant-numeric: tabular-nums; white-space: nowrap; overflow-wrap: normal; }
 .kpi b small { font-size: var(--fs-xs); font-weight: 600; color: var(--text-secondary); }
 .kpi span { font-size: var(--fs-xs); color: var(--text-secondary); line-height: 1.3; }
 
@@ -1493,9 +1498,70 @@ button.row-switch { width: 100%; border: 0; background: none; font: inherit; col
 .split-bar span.m2 { background: var(--macro-2); }
 .split-bar span.m3 { background: var(--macro-3); }
 .split-key { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-8); }
-.split-key > div { display: grid; grid-template-columns: auto 1fr; align-items: center; column-gap: var(--sp-6); font-size: var(--fs-sm); }
-.split-key b { grid-column: 2; font-size: var(--fs-lg); font-weight: 800; }
-.split-key .muted-text { grid-column: 2; font-size: var(--fs-xs); }
+.split-key > div { display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; font-size: var(--fs-sm); }
+.split-name { display: flex; align-items: center; gap: var(--sp-6); }
+.split-key b { font-size: var(--fs-lg); font-weight: 800; line-height: 1.2; }
+.split-key .muted-text { font-size: var(--fs-xs); }
 
 .rec-row { cursor: default; }
 .rec-value { flex: none; font-weight: 800; font-variant-numeric: tabular-nums; }
+
+/* Plate calculator (openPlateCalculator in app.js)
+   A barbell set's weight field and its plates button read as one control. The calculator is
+   a <dialog> styled like the bottom sheets. */
+.weight-plates { display: flex; min-width: 0; }
+.weight-plates input { flex: 1 1 auto; min-width: 0; border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.plates-btn {
+  flex: none; display: flex; align-items: center; justify-content: center; width: 36px;
+  background: var(--surface-2); border: 1px solid var(--border); border-left: 1px solid var(--gridline);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0; color: var(--accent); cursor: pointer;
+}
+.plates-btn .icon { width: 20px; height: 20px; }
+.plates-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.set-row.set-row-3.has-plates[data-primary] { grid-template-columns: minmax(0, 2.1fr) minmax(0, 1fr) minmax(0, 1fr) auto auto; }
+.set-row .field-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.plate-dialog {
+  width: 100%; max-width: 560px; max-height: 92vh; margin: auto auto 0; padding: 0; border: 0;
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0; background: var(--surface-1); color: var(--text-primary);
+  box-shadow: var(--shadow-sheet); overflow-y: auto;
+}
+.plate-dialog::backdrop { background: var(--overlay); }
+.plate-sheet { display: flex; flex-direction: column; gap: var(--sp-16); padding: var(--sp-24) var(--gutter) calc(var(--sp-24) + env(safe-area-inset-bottom)); }
+.plate-total { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: var(--sp-6); }
+.plate-total b { font-size: var(--fs-3xl); font-weight: 800; line-height: 1.1; }
+.plate-unit { font-size: var(--fs-base); font-weight: 700; color: var(--text-secondary); }
+.plate-sub { flex-basis: 100%; font-size: var(--fs-sm); color: var(--text-secondary); }
+.plate-bar { padding: var(--sp-8) 0; border-radius: var(--radius-md); background: var(--surface-2); }
+.plate-svg { display: block; width: 100%; height: auto; }
+.plate-svg .pb-shaft { fill: var(--baseline); }
+.plate-svg .pb-collar { fill: var(--border-strong); }
+.plate-svg .pb-sleeve { fill: var(--surface-1); stroke: var(--baseline); stroke-width: 1; }
+.plate-svg .pb-bar-label { fill: var(--muted); font-size: var(--fs-xs); font-weight: 600; }
+.plate-svg .pb-plate { cursor: pointer; outline: none; }
+.plate-svg .pb-plate rect { fill: var(--accent-fill); }
+.plate-svg .pb-plate text { fill: var(--on-accent); font-size: var(--fs-xs); font-weight: 800; font-variant-numeric: tabular-nums; pointer-events: none; }
+.plate-svg .pb-plate:hover rect { fill: var(--accent); }
+.plate-svg .pb-plate:focus-visible rect { stroke: var(--text-primary); stroke-width: 2; }
+.plate-add { display: flex; flex-direction: column; gap: var(--sp-8); }
+.plate-chips { display: grid; grid-template-columns: repeat(var(--n), minmax(0, 1fr)); gap: var(--sp-6); }
+.plate-chip {
+  min-height: 48px; padding: 0; border-radius: 999px; border: 1px solid var(--border); background: var(--surface-2);
+  font: inherit; font-size: var(--fs-md); font-weight: 800; color: var(--text-primary); cursor: pointer; font-variant-numeric: tabular-nums;
+}
+.plate-chip:active { background: var(--accent-track); color: var(--on-accent-track); }
+.plate-note { font-size: var(--fs-sm); color: var(--warning-ink); }
+.plate-actions { margin-top: 0; }
+.plate-actions .btn { flex: 1 1 0; }
+.plate-actions .btn-primary { flex-grow: 2; }
+
+@media (max-width: 359px) {
+  /* Narrow phones: tighter set rows so weight, reps and RPE keep readable widths. */
+  .set-row { column-gap: var(--sp-4); }
+  .set-row input { padding-inline: var(--sp-6); }
+  .set-row-remove, .set-row-star { width: 36px; }
+  .plates-btn { width: 32px; }
+  /* Three tiles share 250px here, so the number and its unit stay on one line. */
+  .kpi { padding: var(--sp-8); }
+  .kpi b { font-size: var(--fs-base); }
+}
