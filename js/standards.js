@@ -252,6 +252,9 @@
 
   const STREAK_RULE = 'A day counts when you log anything in a section you track: a workout or habit, food, water or a body entry.';
 
+  // Weekly hard sets per muscle group linked with more growth (see REFERENCES 'weeklySets').
+  const WEEKLY_SETS_TARGET = 10;
+
   const REFERENCES = [
     { id: 'streak', title: 'Day streak', kind: 'assumption',
       summary: STREAK_RULE + ' Today may be empty without breaking the streak until the day ends.',
@@ -261,6 +264,10 @@
       source: { label: 'Hirshkowitz et al. 2015 (NSF), Sleep Health', url: 'https://doi.org/10.1016/j.sleh.2014.12.010' },
       alt: { label: 'Watson et al. 2015 (AASM/SRS), SLEEP', url: 'https://doi.org/10.5665/sleep.4716' },
       caveat: 'Needs vary by person. This is not a medical assessment.' },
+    { id: 'weeklySets', title: 'Sets per muscle a week', kind: 'reference',
+      summary: 'Progress counts every logged set of a lift or bodyweight exercise in the Workout area toward that exercise\'s muscle group, Monday to Sunday. Cardio and Daily targets are left out. Doing ' + WEEKLY_SETS_TARGET + ' or more sets per muscle a week is linked with more muscle growth than doing fewer, so the chart marks ' + WEEKLY_SETS_TARGET + '. Each exercise counts toward the one group set in its form.',
+      source: { label: 'Schoenfeld, Ogborn & Krieger 2017, J Sports Sci', url: 'https://doi.org/10.1080/02640414.2016.1210197' },
+      caveat: 'A guide for building muscle, not a rule. Effort and recovery matter as much as the count.' },
     { id: 'oneRM', title: 'Estimated 1RM', kind: 'reference',
       summary: 'Epley formula: weight x (1 + reps / 30). Only sets of ' + ONE_RM_MAX_REPS + ' reps or fewer are used, because the estimate drifts high on longer sets. A set of one rep is a real lift and is labelled as such; everything else is calculated.',
       source: { label: 'Epley, B. (1985) Poundage Chart, Boyd Epley Workout', url: null },
@@ -308,7 +315,7 @@
     reviewed: '2026-10-20',
     LB_PER_KG,
     TIER_LABELS, STRENGTH, STRENGTH_KEYS, strengthThresholds, tierIndex, CATALOG_STANDARDS, standardKeyFor,
-    ONE_RM_MAX_REPS, estimateOneRM, BAR_WEIGHT, PLATES,
+    ONE_RM_MAX_REPS, estimateOneRM, BAR_WEIGHT, PLATES, WEEKLY_SETS_TARGET,
     RUN_TIER_LABELS, RUN_5K, RUN_MIN_MI, RUN_MAX_MI, DEFAULT_RUN_AGE, fiveKEquivalentSec, runThresholds, runLevel,
     BMI_CATEGORIES, bmiFromKgCm, bmiCategory,
     SLEEP, sleepCategory,

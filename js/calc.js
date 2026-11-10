@@ -126,6 +126,19 @@
     return { slope, last: my + slope * (xs[n - 1] - mx) };
   }
 
+  /** Sets per group for each of `weeks` (Monday ISO dates, oldest first). `items` are
+   *  { date, group, sets }; anything outside the weeks is ignored. Returns { group: counts[] }. */
+  function setsPerGroupWeek(items, weeks) {
+    const index = Object.fromEntries(weeks.map((w, i) => [w, i]));
+    const out = {};
+    items.forEach((it) => {
+      const i = index[weekStartISO(it.date)];
+      if (i === undefined) return;
+      (out[it.group] = out[it.group] || weeks.map(() => 0))[i] += it.sets;
+    });
+    return out;
+  }
+
   /** Plates for one side of a bar that load `total` as closely as possible without going
    *  over, heaviest first. `plates` is the set to use, heaviest first. Works in hundredths
    *  so 1.25 kg plates add up exactly. Returns { perSide, loaded, short }, where `short` is
@@ -251,7 +264,7 @@
     return { key, label: std.label, group: std.group, load: std.load, metric: std.metric, results, best };
   }
 
-  const api = { localDateISO, addDaysISO, platesPerSide, weekStarts, trailingAverage, linearTrend, activityDays, computeStreak, computeWeekStreak, longestStreak, weekStartISO, loggingRhythm, sleepInsights, bestEstimatedOneRM, bestReps, bestAddedOneRM, strengthLevel };
+  const api = { localDateISO, addDaysISO, platesPerSide, setsPerGroupWeek, weekStarts, trailingAverage, linearTrend, activityDays, computeStreak, computeWeekStreak, longestStreak, weekStartISO, loggingRhythm, sleepInsights, bestEstimatedOneRM, bestReps, bestAddedOneRM, strengthLevel };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.FitCalc = api;
 })(typeof window !== 'undefined' ? window : globalThis);

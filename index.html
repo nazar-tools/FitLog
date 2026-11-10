@@ -96,22 +96,10 @@
 
     </section>
 
-    <!-- PROGRESS - every goal card plus the body & wellness trends -->
+    <!-- PROGRESS - one card per tracked area: its chart, then its long-term goals -->
     <section id="view-progress" class="view" data-view="progress" hidden>
       <div class="section-head"><h2>Progress</h2></div>
-      <div class="segmented segmented-fill" id="progressSeg" role="radiogroup" aria-label="Progress view">
-        <button type="button" role="radio" data-progress-seg="goals">Goals</button>
-        <button type="button" role="radio" data-progress-seg="charts">Charts</button>
-      </div>
-
-      <div id="progressGoals">
-        <div id="goalsGroups"></div>
-        <div id="goalsEmpty" class="empty-state" hidden>
-          <p>No goals yet. Set a target on an exercise, a body tracker or your daily food and it shows up here.</p>
-        </div>
-      </div>
-
-      <div id="progressCharts" hidden>
+      <div id="progressCharts">
         <div id="chartsOverview" class="charts-overview"></div>
         <div id="dashboardEmpty" class="empty-state" hidden>
           <p>Nothing to chart yet. Turn on an area in Manage and log something, and its chart shows up here.</p>
@@ -536,6 +524,15 @@
             <button type="button" data-unit-choice="mL" role="radio">mL</button>
           </div>
         </div>
+      </div>
+
+      <div class="section-head"><h2>Logging</h2></div>
+      <div class="card card-list">
+        <div class="setting-row">
+          <span class="setting-row-label"><span class="setting-icon" data-icon="gauge"></span><span>RPE <span class="muted-text">(how hard each set felt, 1 to 10)</span></span></span>
+          <button type="button" class="switch" id="showRpeSwitch" role="switch" aria-checked="true" aria-label="RPE"><span class="switch-track"><span class="switch-thumb"></span></span></button>
+        </div>
+        <p class="muted-text field-hint">Off hides the RPE field on sets and runs. Ratings you already logged are kept.</p>
       </div>
 
       <div class="section-head"><h2>Home screen</h2></div>

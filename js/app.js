@@ -57,6 +57,8 @@
     showSleepInsights: true,
     // Daily-value guidance in the Food detail modal.
     showMacroGuidance: true,
+    // The RPE (effort) field on set rows and runs. Off only hides the field; logged ratings stay.
+    showRpe: true,
     // Master "Track this" switches. trackWorkout is the Lifting switch; the Workout
     // area stays on while Lifting or Running & cardio is on, and Daily follows trackHabits (js/features.js).
     // An off area is hidden from Log, History and Home. Manage always shows it so it
@@ -1275,6 +1277,9 @@
     return toCanon(v);
   }
   const setRowKind = (ex) => (isTimed(ex) ? 'timed' : ex.kind);
+  // With RPE switched off in Settings the field stays in the form, hidden, so editing an
+  // entry never drops a rating logged earlier.
+  const rpeHidden = () => (state.settings.showRpe ? '' : ' hidden');
   function setRowHtml(kind, idx, set, plates) {
     set = set || {};
     const timed = kind === 'timed';
@@ -1287,11 +1292,11 @@
         ? `<div class="field"><span class="field-label" aria-hidden="true">${label}</span><div class="weight-plates">${input}<button type="button" class="plates-btn" data-action="plates" aria-label="Plate calculator" title="Plate calculator">${PLATES_ICON_SVG}</button></div></div>`
         : `<label class="field"><span class="field-label">${label}</span>${input}</label>`;
       return `
-        <div class="set-row set-row-3${plates ? ' has-plates' : ''}" data-set-idx="${idx}" data-primary="${set.primary ? '1' : '0'}">
+        <div class="set-row set-row-3${plates ? ' has-plates' : ''}${state.settings.showRpe ? '' : ' no-rpe'}" data-set-idx="${idx}" data-primary="${set.primary ? '1' : '0'}">
           ${weightField}
           <label class="field"><span class="field-label">Reps</span>
             <input type="number" step="1" min="1" inputmode="numeric" class="set-reps" value="${set.reps ?? ''}" placeholder="0" /></label>
-          <label class="field"><span class="field-label">RPE</span>
+          <label class="field"${rpeHidden()}><span class="field-label">RPE</span>
             <input type="number" step="0.5" min="1" max="10" inputmode="decimal" class="set-rpe" value="${set.rpe ?? ''}" placeholder="opt." /></label>
           <button type="button" class="set-row-star ${set.primary ? 'is-active' : ''}" data-action="toggle-primary" aria-label="Mark as working set" title="Mark as working set (used for suggestions)">★</button>
           <button type="button" class="set-row-remove" data-action="remove-set" aria-label="Remove set">${CLOSE_ICON_SVG}</button>
@@ -1300,12 +1305,12 @@
     // reps kind (bodyweight), or a timed hold
     const aw = set.addedWeight ? round(Units.lbToDisplay(set.addedWeight), 2) : '';
     return `
-      <div class="set-row set-row-3" data-set-idx="${idx}">
+      <div class="set-row set-row-3${state.settings.showRpe ? '' : ' no-rpe'}" data-set-idx="${idx}">
         <label class="field"><span class="field-label">${timed ? 'Time (sec)' : 'Reps'}</span>
           <input type="number" step="1" min="1" inputmode="numeric" class="set-reps" value="${set.reps ?? ''}" placeholder="0" /></label>
         <label class="field"><span class="field-label">Added wt (${Units.weightUnitLabel()})</span>
           <input type="number" step="any" inputmode="decimal" class="set-addedweight" value="${aw}"${canonAttr(set.addedWeight || null)} placeholder="opt." /></label>
-        <label class="field"><span class="field-label">RPE</span>
+        <label class="field"${rpeHidden()}><span class="field-label">RPE</span>
           <input type="number" step="0.5" min="1" max="10" inputmode="decimal" class="set-rpe" value="${set.rpe ?? ''}" placeholder="opt." /></label>
         <button type="button" class="set-row-remove" data-action="remove-set" aria-label="Remove set">${CLOSE_ICON_SVG}</button>
       </div>`;
@@ -1328,7 +1333,7 @@
           </div>
         </div>
       </div>
-      <label class="field"><span class="field-label">Effort / RPE (optional, 1–10)</span>
+      <label class="field"${rpeHidden()}><span class="field-label">Effort / RPE (optional, 1–10)</span>
         <input type="number" step="0.5" min="1" max="10" inputmode="decimal" id="cardioRpe" value="${entry.rpe ?? ''}" placeholder="How hard did that feel?" /></label>`;
   }
 
@@ -1515,7 +1520,7 @@
     const setText = (st) => exercise.kind === 'weight' ? `${round(Units.lbToDisplay(st.weight), 2)} × ${st.reps}` : `${isTimed(exercise) ? fmtHold(st.reps) : st.reps}${st.addedWeight ? ` +${round(Units.lbToDisplay(st.addedWeight), 2)}` : ''}`;
     const lastHtml = lastEntry ? `
       <div class="last-time">
-        <div class="last-time-head"><span class="lbl">Last time · ${escapeHtml(fmtDateShort(lastEntry.date))}</span><button type="button" class="link-btn" data-action="copy-last">Copy sets</button></div>
+        <div class="last-time-head"><span class="last-time-label">Last time · ${escapeHtml(fmtDateShort(lastEntry.date))}</span><button type="button" class="btn btn-secondary btn-sm" data-action="copy-last">Copy sets</button></div>
         <div class="last-time-sets num">${lastEntry.sets.map(setText).join(' · ')}</div>
       </div>` : '';
     container.innerHTML = `
@@ -2376,32 +2381,6 @@
     renderGoalsStrip();
   }
 
-  // Progress: every goal card (including ones also shown on Home today),
-  // then the body & wellness trends.
-  let progressSeg = 'goals';
-
-  function renderProgressGoals() {
-    const goals = collectGoals();
-    const groups = [
-      ['Lifts', (g) => g.type === 'lift'],
-      ['Body', (g) => g.type === 'body'],
-      ['Today', (g) => g.type === 'food'],
-      ['Daily reps and habits', (g) => g.type === 'daily'],
-      ['Cardio', (g) => g.type === 'cardio'],
-    ];
-    const wrap = document.getElementById('goalsGroups');
-    let idx = 0; const flat = [];
-    wrap.innerHTML = groups.map(([title, test]) => {
-      const list = goals.filter(test);
-      if (!list.length) return '';
-      const rows = list.map((g) => { flat.push(g); return goalRowHtml(g, idx++); }).join('');
-      const met = list.filter((g) => g.met).length;
-      return `<div class="section-head"><h2>${title}</h2><span class="muted-text">${met ? `${met} of ${list.length} met` : ''}</span></div><div class="card card-list">${rows}</div>`;
-    }).join('');
-    document.getElementById('goalsEmpty').hidden = goals.length > 0;
-    wrap.querySelectorAll('[data-goal-idx]').forEach((row) => wireOpenable(row.querySelector('.glance-open'), flat[Number(row.dataset.goalIdx)].open));
-  }
-
   /* Progress charts
      Charts leads with one card per tracked area, all scoped by one range: the last 4, 12, 26
      or 52 weeks, Monday to Sunday. Details opens a sheet per area with the same range. Today
@@ -2451,7 +2430,19 @@
     </table></div>`;
   }
 
-  // One chart card: { id, icon, name, sub, open, extra, plot, table, legend, note, empty: { text, have, need } }.
+  // A card's long-term goals (collectGoals rows), as compact meters under its chart.
+  function cardGoalsHtml(goals) {
+    if (!goals || !goals.length) return '';
+    const met = goals.filter((g) => g.met).length;
+    return `<div class="cc-goals"><div class="cc-goals-head"><span>Goals</span>${met ? `<span>${met} of ${goals.length} met</span>` : ''}</div>${goals.map((g, i) => `
+      <button type="button" class="cc-goal${g.met ? ' is-complete' : ''}" data-goal-i="${i}">
+        <span class="cc-goal-line"><span class="cc-goal-name">${escapeHtml(g.name)}</span>
+          ${g.met ? '<span class="tag tag-good">Goal met</span>' : `<span class="cc-goal-value">${g.cur}<span class="muted-text"> ${g.arrow ? '→' : '/'} ${g.goal}</span></span>`}</span>
+        <span class="meter meter-sm"><span class="meter-fill${g.met ? ' is-complete' : ''}" style="--fill:${Math.min(100, g.pct || 0)}%"></span></span>
+      </button>`).join('')}</div>`;
+  }
+
+  // One chart card: { id, icon, name, sub, open, extra, plot, table, legend, note, goals, empty: { text, have, need } }.
   function chartCardHtml(c) {
     const asTable = !!c.table && chartTables.has(c.id);
     const head = `
@@ -2464,6 +2455,7 @@
       const { text, have, need } = c.empty;
       return `<div class="card chart-card" data-chart-card="${c.id}">${head}${c.extra || ''}
         <div class="cc-empty"><p>${text}</p>${need ? `<div class="meter meter-sm"><div class="meter-fill" style="--fill:${Math.min(100, (have / need) * 100)}%"></div></div><p class="muted-text">${have} of ${need} logged</p>` : ''}</div>
+        ${cardGoalsHtml(c.goals)}
       </div>`;
     }
     return `<div class="card chart-card" data-chart-card="${c.id}">${head}${c.extra || ''}
@@ -2471,6 +2463,7 @@
       ${c.table ? `<div class="cc-table"${asTable ? '' : ' hidden'}>${chartTableHtml(c.table)}</div>` : ''}
       ${c.legend || c.table ? `<div class="cc-foot"><div class="cc-key">${c.legend || ''}</div>${c.table ? `<button type="button" class="link-btn" data-cc-table aria-pressed="${asTable}">${asTable ? 'Show chart' : 'Show table'}</button>` : ''}</div>` : ''}
       ${c.note ? `<p class="cc-note">${c.note}</p>` : ''}
+      ${cardGoalsHtml(c.goals)}
     </div>`;
   }
 
@@ -2480,6 +2473,7 @@
       if (!el) return;
       const more = el.querySelector('[data-cc-open]');
       if (more && c.open) more.addEventListener('click', c.open);
+      el.querySelectorAll('[data-goal-i]').forEach((b) => b.addEventListener('click', () => c.goals[Number(b.dataset.goalI)].open()));
       const tbl = el.querySelector('[data-cc-table]');
       if (tbl) tbl.addEventListener('click', () => {
         const on = !chartTables.has(c.id);
@@ -2797,6 +2791,48 @@
       if (seg) seg.addEventListener('click', (ev) => { const b = ev.target.closest('[data-seg]'); if (b) { metricFor[selId] = b.dataset.seg; repaint(); } });
       wireChartCards(body, cards);
     });
+  }
+
+  /* Sets per muscle */
+
+  // Logged sets per muscle group, Monday to Sunday, for the range's weeks: lifts and bodyweight
+  // moves in the Workout area only (not cardio or Daily targets). See S.REFERENCES 'weeklySets'.
+  function muscleSetsByWeek(weeks) {
+    const items = [];
+    state.entries.forEach((e) => {
+      if (e.date > todayISO()) return;
+      const ex = exerciseById(e.exerciseId);
+      if (!ex || isDailyEx(ex) || !(ex.kind === 'weight' || ex.kind === 'reps')) return;
+      const sets = (e.sets || []).filter((st) => st.reps > 0).length;
+      const group = exerciseGroup(ex);
+      if (sets && group !== 'cardio') items.push({ date: e.date, group, sets });
+    });
+    return window.FitCalc.setsPerGroupWeek(items, weeks);
+  }
+
+  function muscleSetsCard() {
+    if (!domainTracked('workout')) return null;
+    const weeks = rangeWeeks();
+    const byGroup = muscleSetsByWeek(weeks);
+    const groups = EXERCISE_GROUPS.map(([g]) => g).filter((g) => byGroup[g]);
+    if (!groups.length) return null;
+    const target = S.WEEKLY_SETS_TARGET;
+    const now = weeks.length - 1;
+    const firstWeek = weeks.findIndex((_, i) => groups.some((g) => byGroup[g][i] > 0));
+    const done = (g) => byGroup[g].slice(firstWeek, now);
+    const rows = groups.map((g) => ({
+      group: g, label: EXERCISE_GROUP_LABELS[g], value: byGroup[g][now], prev: now > 0 ? byGroup[g][now - 1] : null,
+      avg: done(g).length ? mean(done(g)) : null,
+    }));
+    const lastWeekHit = rows.filter((r) => (r.prev || 0) >= target).length;
+    return {
+      id: 'muscles', icon: itemIconHtml('biceps'), name: 'Sets per muscle',
+      sub: now > 0 ? `Last week ${lastWeekHit} of ${plural(rows.length, 'muscle group')} reached ${target} sets` : 'This week so far',
+      plot: Charts.hbars(rows, { mark: target, markText: `${target} sets`, label: `Sets per muscle group this week so far: ${rows.map((r) => `${r.label} ${r.value}`).join(', ')}. ${target} sets a week is marked.` }),
+      legend: [keyItem('sw now', 'This week, so far'), now > 0 ? keyItem('tk', 'Last week') : '', keyItem('ln goal', `${target} sets a week`)].join(''),
+      table: { head: ['Muscle', 'This week', 'Last week', `Avg, ${rangeInfo()[1]}`], rows: rows.map((r) => [r.label, `${r.value} so far`, r.prev != null ? String(r.prev) : '—', r.avg != null ? String(round(r.avg, 1)) : '—']) },
+      note: 'Every logged set of a lift or bodyweight move counts toward its exercise\'s muscle group. Change the group in Manage.',
+    };
   }
 
   /* Daily */
@@ -3294,7 +3330,13 @@
     const wrap = document.getElementById('chartsOverview');
     Charts.setWidth(chartWidthIn(wrap));
     chartsDrawnAt = wrap.clientWidth;
-    const cards = [workoutOverviewCard(), dailyOverviewCard(), bodyOverviewCard(), waterOverviewCard(), domainTracked('food') ? caloriesCard(() => openFoodCharts()) : null].filter(Boolean);
+    const cards = [workoutOverviewCard(), muscleSetsCard(), dailyOverviewCard(), bodyOverviewCard(), waterOverviewCard(), domainTracked('food') ? caloriesCard(() => openFoodCharts()) : null].filter(Boolean);
+    // Long-term goals sit under their area's chart. Today's targets (Daily, food) stay on Home and Log.
+    const goals = collectGoals();
+    cards.forEach((c) => {
+      if (c.id === 'workout') c.goals = goals.filter((g) => g.type === 'lift' || g.type === 'cardio');
+      if (c.id === 'body') c.goals = goals.filter((g) => g.type === 'body');
+    });
     document.getElementById('dashboardEmpty').hidden = cards.length > 0;
     wrap.innerHTML = cards.length ? `${rangeSegHtml()}${kpiRowHtml(overviewTiles())}${cards.map(chartCardHtml).join('')}` : '';
     if (!cards.length) return;
@@ -3326,17 +3368,13 @@
       chartRange = b.dataset.seg;
       sheet.querySelectorAll('.chart-range [data-seg]').forEach((x) => x.setAttribute('aria-checked', String(x.dataset.seg === chartRange)));
       repaint();
-      if (!document.getElementById('progressCharts').hidden) renderProgressCharts();
+      if (!document.getElementById('view-progress').hidden) renderProgressCharts();
     });
     repaint();
   }
 
   function renderProgress() {
-    document.querySelectorAll('#progressSeg [data-progress-seg]').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.progressSeg === progressSeg)));
-    document.getElementById('progressGoals').hidden = progressSeg !== 'goals';
-    document.getElementById('progressCharts').hidden = progressSeg !== 'charts';
-    if (progressSeg === 'goals') renderProgressGoals();
-    else renderProgressCharts();
+    renderProgressCharts();
   }
 
   // Daily {date, value} points for one macro, for the Food detail Trend chart.
@@ -4510,6 +4548,7 @@
     get scale() { return itemIconSvg('scale'); },
     get moon() { return itemIconSvg('moon'); },
     get footprints() { return itemIconSvg('footprints'); },
+    get gauge() { return itemIconSvg('gauge'); },
     trophy: lucide('<path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/>'),
     chart: lucide('<path d="M3 3v16a2 2 0 0 0 2 2h16"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/>'),
     calendar: lucide('<path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/>'),
@@ -7138,7 +7177,7 @@
     trackWaterSwitch: 'trackWater', trackFoodSwitch: 'trackFood', trackHabitsSwitch: 'trackHabits', trackCardioSwitch: 'trackCardio',
     showWeightInsightsSwitch: 'showWeightInsights', showStrengthLevelSwitch: 'showStrengthLevel',
     showPaceLevelSwitch: 'showPaceLevel', showSleepInsightsSwitch: 'showSleepInsights',
-    showMacroGuidanceSwitch: 'showMacroGuidance',
+    showMacroGuidanceSwitch: 'showMacroGuidance', showRpeSwitch: 'showRpe',
   };
   // Home-block switches write into settings.homeSections rather than a flat key.
   const homeSwitches = {
@@ -8302,9 +8341,8 @@
     document.querySelectorAll('[data-action="add-exercise"]').forEach((btn) => btn.addEventListener('click', () => openExerciseForm(null)));
     document.querySelectorAll('[data-action="add-tracker"]').forEach((btn) => btn.addEventListener('click', () => openTrackerForm(null)));
     document.querySelectorAll('[data-action="add-cup"]').forEach((btn) => btn.addEventListener('click', () => openCupForm(null)));
-    document.getElementById('progressSeg').addEventListener('click', (ev) => { const b = ev.target.closest('[data-progress-seg]'); if (!b) return; progressSeg = b.dataset.progressSeg; renderProgress(); });
     document.getElementById('homeFoodPencil').addEventListener('click', () => openManageCategory('food'));
-    document.getElementById('goalsOpenBtn').addEventListener('click', () => { progressSeg = 'goals'; switchTab('progress'); });
+    document.getElementById('goalsOpenBtn').addEventListener('click', () => switchTab('progress'));
     document.querySelectorAll('[data-action="open-catalog"]').forEach((btn) => btn.addEventListener('click', () => openCatalogSheet(btn.dataset.catTabOpen)));
     document.querySelectorAll('[data-action="add-saved-food"]').forEach((btn) => btn.addEventListener('click', () => openSavedFoodForm(null)));
 

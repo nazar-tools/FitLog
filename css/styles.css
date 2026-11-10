@@ -1180,9 +1180,7 @@ button.row-switch { width: 100%; border: 0; background: none; font: inherit; col
 .mini-delta { font-size: var(--fs-xs); color: var(--text-secondary); }
 .mini-delta.is-good { color: var(--good); }
 .mini-delta.is-bad { color: var(--warning-ink); }
-.segmented-fill + #progressGoals, #progressSeg + div { margin-top: var(--sp-12); }
-#goalsGroups, #progressGoals, #progressCharts { display: flex; flex-direction: column; gap: var(--sp-12); }
-#goalsGroups .section-head { margin-top: var(--sp-4); }
+#progressCharts { display: flex; flex-direction: column; gap: var(--sp-12); }
 .mini-head .icon-btn-sm { width: 32px; height: 32px; }
 #home-log-icon, .btn svg.icon { flex: none; }
 #homeLogSetBtn, #homeAddFoodBtn { display: inline-flex; align-items: center; justify-content: center; gap: var(--sp-6); }
@@ -1338,11 +1336,10 @@ button.row-switch { width: 100%; border: 0; background: none; font: inherit; col
 .pick-chip.is-on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-strong); }
 .pick-chip.is-fixed { opacity: .8; cursor: default; }
 
-.last-time { display: flex; flex-direction: column; gap: var(--sp-6); padding: var(--sp-12) var(--sp-16); margin-bottom: var(--sp-8); border-radius: var(--radius-md); background: var(--surface-2); }
+.last-time { display: flex; flex-direction: column; gap: var(--sp-6); padding: var(--sp-12) 0; border-block: 1px solid var(--gridline); }
 .last-time-head { display: flex; justify-content: space-between; align-items: center; gap: var(--sp-8); }
-.last-time-sets { font-weight: 700; font-size: var(--fs-base); overflow-wrap: anywhere; }
-/* "Last time" is a full-width band across the top of the fields card, not a box inside it. */
-#logFields .last-time { margin: 0 calc(var(--card-pad) * -1) var(--sp-4); border-radius: 0; border-block: 1px solid var(--gridline); }
+.last-time-label { font-size: var(--fs-sm); color: var(--text-secondary); }
+.last-time-sets { font-weight: 700; font-size: var(--fs-base); overflow-wrap: normal; }
 #logForm > .log-head.card { padding: var(--sp-12) var(--sp-16); }
 
 /* ---------- About the numbers ---------- */
@@ -1430,6 +1427,7 @@ button.row-switch { width: 100%; border: 0; background: none; font: inherit; col
 .cc-key .ln { width: 14px; height: 2px; border-radius: 1px; background: var(--accent); }
 .cc-key .ln.est { height: 0; background: none; border-top: 2px dashed var(--accent); opacity: .55; }
 .cc-key .ln.goal { height: 0; background: none; border-top: 2px dashed var(--text-secondary); opacity: .6; }
+.cc-key .tk { width: 2px; height: 12px; border-radius: 1px; background: var(--text-secondary); }
 .sw.over { background: var(--chart-over); }
 .sw.open { background: var(--surface-1); box-shadow: inset 0 0 0 1.5px var(--accent); }
 .sw.band { background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--accent-track); }
@@ -1459,6 +1457,8 @@ button.row-switch { width: 100%; border: 0; background: none; font: inherit; col
 .chart-svg .cline { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .chart-svg .cest { fill: none; stroke: var(--accent); stroke-width: 2; stroke-dasharray: 4 4; opacity: .5; }
 .chart-svg .cend { fill: var(--accent); stroke: var(--surface-1); stroke-width: 2; }
+.chart-svg .ctick { stroke: var(--text-secondary); stroke-width: 2; stroke-linecap: round; }
+.chart-svg .ctrack { fill: var(--surface-2); }
 .chart-svg .cpt { fill: var(--accent); }
 .chart-svg .halo { paint-order: stroke; stroke: var(--surface-1); stroke-width: 4px; stroke-linejoin: round; }
 .is-food .chart-svg .cline { stroke: var(--dot-food); }
@@ -1519,6 +1519,10 @@ button.row-switch { width: 100%; border: 0; background: none; font: inherit; col
 .plates-btn .icon { width: 20px; height: 20px; }
 .plates-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .set-row.set-row-3.has-plates[data-primary] { grid-template-columns: minmax(0, 2.1fr) minmax(0, 1fr) minmax(0, 1fr) auto auto; }
+/* RPE switched off in Settings: its field is hidden, so the row drops a column. */
+.set-row.set-row-3.no-rpe { grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) auto; }
+.set-row.set-row-3.no-rpe[data-primary] { grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) auto auto; }
+.set-row.set-row-3.no-rpe.has-plates[data-primary] { grid-template-columns: minmax(0, 1.8fr) minmax(0, 1fr) auto auto; }
 .set-row .field-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 .plate-dialog {
@@ -1565,3 +1569,19 @@ button.row-switch { width: 100%; border: 0; background: none; font: inherit; col
   .kpi { padding: var(--sp-8); }
   .kpi b { font-size: var(--fs-base); }
 }
+
+/* Long-term goals under an area's chart on Progress (cardGoalsHtml). */
+.cc-goals { display: flex; flex-direction: column; border-top: 1px solid var(--gridline); }
+.cc-goals-head { display: flex; justify-content: space-between; gap: var(--sp-8); padding-top: var(--sp-12); font-size: var(--fs-xs); font-weight: 600; color: var(--text-secondary); }
+.cc-goals-head + .cc-goal { padding-top: var(--sp-8); }
+.cc-goal { display: flex; flex-direction: column; gap: var(--sp-6); width: 100%; padding: var(--sp-12) 0 var(--sp-8); border: 0; background: none; font: inherit; color: inherit; text-align: left; cursor: pointer; }
+.cc-goal + .cc-goal { border-top: 1px solid var(--gridline); }
+.cc-goal:last-child { padding-bottom: 0; }
+.cc-goal:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--radius-sm); }
+.cc-goal-line { display: flex; align-items: baseline; justify-content: space-between; gap: var(--sp-8); }
+.cc-goal-name { min-width: 0; font-size: var(--fs-md); font-weight: 600; }
+.cc-goal-value { flex: none; font-size: var(--fs-md); font-weight: 700; font-variant-numeric: tabular-nums; }
+.cc-goal-value .muted-text { font-weight: 400; }
+.cc-goal .meter-sm { margin-top: 0; }
+.cc-goal .meter, .cc-goal .meter-fill { display: block; }
+.sw.now { background: var(--accent); }
