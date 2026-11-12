@@ -1221,9 +1221,6 @@ button.row-switch { width: 100%; border: 0; background: none; font: inherit; col
 .chip-lead { flex: none; align-self: center; font-size: var(--fs-xs); font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); padding-right: var(--sp-2); }
 
 /* ---------- Log > Food (matches the Food boards) ---------- */
-.add-btn { flex: none; width: 44px; height: 44px; border-radius: 50%; border: 0; background: var(--accent-fill); color: var(--on-accent); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; }
-.add-btn svg { width: 20px; height: 20px; }
-.add-btn:active { transform: scale(.94); }
 .saved-food-log-row .entry-row-sub { white-space: normal; }
 .qty-label { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-8); }
 .row-icon { flex: none; width: 40px; height: 40px; border-radius: 12px; background: var(--surface-2); display: inline-flex; align-items: center; justify-content: center; color: var(--text-primary); }
@@ -1635,3 +1632,25 @@ button.row-switch { width: 100%; border: 0; background: none; font: inherit; col
 .mm .mm-m.l1, .sw.mm-l1 { fill: color-mix(in srgb, var(--accent) 34%, var(--surface-2)); background: color-mix(in srgb, var(--accent) 34%, var(--surface-2)); }
 .mm .mm-m.l2, .sw.mm-l2 { fill: color-mix(in srgb, var(--accent) 66%, var(--surface-2)); background: color-mix(in srgb, var(--accent) 66%, var(--surface-2)); }
 .mm .mm-m.l3, .sw.mm-l3 { fill: var(--accent); background: var(--accent); }
+
+/* Motion
+   Short and quiet: a view or sheet eases in once when it appears, meters and bars grow to
+   their value, and a control answers a press. The reduced-motion rule above turns it all off. */
+@keyframes rise-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+@keyframes sheet-in { from { opacity: .4; transform: translateY(32px); } to { opacity: 1; transform: none; } }
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes grow-x { from { transform: scaleX(0); } to { transform: none; } }
+@keyframes grow-y { from { transform: scaleY(0); } to { transform: none; } }
+@keyframes pop-in { 0% { transform: scale(.5); } 60% { transform: scale(1.2); } 100% { transform: none; } }
+@keyframes toast-in { from { opacity: 0; transform: translate(-50%, 8px); } to { opacity: 1; transform: translate(-50%, 0); } }
+.view.is-entering { animation: rise-in .2s ease-out; }
+.modal-sheet.is-entering { animation: sheet-in .24s cubic-bezier(.2, .8, .2, 1); }
+.modal-root:not([hidden]) > .modal-backdrop { animation: fade-in .2s ease-out; }
+.is-entering .meter-fill { transform-origin: left center; animation: grow-x .5s cubic-bezier(.2, .7, .2, 1) both; }
+.is-entering .chart-svg .cbar { transform-box: fill-box; transform-origin: center bottom; animation: grow-y .45s cubic-bezier(.2, .7, .2, 1) both; }
+.is-entering .chart-svg .cline, .is-entering .chart-svg .cpt, .is-entering .chart-svg .cend, .is-entering .chart-svg .cdot, .is-entering .mm .mm-m { animation: fade-in .45s ease-out both; }
+.toast:not([hidden]) { animation: toast-in .2s ease-out; }
+.item-fold[open] > :not(summary) { animation: fade-in .2s ease-out; }
+.glance-row.just-done .glance-value > svg { animation: pop-in .35s ease-out; }
+.btn, .quick-chip, .f-chip, .domain-tab, .icon-btn, .tab { transition: transform .08s ease, background-color .15s ease, border-color .15s ease, color .15s ease; }
+.btn:active, .quick-chip:active, .f-chip:active, .domain-tab:active, .icon-btn:active { transform: scale(.97); }

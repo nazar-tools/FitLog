@@ -65,7 +65,7 @@
     showSuggestions: true, showMuscleSets: true,
     // Daily tracks one Workout goal (a gym session or any daily reps) instead of each rep item.
     dailyWorkoutGoal: true,
-    // Sets per muscle opens as the body map or as bars; the card's link switches and saves it.
+    // Sets per muscle shows as the body map, bars or a table; the card's one link steps through them.
     muscleView: 'map',
     // Master "Track this" switches. trackWorkout is the Lifting switch; the Workout
     // area stays on while Lifting or Running & cardio is on, and Daily follows trackHabits (js/features.js).
@@ -244,6 +244,8 @@
     if (!ex) return;
     state.entries.push({ id: genId('en'), exerciseId: ex.id, date: todayISO(), time: new Date().toTimeString().slice(0, 5), note: null });
     if (!save()) return;
+    justDoneId = ex.id;
+    setTimeout(() => { justDoneId = null; }, 700);
     toast(`${ex.name} done`);
     if (document.getElementById('logExercise').value === ex.id) renderLogForm();
     if (document.getElementById('habitDoneBtn')) renderHabitDetail(ex);
@@ -1004,6 +1006,18 @@
     toastTimer = setTimeout(() => { el.hidden = true; }, action ? 7000 : Math.max(2200, msg.length * 55));
   }
 
+  // Marks an element as just shown, so CSS can ease it and what it holds into place once.
+  function markEntering(el) {
+    if (!el) return;
+    el.classList.remove('is-entering');
+    void el.offsetWidth;
+    el.classList.add('is-entering');
+    clearTimeout(el.enterTimer);
+    el.enterTimer = setTimeout(() => el.classList.remove('is-entering'), 600);
+  }
+  // The Daily item just completed, so its tick can pop once.
+  let justDoneId = null;
+
   const modalRoot = () => document.getElementById('modalRoot');
   const modalSheet = () => document.getElementById('modalSheet');
   let modalLastFocusedEl = null;
@@ -1146,6 +1160,7 @@
     sheet.classList.toggle('is-detail-sheet', tall);
     sheet.classList.toggle('is-split-sheet', split);
     sheet.innerHTML = `<div class="modal-handle"></div>${html}`;
+    if (!wasOpen) markEntering(sheet);
     // Icon-only close buttons need a name for screen readers, and a bare <button> would
     // default to type=submit. Done here once instead of on every template.
     sheet.querySelectorAll('.modal-close:not([aria-label])').forEach((b) => b.setAttribute('aria-label', 'Close'));
@@ -1976,7 +1991,7 @@
     const complete = prog.pct != null && prog.pct >= 100;
     const isHabit = ex.kind === 'habit';
     return `
-      <div class="glance-row${complete ? ' is-complete' : ''}" data-exercise-id="${ex.id}">
+      <div class="glance-row${complete ? ' is-complete' : ''}${complete && ex.id === justDoneId ? ' just-done' : ''}" data-exercise-id="${ex.id}">
         <div class="glance-open">
           ${exerciseIconHtml(ex)}
           <div class="glance-main">
@@ -2892,8 +2907,11 @@
       avg: done(g).length ? mean(done(g)) : null,
     }));
     const lastWeekHit = rows.filter((r) => (r.prev || 0) >= target).length;
-    const asMap = state.settings.muscleView !== 'bars';
-    const swap = { label: asMap ? 'Show bars' : 'Show map', run: () => { state.settings.muscleView = asMap ? 'bars' : 'map'; if (save()) renderProgressCharts(); } };
+    // One button steps through the three views, so there is never a second switch to disagree with it.
+    const view = ['map', 'bars', 'table'].includes(state.settings.muscleView) ? state.settings.muscleView : 'map';
+    const next = { map: 'bars', bars: 'table', table: 'map' }[view];
+    const swap = { label: `Show ${next}`, run: () => { state.settings.muscleView = next; if (save()) renderProgressCharts(); } };
+    const asMap = view === 'map';
     const label = `Sets per muscle group this week so far: ${rows.map((r) => `${r.label} ${r.value}`).join(', ')}. ${target} sets a week is marked.`;
     // The map shades the six areas a body has; each step is a share of the weekly target.
     const level = (v) => (v <= 0 ? 0 : v >= target ? 3 : v >= target / 2 ? 2 : 1);
@@ -2905,11 +2923,11 @@
       plot: asMap
         ? `<div class="mm-wrap">${Charts.bodyMap(Object.fromEntries(areas.map((a) => [a.g, level(a.value)])), Object.fromEntries(areas.map((a) => [a.g, `${a.label}: ${plural(a.value, 'set')} this week`])), label)}
             <dl class="mm-list">${areas.map((a) => `<div><dt><i class="sw mm-l${level(a.value)}"></i>${a.label}</dt><dd>${a.value}</dd></div>`).join('')}</dl></div>`
-        : Charts.hbars(rows, { mark: target, markText: `${target} sets`, label }),
-      legend: asMap
+        : view === 'bars' ? Charts.hbars(rows, { mark: target, markText: `${target} sets`, label })
+        : chartTableHtml({ head: ['Muscle', 'This week', 'Last week', `Avg, ${rangeInfo()[1]}`], rows: rows.map((r) => [r.label, `${r.value} so far`, r.prev != null ? String(r.prev) : '-', r.avg != null ? String(round(r.avg, 1)) : '-']) }),
+      legend: view === 'table' ? '' : asMap
         ? [keyItem('sw mm-l0', '0'), keyItem('sw mm-l1', `1 to ${Math.ceil(half) - 1}`), keyItem('sw mm-l2', `${Math.ceil(half)} to ${target - 1}`), keyItem('sw mm-l3', `${target} or more sets this week`)].join('')
         : [keyItem('sw now', 'This week, so far'), now > 0 ? keyItem('tk', 'Last week') : '', keyItem('ln goal', `${target} sets a week`)].join(''),
-      table: { head: ['Muscle', 'This week', 'Last week', `Avg, ${rangeInfo()[1]}`], rows: rows.map((r) => [r.label, `${r.value} so far`, r.prev != null ? String(r.prev) : '—', r.avg != null ? String(round(r.avg, 1)) : '—']) },
       note: `Working sets of lifts and bodyweight moves count toward the exercise's muscle group. Warm-up sets, under ${S.WARMUP_CUTOFF * 100}% of that day's heaviest set, are left out.`,
     };
   }
@@ -4956,10 +4974,13 @@
     const wrap = document.getElementById('waterCupList');
     wrap.hidden = state.water.cups.length === 0;
     wrap.innerHTML = state.water.cups.map((cup) => `
-      <div class="entry-row">
-        <span class="item-icon item-icon-sm" aria-hidden="true">${itemIconSvg(cupIconKey(cup))}</span>
-        <div class="entry-row-main"><div class="entry-row-title">${escapeHtml(cup.name)}</div><div class="entry-row-sub">${fmtVolume(cup.amountMl)}</div></div>
-        <button type="button" class="add-btn" data-cup-id="${cup.id}" aria-label="Log one ${escapeHtml(cup.name)}">${uiIcon('plus')}</button>
+      <div class="glance-row">
+        ${itemIconHtml(cupIconKey(cup))}
+        <div class="glance-main">
+          <div class="glance-name">${escapeHtml(cup.name)}</div>
+          <div class="glance-sub">${fmtVolume(cup.amountMl)}</div>
+        </div>
+        <button type="button" class="btn btn-secondary btn-sm glance-btn" data-cup-id="${cup.id}" aria-label="Log one ${escapeHtml(cup.name)}">Log</button>
       </div>`).join('');
     wrap.querySelectorAll('[data-cup-id]').forEach((btn) => btn.addEventListener('click', () => {
       const cup = cupById(btn.dataset.cupId);
@@ -5646,7 +5667,7 @@
             <div class="entry-row-title">${escapeHtml(food.name)}</div>
             <div class="entry-row-sub num">${compactFoodLine(food)}</div>
           </div>
-          <button type="button" class="add-btn" data-quick-add="${food.id}" aria-label="Add one serving of ${escapeHtml(food.name)}">${uiIcon('plus')}</button>
+          <button type="button" class="btn btn-secondary btn-sm glance-btn" data-quick-add="${food.id}" aria-label="Log one serving of ${escapeHtml(food.name)}">Log</button>
         </div>
         ${expanded ? `
         <div class="card form-card saved-food-qty-card">
@@ -8435,7 +8456,9 @@
   // so no tab is highlighted for it.
   function switchTab(tab) {
     navOnSwitchTab(tab);
+    const shown = document.querySelector('.view:not([hidden])');
     document.querySelectorAll('.view').forEach((v) => { v.hidden = v.dataset.view !== tab; });
+    if (!shown || shown.dataset.view !== tab) markEntering(document.querySelector(`.view[data-view="${tab}"]`));
     document.querySelectorAll('.tab').forEach((t) => {
       if (t.dataset.tab === tab) t.setAttribute('aria-current', 'page');
       else t.removeAttribute('aria-current');
@@ -8825,7 +8848,7 @@
     document.getElementById('logDate').value = todayISO();
     document.getElementById('logMeasurementDate').value = todayISO();
     if (needsSetup) startSetupWizard();
-    else renderAll();
+    else { renderAll(); markEntering(document.querySelector('.view:not([hidden])')); }
     wireLiveSync();
     registerServiceWorker();
   }
