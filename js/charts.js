@@ -240,7 +240,15 @@ const Charts = (() => {
     if (opts.goal != null) {
       const gy = r1(y(opts.goal));
       out += `<line class="cgoal" x1="${padL}" x2="${padL + iw}" y1="${gy}" y2="${gy}"></line>`;
-      out += `<text class="ct strong halo" x="${padL + 4}" y="${r1(gy - 5)}">${esc(opts.goalText || `Goal ${fmt(opts.goal)}`)}</text>`;
+      // The label goes where it covers no reading: above the line at the left, then at the
+      // right, then below the line.
+      const text = opts.goalText || `Goal ${fmt(opts.goal)}`;
+      const tw = text.length * 7 + 8;
+      const marks = dots.concat(avg);
+      const covers = (lx, ly) => marks.some((p) => { const px = x(p.date); const py = y(p.value); return px > lx - 5 && px < lx + tw && py > ly - 15 && py < ly + 5; });
+      const spots = [[padL + 4, gy - 5], [padL + iw - tw, gy - 5], [padL + 4, gy + 14], [padL + iw - tw, gy + 14]];
+      const [lx, ly] = spots.find((s) => !covers(s[0], s[1])) || spots[0];
+      out += `<text class="ct strong halo" x="${r1(lx)}" y="${r1(ly)}">${esc(text)}</text>`;
     }
     if (!opts.connect) dots.forEach((p) => { out += `<circle class="cdot" cx="${r1(x(p.date))}" cy="${r1(y(p.value))}" r="3.5"></circle>`; });
     if (avg.length > 1) out += `<polyline class="cline" points="${avg.map((p) => `${r1(x(p.date))},${r1(y(p.value))}`).join(' ')}"></polyline>`;
@@ -280,12 +288,14 @@ const Charts = (() => {
     const labelW = 80;
     const n = dates.length;
     const gap = 3;
-    const cs = Math.min(15, (VBW - labelW - gap * (n - 1)) / n);
-    const pitch = cs + gap;
+    // Cells fill the width; past a square they grow sideways only, so a wide card does not get taller.
+    const cw = (VBW - labelW - gap * (n - 1)) / n;
+    const cs = Math.min(18, cw);
+    const pitch = cw + gap;
     const rowH = cs + 5;
     const top = 18;
     const H = top + rows.length * rowH;
-    let out = `<text class="ct" x="${labelW}" y="10">${esc(shortDate(dates[0]))}</text><text class="ct strong" x="${r1(labelW + pitch * (n - 1) + cs)}" y="10" text-anchor="end">Today</text>`;
+    let out = `<text class="ct" x="${labelW}" y="10">${esc(shortDate(dates[0]))}</text><text class="ct strong" x="${r1(labelW + pitch * (n - 1) + cw)}" y="10" text-anchor="end">Today</text>`;
     rows.forEach((row, ri) => {
       const ry = top + ri * rowH;
       const name = row.name.length > 12 ? `${row.name.slice(0, 11)}…` : row.name;
@@ -293,13 +303,82 @@ const Charts = (() => {
       row.cells.forEach((c, ci) => {
         const cx = labelW + ci * pitch;
         out += c === 'off' || c === 'open'
-          ? `<rect class="hm ${c}" x="${r1(cx + 0.75)}" y="${r1(ry + 0.75)}" width="${r1(cs - 1.5)}" height="${r1(cs - 1.5)}" rx="3.5"></rect>`
-          : `<rect class="hm ${c}" x="${r1(cx)}" y="${r1(ry)}" width="${r1(cs)}" height="${r1(cs)}" rx="4"></rect>`;
+          ? `<rect class="hm ${c}" x="${r1(cx + 0.75)}" y="${r1(ry + 0.75)}" width="${r1(cw - 1.5)}" height="${r1(cs - 1.5)}" rx="3.5"></rect>`
+          : `<rect class="hm ${c}" x="${r1(cx)}" y="${r1(ry)}" width="${r1(cw)}" height="${r1(cs)}" rx="4"></rect>`;
       });
     });
-    const t = tips.map((tip, i) => ({ x: r1(labelW + i * pitch + cs / 2), ...tip }));
+    const t = tips.map((tip, i) => ({ x: r1(labelW + i * pitch + cw / 2), ...tip }));
     const svg = `<svg viewBox="0 0 ${VBW} ${H}" class="chart-svg" aria-hidden="true">${out}${hairline(top - 3, H)}</svg>`;
     return boxHtml(svg, t, label);
+  }
+
+  /* Body map: a front and a back figure with one shape per muscle, each shaded by the level
+     (0 to 3) of the muscle group it belongs to. The drawing is the app's own: every shape is
+     a short list of points on a 200 x 400 figure, rounded into a smooth outline. Points are
+     given for the left half; `pair` shapes are mirrored, `mid` shapes run down the centre
+     line and close with their own mirror image. */
+  const BODY_SIL = [
+    ['mid', [[92, 43], [91, 51], [88, 60]]],
+    ['mid', [[86, 56], [66, 62], [55, 74], [58, 104], [64, 134], [67, 156], [63, 178], [60, 200], [78, 208]]],
+    ['pair', [[58, 64], [46, 68], [40, 86], [38, 116], [33, 146], [28, 176], [26, 198], [38, 202], [45, 178], [51, 150], [56, 124], [61, 100], [63, 80]]],
+    ['pair', [[26, 204], [24, 214], [28, 224], [35, 224], [38, 212], [36, 203]]],
+    ['pair', [[61, 196], [59, 228], [63, 260], [66, 280], [63, 306], [66, 344], [71, 372], [88, 372], [91, 344], [93, 306], [92, 282], [96, 260], [99, 230], [99, 200]]],
+    ['pair', [[66, 372], [62, 381], [67, 387], [88, 387], [92, 380], [89, 372]]],
+  ];
+  const BODY_ARM = [
+    ['arms', 'pair', [[45, 100], [57, 96], [60, 116], [55, 139], [46, 141], [40, 121]]],
+    ['arms', 'pair', [[40, 147], [53, 144], [50, 166], [43, 196], [29, 196], [33, 170]]],
+    ['shoulders', 'pair', [[63, 63], [51, 67], [43, 79], [42, 93], [49, 100], [57, 91], [63, 77]]],
+  ];
+  const BODY_FRONT = BODY_ARM.concat([
+    ['back', 'pair', [[91, 50], [89, 60], [70, 63], [82, 56]]],
+    ['chest', 'pair', [[67, 68], [84, 66], [98, 70], [98, 98], [86, 107], [70, 104], [61, 93], [62, 78]]],
+    ['core', 'pair', [[87, 109], [98, 109], [98, 123], [87, 123]]],
+    ['core', 'pair', [[87, 126], [98, 126], [98, 140], [87, 140]]],
+    ['core', 'pair', [[87, 143], [98, 143], [98, 157], [87, 157]]],
+    ['core', 'pair', [[88, 160], [98, 160], [98, 184], [92, 178]]],
+    ['core', 'pair', [[68, 108], [82, 110], [84, 134], [84, 160], [74, 168], [67, 150], [64, 128]]],
+    ['legs', 'pair', [[62, 200], [75, 198], [80, 230], [78, 262], [70, 272], [62, 250], [59, 224]]],
+    ['legs', 'pair', [[78, 198], [92, 202], [94, 238], [89, 268], [81, 270], [82, 234]]],
+    ['legs', 'pair', [[93, 203], [99, 206], [99, 240], [95, 252]]],
+    ['legs', 'pair', [[66, 288], [79, 284], [87, 300], [86, 330], [80, 360], [72, 362], [65, 330], [63, 306]]],
+  ]);
+  const BODY_BACK = BODY_ARM.concat([
+    ['back', 'mid', [[93, 46], [88, 58], [67, 63], [82, 74], [92, 96], [96, 114]]],
+    ['back', 'pair', [[63, 97], [80, 84], [93, 104], [96, 138], [89, 160], [75, 152], [66, 126]]],
+    ['back', 'mid', [[92, 146], [88, 160], [89, 176], [96, 186]]],
+    ['legs', 'pair', [[61, 192], [72, 186], [88, 186], [98, 192], [98, 214], [90, 226], [74, 228], [62, 218]]],
+    ['legs', 'pair', [[61, 232], [78, 232], [80, 266], [73, 276], [64, 264]]],
+    ['legs', 'pair', [[80, 232], [97, 230], [97, 260], [90, 276], [82, 268]]],
+    ['legs', 'pair', [[64, 286], [77, 282], [80, 312], [76, 342], [69, 344], [62, 314]]],
+    ['legs', 'pair', [[79, 282], [90, 286], [92, 312], [86, 342], [79, 344]]],
+  ]);
+
+  // A closed, rounded outline through the points (Catmull-Rom, written as cubic Béziers).
+  function blobPath(pts) {
+    const n = pts.length;
+    const at = (i) => pts[(i + n) % n];
+    let d = `M${r1(pts[0][0])} ${r1(pts[0][1])}`;
+    for (let i = 0; i < n; i++) {
+      const p0 = at(i - 1), p1 = at(i), p2 = at(i + 1), p3 = at(i + 2);
+      const k = 0.9 / 6;
+      d += `C${r1(p1[0] + (p2[0] - p0[0]) * k)} ${r1(p1[1] + (p2[1] - p0[1]) * k)} ${r1(p2[0] - (p3[0] - p1[0]) * k)} ${r1(p2[1] - (p3[1] - p1[1]) * k)} ${r1(p2[0])} ${r1(p2[1])}`;
+    }
+    return `${d}Z`;
+  }
+  const flipX = (pts) => pts.map(([x, y]) => [200 - x, y]);
+  function bodyShapes(kind, pts) {
+    return kind === 'mid' ? [blobPath(pts.concat(flipX(pts).reverse()))] : [blobPath(pts), blobPath(flipX(pts))];
+  }
+
+  // levels: { chest, back, legs, shoulders, arms, core } -> 0 to 3. `titles` names each group's value.
+  function bodyMap(levels, titles, label) {
+    const figure = (muscles, dx, name) => {
+      const sil = `<ellipse class="mm-sil" cx="100" cy="27" rx="16" ry="20"></ellipse>${BODY_SIL.map(([kind, pts]) => bodyShapes(kind, pts).map((d) => `<path class="mm-sil" d="${d}"></path>`).join('')).join('')}`;
+      const parts = muscles.map(([group, kind, pts]) => bodyShapes(kind, pts).map((d) => `<path class="mm-m l${levels[group] || 0}" d="${d}"><title>${esc(titles[group] || '')}</title></path>`).join('')).join('');
+      return `<g transform="translate(${dx} 0)">${sil}${parts}<text class="ct" x="100" y="408" text-anchor="middle">${name}</text></g>`;
+    };
+    return `<svg viewBox="0 0 410 414" class="chart-svg mm" role="img" aria-label="${esc(label)}">${figure(BODY_FRONT, 0, 'Front')}${figure(BODY_BACK, 210, 'Back')}</svg>`;
   }
 
   /* Horizontal bars, one row per category: this period's value as the bar, a tick for the
@@ -385,5 +464,5 @@ const Charts = (() => {
     tipsById.forEach((_, id) => { if (!document.querySelector(`[data-chart="${id}"]`)) tipsById.delete(id); });
   }
 
-  return { lineChart, columns, line, heatmap, hbars, wire, setWidth, compact, niceMax };
+  return { lineChart, columns, line, heatmap, hbars, bodyMap, wire, setWidth, compact, niceMax };
 })();

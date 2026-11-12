@@ -254,6 +254,8 @@
 
   // Weekly hard sets per muscle group linked with more growth (see REFERENCES 'weeklySets').
   const WEEKLY_SETS_TARGET = 10;
+  // A weighted set under this share of the day's heaviest set of the same exercise counts as a warm-up.
+  const WARMUP_CUTOFF = 0.6;
 
   const REFERENCES = [
     { id: 'streak', title: 'Day streak', kind: 'assumption',
@@ -265,13 +267,19 @@
       alt: { label: 'Watson et al. 2015 (AASM/SRS), SLEEP', url: 'https://doi.org/10.5665/sleep.4716' },
       caveat: 'Needs vary by person. This is not a medical assessment.' },
     { id: 'weeklySets', title: 'Sets per muscle a week', kind: 'reference',
-      summary: 'Progress counts every logged set of a lift or bodyweight exercise in the Workout area toward that exercise\'s muscle group, Monday to Sunday. Cardio and Daily targets are left out. Doing ' + WEEKLY_SETS_TARGET + ' or more sets per muscle a week is linked with more muscle growth than doing fewer, so the chart marks ' + WEEKLY_SETS_TARGET + '. Each exercise counts toward the one group set in its form.',
+      summary: 'Progress counts the working sets of each lift or bodyweight exercise in the Workout area toward that exercise\'s muscle group, Monday to Sunday. A weighted set under ' + (WARMUP_CUTOFF * 100) + '% of that day\'s heaviest set of the same exercise is treated as a warm-up and left out; that cut-off is the app\'s own. Cardio and Daily targets are left out. Doing ' + WEEKLY_SETS_TARGET + ' or more sets per muscle a week is linked with more muscle growth than doing fewer, so the chart marks ' + WEEKLY_SETS_TARGET + '. Each exercise counts toward the one group set in its form.',
       source: { label: 'Schoenfeld, Ogborn & Krieger 2017, J Sports Sci', url: 'https://doi.org/10.1080/02640414.2016.1210197' },
       caveat: 'A guide for building muscle, not a rule. Effort and recovery matter as much as the count.' },
     { id: 'oneRM', title: 'Estimated 1RM', kind: 'reference',
       summary: 'Epley formula: weight x (1 + reps / 30). Only sets of ' + ONE_RM_MAX_REPS + ' reps or fewer are used, because the estimate drifts high on longer sets. A set of one rep is a real lift and is labelled as such; everything else is calculated.',
       source: { label: 'Epley, B. (1985) Poundage Chart, Boyd Epley Workout', url: null },
+      alt: { label: 'LeSuer et al. 1997, J Strength Cond Res 11(4): prediction equations tested on bench press, squat and deadlift', url: null },
       caveat: 'An estimate, not a tested max.' },
+    { id: 'nextSession', title: 'Next session tips', kind: 'assumption',
+      summary: 'A tip compares the top set of your last session with the one before. With RPE logged: 6.5 or lower suggests a full step up, up to 7.5 half a step, under 9 one more rep at the same weight, and 9 or more holding the weight. Without RPE: matching or beating your reps at the same weight two sessions running, with 5 reps or more, suggests a step up. A step is 5 lb (2.5 kg) for upper-body lifts and 10 lb (5 kg) for lower-body lifts.',
+      source: { label: 'Helms et al. 2016, Strength Cond J (RPE based on reps in reserve)', url: 'https://doi.org/10.1519/SSC.0000000000000218' },
+      alt: { label: 'ACSM 2009 position stand, Med Sci Sports Exerc (raise load 2 to 10% once you beat the target by one to two reps)', url: 'https://pubmed.ncbi.nlm.nih.gov/19204579/' },
+      caveat: 'The bands and step sizes are the app\'s own reading of these sources, not a program. Adjust for sleep, soreness and how the bar felt.' },
     { id: 'liftLevels', title: 'Strength levels', kind: 'assumption',
       summary: 'Your best set against Strength Level\'s tables for your sex and exact body weight (blended between published rows). Each table has five lines: Beginner is stronger than about 5% of lifters, Novice 20%, Intermediate 50%, Advanced 80% and Elite 95%. Weight lifts use your best estimated 1RM (or best single). Rep exercises such as push-ups, pull-ups, dips and chin-ups use your best reps in one set; where the site has a table, pull-ups, chin-ups and dips also count added weight (1RM of the added load, from body weight plus the extra). Dumbbell tables are per dumbbell. Which table an exercise uses follows its movement and equipment (barbell and dumbbell bench differ).',
       source: { label: 'Strength Level standards (user-submitted lifts, to March 2026)', url: 'https://strengthlevel.com/strength-standards' },
@@ -315,7 +323,7 @@
     reviewed: '2026-10-20',
     LB_PER_KG,
     TIER_LABELS, STRENGTH, STRENGTH_KEYS, strengthThresholds, tierIndex, CATALOG_STANDARDS, standardKeyFor,
-    ONE_RM_MAX_REPS, estimateOneRM, BAR_WEIGHT, PLATES, WEEKLY_SETS_TARGET,
+    ONE_RM_MAX_REPS, estimateOneRM, BAR_WEIGHT, PLATES, WEEKLY_SETS_TARGET, WARMUP_CUTOFF,
     RUN_TIER_LABELS, RUN_5K, RUN_MIN_MI, RUN_MAX_MI, DEFAULT_RUN_AGE, fiveKEquivalentSec, runThresholds, runLevel,
     BMI_CATEGORIES, bmiFromKgCm, bmiCategory,
     SLEEP, sleepCategory,

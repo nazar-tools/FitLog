@@ -51,7 +51,9 @@
     theme: 'system', weightUnit: 'lb', distanceUnit: 'mi', lengthUnit: 'in', volumeUnit: 'flOz',
     // Chart range and the optional insights (see "Insights & standards"). Each
     // insight is on by default and shows a hint until its data exists. Saved values win.
-    chartScale: 'last10', insightsWindowDays: 90,
+    // chartScale and insightsWindowDays are no longer read (v74 uses chartRange everywhere);
+    // they stay so data written by older versions keeps its shape.
+    chartScale: 'last10', insightsWindowDays: 90, chartRange: '12w',
     showWeightInsights: true, showStrengthLevel: true, showPaceLevel: true,
     // Gates only the trailing-nights sleep average; the sleep card itself always shows today.
     showSleepInsights: true,
@@ -59,6 +61,12 @@
     showMacroGuidance: true,
     // The RPE (effort) field on set rows and runs. Off only hides the field; logged ratings stay.
     showRpe: true,
+    // Next session tips on item pages, and the Sets per muscle card on Progress.
+    showSuggestions: true, showMuscleSets: true,
+    // Daily tracks one Workout goal (a gym session or any daily reps) instead of each rep item.
+    dailyWorkoutGoal: true,
+    // Sets per muscle opens as the body map or as bars; the card's link switches and saves it.
+    muscleView: 'map',
     // Master "Track this" switches. trackWorkout is the Lifting switch; the Workout
     // area stays on while Lifting or Running & cardio is on, and Daily follows trackHabits (js/features.js).
     // An off area is hidden from Log, History and Home. Manage always shows it so it
@@ -130,7 +138,11 @@
   let needsSetup = false;
   // True when saved data exists but could not be read; init() then shows the
   // recovery screen. `rawCorrupt` keeps the original text so it can be handed back.
+  const BEFORE_UPGRADE_KEY = `${STORAGE_KEY}.before-upgrade`;
   let needsRecovery = false;
+  // True when the saved data came from a newer version of the app than this one. It is shown
+  // but never written, so an old cached build cannot damage it.
+  let dataIsNewer = false;
   let rawCorrupt = null;
 
   function load() {
@@ -151,8 +163,13 @@
         && (Array.isArray(parsed.exercises) || Array.isArray(parsed.entries) || typeof parsed.version === 'number');
       if (!looksLikeData) throw new Error('bad shape');
       const fromVersion = parsed.version;
+      dataIsNewer = typeof fromVersion === 'number' && fromVersion > SCHEMA_VERSION;
       state = upgradeData(parsed);
-      if (fromVersion !== SCHEMA_VERSION) save();
+      if (fromVersion !== SCHEMA_VERSION && !dataIsNewer) {
+        // One copy of the data as the older version left it, replaced at the next upgrade.
+        try { localStorage.setItem(BEFORE_UPGRADE_KEY, raw); } catch (e) { console.warn('Could not keep a pre-upgrade copy', e); }
+        save();
+      }
     } catch (e) {
       // Saved data exists but could not be parsed or migrated. Do not overwrite it
       // (there is no other copy); leave localStorage alone and let the recovery
@@ -166,6 +183,7 @@
   // Returns false on failure (it shows its own failure toast). Callers must
   // check it and skip any success toast or modal close: `if (!save()) return;`.
   function save() {
+    if (dataIsNewer) { warnNewerData(); return false; }
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
       return true;
@@ -175,6 +193,10 @@
       toast('Could not save — your browser storage may be full. Try exporting a backup and freeing up space.');
       return false;
     }
+  }
+
+  function warnNewerData() {
+    toast('This data was saved by a newer Fit Log. Reload to update the app.', { label: 'Reload', run: () => window.location.reload() });
   }
 
   function genId(prefix) {
@@ -196,6 +218,8 @@
   function activeExercises() { return state.exercises.filter((e) => F.exerciseTracked(state.settings, e)); }
   function exerciseById(id) { return state.exercises.find((e) => e.id === id); }
   function entriesFor(exId) { return state.entries.filter((e) => e.exerciseId === exId); }
+  // A lift or rep session can be marked light (entry.light): not a working day.
+  const canBeLight = (ex) => !!ex && (ex.kind === 'weight' || ex.kind === 'reps') && !F.isHabitLike(ex);
   function sectionOf(ex) { return ex.section || 'goal'; }
   // Habits and daily reps live in the Daily area (Log, History, Manage); everything else is Workout.
   const isDailyEx = (ex) => !!ex && F.isHabitLike(ex);
@@ -396,7 +420,8 @@
   function suggestNextTarget(exercise) {
     // Daily targets are open-ended, so they get no suggestion.
     if (sectionOf(exercise) === 'daily') return [];
-    const entries = entriesFor(exercise.id).slice().sort((a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id));
+    const usable = (s) => state.settings.showRpe || !s.needsRpe;
+    const entries = entriesFor(exercise.id).filter((e) => !e.light).sort((a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id));
     if (!entries.length) return [{ headline: 'Log a session to get a suggestion.', method: null }];
     const last = entries[0];
     const prev = entries[1] || null;
@@ -404,9 +429,9 @@
     if (exercise.kind === 'cardio') {
       const metrics = cardioMetricsOf(exercise);
       if (!metrics.length) return [{ headline: 'Set a distance or pace goal to get a suggestion.', method: null }];
-      return metrics.map((metric) => ({ metric, ...suggestCardioMetric(exercise, metric, last, prev) }));
+      return metrics.map((metric) => ({ metric, ...suggestCardioMetric(exercise, metric, last, prev) })).filter(usable);
     }
-    return [suggestWeightOrReps(exercise, last, prev)];
+    return [suggestWeightOrReps(exercise, last, prev)].filter(usable);
   }
 
   function suggestWeightOrReps(exercise, last, prev) {
@@ -441,7 +466,7 @@
           : `Fewer than 5 reps (${lastTop.reps}) at this weight. Build to 5 before adding load.`;
         return { headline: `Repeat ${fmtWeight(lastTop.weight)} next session`, detail, method: 'sametrend' };
       }
-      return { headline: `Repeat ${fmtWeight(lastTop.weight)}, or log RPE for a sharper suggestion`, detail: 'Logging an RPE (how hard that top set felt, 1–10) unlocks a tailored recommendation.', method: null };
+      return { headline: `Repeat ${fmtWeight(lastTop.weight)}, or log RPE for a sharper suggestion`, detail: 'Logging an RPE (how hard that top set felt, 1–10) unlocks a tailored recommendation.', method: null, needsRpe: true };
     }
 
     if (exercise.kind === 'reps') {
@@ -460,7 +485,7 @@
         if (lastTop.reps >= prevTop.reps) return { headline: `Try ${r + 2} reps next time`, detail: `Reps trending up (${Math.round(prevTop.reps)} → ${r}).`, method: 'trend' };
         return { headline: `Repeat ${r} reps`, detail: `Reps dipped (${Math.round(prevTop.reps)} → ${r}) — consolidate first.`, method: 'trend' };
       }
-      return { headline: `Repeat ${r} reps, or log RPE for a sharper suggestion`, detail: 'Logging an RPE unlocks a tailored recommendation.', method: null };
+      return { headline: `Repeat ${r} reps, or log RPE for a sharper suggestion`, detail: 'Logging an RPE unlocks a tailored recommendation.', method: null, needsRpe: true };
     }
     return { headline: 'Log a session to get a suggestion.', method: null };
   }
@@ -479,7 +504,7 @@
         if (lastTop.distance >= prevTop.distance) return { headline: `Try ~${fmtDistance(lastTop.distance * 1.05)} next run`, detail: `Distance trending up (${fmtDistance(prevTop.distance)} → ${fmtDistance(lastTop.distance)}).`, method: 'trend' };
         return { headline: `Repeat ~${fmtDistance(lastTop.distance)} next run`, detail: 'Distance dipped from last time — rebuild before extending.', method: 'trend' };
       }
-      return { headline: `Repeat ~${fmtDistance(lastTop.distance)}, or log an effort rating for a sharper suggestion`, detail: 'Logging RPE (how hard that run felt) unlocks a tailored recommendation.', method: null };
+      return { headline: `Repeat ~${fmtDistance(lastTop.distance)}, or log an effort rating for a sharper suggestion`, detail: 'Logging RPE (how hard that run felt) unlocks a tailored recommendation.', method: null, needsRpe: true };
     }
     // pace
     if (!lastTop || lastTop.pace == null) return { headline: 'Log a run with both distance and time to get a pace suggestion.', method: null };
@@ -490,7 +515,7 @@
       if (lastTop.pace <= prevTop.pace) return { headline: `Try ~${fmtPace(lastTop.pace * 0.99)} next run`, detail: `Pace trending faster (${fmtPace(prevTop.pace)} → ${fmtPace(lastTop.pace)}).`, method: 'trend' };
       return { headline: `Repeat ~${fmtPace(lastTop.pace)} next run`, detail: 'Pace slipped from last time — rebuild before pushing faster.', method: 'trend' };
     }
-    return { headline: `Repeat ~${fmtPace(lastTop.pace)}, or log an effort rating for a sharper suggestion`, detail: 'Logging RPE unlocks a tailored recommendation.', method: null };
+    return { headline: `Repeat ~${fmtPace(lastTop.pace)}, or log an effort rating for a sharper suggestion`, detail: 'Logging RPE unlocks a tailored recommendation.', method: null, needsRpe: true };
   }
 
   function kindBadge(exercise) {
@@ -553,11 +578,21 @@
     return tracker.direction === 'down' ? b > g : b < g;
   }
 
+  // Where progress is measured from: the saved start when it sits on the right side of the
+  // goal, else the first reading that does (the goal was changed after the start was saved).
+  function trackerStart(tracker) {
+    if (trackerBaselineUsable(tracker)) return tracker.baseline;
+    if (tracker.goal == null) return null;
+    const before = (v) => (tracker.direction === 'down' ? v > tracker.goal : v < tracker.goal);
+    const first = measurementsFor(tracker.id).slice().sort((a, b) => (a.date + a.id).localeCompare(b.date + b.id)).find((m) => before(m.value));
+    return first ? first.value : null;
+  }
+
   function trackerProgressPct(tracker, value) {
     if (value == null || tracker.goal == null) return { pct: 0, achieved: false };
     const goal = tracker.goal;
     const achieved = tracker.direction === 'down' ? value <= goal : value >= goal;
-    const baseline = trackerBaselineUsable(tracker) ? tracker.baseline : null;
+    const baseline = trackerStart(tracker);
     if (baseline == null || baseline === goal) {
       const pct = tracker.direction === 'down'
         ? (value <= 0 ? 0 : (goal / value) * 100)
@@ -718,7 +753,7 @@
     let trend = null;
     if (list.length >= 2) {
       const cutoff = new Date(latest.date + 'T00:00:00');
-      cutoff.setDate(cutoff.getDate() - state.settings.insightsWindowDays);
+      cutoff.setDate(cutoff.getDate() - rangeInfo()[2] * 7);
       const cutoffIso = localDateISO(cutoff);
       const baseline = list.filter((m) => m.date <= cutoffIso).slice(-1)[0] || list[0];
       if (baseline.id !== latest.id) {
@@ -1102,6 +1137,7 @@
   // `tall` is for full detail screens (exercise, tracker, food); see
   // `.is-detail-sheet` in styles.css.
   function openModal(html, { tall = false, split = false } = {}) {
+    sheetRepaint = null;
     // Opening a modal over an open one replaces its content, so Back still sees one level.
     const wasOpen = !modalRoot().hidden;
     const sheet = modalSheet();
@@ -1728,7 +1764,7 @@
       <div class="ex-card-metric">
         ${opts.labeled || oneRM ? `<div class="ex-card-metric-label">${label}</div>` : ''}
         <div class="ex-card-values">
-          <div class="ex-card-current">${formatValueForExercise(ex, b, metric)}</div>
+          <div class="ex-card-current">${opts.current || formatValueForExercise(ex, b, metric)}</div>
           ${goal ? `<div class="ex-card-goal">/ ${goalLabelForExercise(ex, metric).replace('Goal ', '')}</div>` : ''}
         </div>
         ${goal ? `
@@ -1739,11 +1775,12 @@
       </div>`;
   }
 
-  // Trim date-sorted `items` to the "Dashboard chart range" setting and map them
+  // Trim date-sorted `items` to the shared chart range and map them
   // to {date, value} points, dropping empty ones. Shared by dashboard cards and
   // the detail modals.
   function chartPointsFor(items, valueFn) {
-    const scaled = state.settings.chartScale === 'last10' ? items.slice(-10) : items;
+    const from = rangeFrom();
+    const scaled = items.filter((item) => item.date >= from);
     return scaled.map((item) => ({ date: item.date, value: valueFn(item) })).filter((p) => p.value != null);
   }
 
@@ -1961,14 +1998,6 @@
     return (tracker.direction === 'down' ? delta < 0 : delta > 0) ? 'good' : 'bad';
   }
 
-  function cupButtonsHtml() {
-    return state.water.cups.map((cup) => `
-      <button type="button" class="btn btn-secondary cup-btn" data-cup-id="${cup.id}">
-        <span class="cup-btn-name-row">${itemIconSvg(cupIconKey(cup))}<span>${escapeHtml(cup.name)}</span></span>
-        <span class="cup-btn-amount">${fmtVolume(cup.amountMl)}</span>
-      </button>`).join('');
-  }
-
   // Water is one tap (pick a cup), so it can be logged from the dashboard as well as Log.
   function logWaterAmount(amountMl, cupId) {
     if (!amountMl || amountMl <= 0) { toast('Enter an amount greater than zero.'); return; }
@@ -2103,14 +2132,29 @@
   const homeSectionOn = (key) => F.homeSectionOn(state.settings, key);
 
   function renderChecklist(all) {
-    const daily = homeSectionOn('checklist') ? all.filter((e) => isDailyEx(e) && (e.kind !== 'habit' || habitDueToday(e))) : [];
-    document.getElementById('dailyTargetsHead').hidden = daily.length === 0;
-    const done = daily.filter((e) => { const p = todayProgressOf(e); return p.pct != null && p.pct >= 100; }).length;
-    document.getElementById('checklistCount').textContent = `${done} of ${daily.length} done`;
+    const goal = workoutGoalOn();
+    const started = (e) => entriesFor(e.id).some((en) => en.date === todayISO());
+    const daily = homeSectionOn('checklist') ? all.filter((e) => isDailyEx(e) && (e.kind === 'habit' ? habitDueToday(e) : !goal || started(e))) : [];
+    const show = homeSectionOn('checklist') && (daily.length > 0 || goal);
+    document.getElementById('dailyTargetsHead').hidden = !show;
+    const tally = dailyTally();
+    document.getElementById('checklistCount').textContent = `${tally.done} of ${tally.total} done`;
     const wrap = document.getElementById('dailyTargetsWrap');
-    wrap.hidden = daily.length === 0;
-    wrap.innerHTML = daily.map((e) => dailyTargetRowHtml(e, 'Log')).join('');
-    wrap.querySelectorAll('.glance-row').forEach((row) => {
+    wrap.hidden = !show;
+    if (!show) { wrap.innerHTML = ''; return; }
+    // Until something is logged, the rep items wait as one-tap chips under the Workout goal.
+    const idle = goal && !workedOutToday() ? dailyRepItems() : [];
+    wrap.innerHTML = (goal ? workoutGoalRowHtml() : '')
+      + daily.filter((e) => e.kind !== 'habit').map((e) => dailyTargetRowHtml(e, 'Log')).join('')
+      + (idle.length ? `<div class="home-card-foot"><div class="quick-chips">${idle.map((e) => `<button type="button" class="quick-chip" data-quick-ex="${e.id}">${itemIconSvg(exerciseIconKey(e))}<span>${exerciseLabelHtml(e)}</span></button>`).join('')}</div></div>` : '')
+      + daily.filter((e) => e.kind === 'habit').map((e) => dailyTargetRowHtml(e, 'Log')).join('');
+    wrap.querySelectorAll('[data-quick-ex]').forEach((b) => b.addEventListener('click', () => openLogFor(b.dataset.quickEx)));
+    const goalRow = wrap.querySelector('[data-workout-goal]');
+    if (goalRow) {
+      wireOpenable(goalRow.querySelector('.glance-open'), openWorkoutCharts);
+      goalRow.querySelector('.glance-btn').addEventListener('click', () => openLogCategory('workout'));
+    }
+    wrap.querySelectorAll('.glance-row[data-exercise-id]').forEach((row) => {
       const exId = row.getAttribute('data-exercise-id');
       wireOpenable(row.querySelector('.glance-open'), () => openExerciseDetail(exId));
       row.querySelector('.glance-btn').addEventListener('click', () => {
@@ -2249,7 +2293,7 @@
     let delta = '';
     if (insights && insights.trend) {
       const d = Units.lbToDisplay(insights.trend.delta);
-      delta = `<span class="mini-delta is-${deltaSentiment(t, insights.trend.delta)}">${d > 0 ? '+' : ''}${round(d, 1)} ${Units.weightUnitLabel()} in ${humanizeDays(insights.trend.days)}</span>`;
+      delta = `<span class="mini-delta is-${deltaSentiment(t, insights.trend.delta)}">${d > 0 ? '+' : ''}${round(d, 1)} ${Units.weightUnitLabel()} in ${rangeInfo()[3]}</span>`;
     }
     return `
       <div class="card home-mini" data-tracker-id="${t.id}">
@@ -2259,6 +2303,35 @@
         ${delta}
         <button type="button" class="btn btn-secondary btn-sm" data-action="log-tracker-prompt">${loggedToday ? 'Log again' : 'Log'}</button>
       </div>`;
+  }
+
+  // The daily water goal in a sheet. Cup sizes are a list, so they stay in Manage.
+  function openWaterGoalSheet() {
+    const unit = Units.volumeUnitLabel();
+    openModal(`
+      <div class="modal-title-row"><h2>Water goal</h2><button class="modal-close" data-action="close-modal" aria-label="Close">${CLOSE_ICON_SVG}</button></div>
+      <div class="form-card">
+        <label class="field"><span class="field-label">Daily goal (${unit})</span>
+          <input type="number" step="any" min="0" inputmode="decimal" id="waterGoalSheetInput" value="${state.water.goalMl ? round(Units.mlToDisplay(state.water.goalMl), 1) : ''}" /></label>
+        <button type="button" class="btn btn-primary btn-block" id="waterGoalSheetSave">Save goal</button>
+        <button type="button" class="btn btn-secondary btn-block" id="waterCupsBtn">Edit cup sizes</button>
+      </div>`);
+    const input = document.getElementById('waterGoalSheetInput');
+    const shown = input.value;
+    document.getElementById('waterGoalSheetSave').addEventListener('click', () => {
+      const blank = input.value.trim() === '';
+      const raw = parseFloat(input.value);
+      if (!blank && !(raw > 0)) { toast('Enter a goal above zero, or clear the field to remove it.'); return; }
+      // An untouched field keeps the stored millilitres instead of a rounded round trip.
+      const goalMl = blank ? null : input.value === shown ? state.water.goalMl : Units.displayToMl(raw);
+      if (goalMl != null && tooBigWater(goalMl)) { toast(WATER_TOO_BIG); return; }
+      state.water.goalMl = goalMl;
+      if (!save()) return;
+      closeModal();
+      toast(blank ? 'Water goal removed' : 'Water goal saved');
+      renderAll();
+    });
+    document.getElementById('waterCupsBtn').addEventListener('click', () => { closeModal(); openManageCategory('water'); });
   }
 
   function waterMiniHtml() {
@@ -2285,7 +2358,7 @@
       if (cup) logWaterAmount(cup.amountMl, cup.id);
     }));
     const wp = document.getElementById('homeWaterPencil');
-    if (wp) wp.addEventListener('click', () => openManageCategory('water'));
+    if (wp) wp.addEventListener('click', openWaterGoalSheet);
     wrap.querySelectorAll('[data-tracker-id]').forEach((card) => {
       wireOpenable(card, () => openTrackerDetail(card.dataset.trackerId));
       card.querySelector('[data-action="log-tracker-prompt"]').addEventListener('click', (ev) => { ev.stopPropagation(); logTrackerFromDetail(card.dataset.trackerId); });
@@ -2387,15 +2460,31 @@
      and this week are drawn but not judged: they stay out of averages and on-target counts
      until they are over, and a day with nothing logged is left out rather than counted as 0. */
   const CHART_RANGES = [
-    ['4w', '4W', 4, '4 weeks', 'the last 4 weeks'], ['12w', '12W', 12, '12 weeks', 'the last 12 weeks'],
-    ['6m', '6M', 26, '6 months', 'the last 6 months'], ['1y', '1Y', 52, 'a year', 'the last year'],
+    ['4w', '4 weeks', 4, '4 weeks', 'the last 4 weeks'], ['12w', '12 weeks', 12, '12 weeks', 'the last 12 weeks'],
+    ['6m', '6 months', 26, '6 months', 'the last 6 months'], ['1y', '1 year', 52, 'a year', 'the last year'],
+    ['all', 'All time', 0, '', ''],
   ];
-  let chartRange = '12w';
+  // One saved range for Progress, the Details sheets, item pages and Home.
+  const chartRange = () => (CHART_RANGES.some((r) => r[0] === state.settings.chartRange) ? state.settings.chartRange : '12w');
+  function setChartRange(id) {
+    state.settings.chartRange = id;
+    save();
+  }
   // Charts showing their table instead, by card id. Kept while the app is open.
   const chartTables = new Set();
   const ALERT_ICON_SVG = '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>';
 
-  const rangeInfo = () => CHART_RANGES.find((r) => r[0] === chartRange);
+  // "All" starts at the week of the first thing ever logged.
+  function allWeeks() {
+    const first = [state.entries, state.measurements, state.waterEntries, state.food.entries]
+      .reduce((min, list) => list.reduce((m, x) => (x.date < m ? x.date : m), min), todayISO());
+    return Math.max(4, Math.round(dayGap(weekOf(first), weekOf(todayISO())) / 7) + 1);
+  }
+  function rangeInfo() {
+    if (chartRange() !== 'all') return CHART_RANGES.find((r) => r[0] === chartRange());
+    const n = allWeeks();
+    return ['all', 'All time', n, `${n} weeks`, `the last ${n} weeks`];
+  }
   const addDays = (iso, n) => window.FitCalc.addDaysISO(iso, n);
   const weekOf = (iso) => window.FitCalc.weekStartISO(iso);
   function rangeWeeks() {
@@ -2405,7 +2494,7 @@
   }
   const rangeFrom = () => rangeWeeks()[0];
   // Daily columns only fit the 4-week range; longer ranges group days into weeks.
-  const rangeIsDaily = () => chartRange === '4w';
+  const rangeIsDaily = () => chartRange() === '4w';
   function daysBetween(from, to) {
     const out = [];
     for (let d = from; d <= to; d = addDays(d, 1)) out.push(d);
@@ -2419,8 +2508,17 @@
   const weekLabel = (w) => (w === weekOf(todayISO()) ? 'This week' : chartDay(w));
   const dayTitle = (d) => (d === todayISO() ? 'Today' : chartDay(d));
 
-  function rangeSegHtml() {
-    return `<div class="segmented segmented-fill seg-sm chart-range" role="radiogroup" aria-label="Chart range">${segHtml(CHART_RANGES.map((r) => [r[0], r[1]]), chartRange)}</div>`;
+  // The range is a native menu styled as a link, so it costs no row and works in any sheet.
+  function rangeMenuHtml() {
+    return `<label class="range-menu"><select data-range-menu aria-label="Chart range">${CHART_RANGES.map((r) => `<option value="${r[0]}"${r[0] === chartRange() ? ' selected' : ''}>${r[1]}</option>`).join('')}</select>${uiIcon('chevron-down')}</label>`;
+  }
+  // What to redraw in the open sheet when the range changes (set by the sheet that has a chart).
+  let sheetRepaint = null;
+  function onRangeChange(id) {
+    setChartRange(id);
+    if (!modalRoot().hidden && sheetRepaint) sheetRepaint();
+    renderHome();
+    if (!document.getElementById('view-progress').hidden) renderProgressCharts();
   }
 
   function chartTableHtml(t) {
@@ -2442,13 +2540,14 @@
       </button>`).join('')}</div>`;
   }
 
-  // One chart card: { id, icon, name, sub, open, extra, plot, table, legend, note, goals, empty: { text, have, need } }.
+  // One chart card: { id, icon, name, sub, range, open, extra, plot, table, legend, note, goals, empty: { text, have, need } }.
+  // `range` puts the range menu in the card's title line; `swap: { label, run }` adds a link to a second view.
   function chartCardHtml(c) {
     const asTable = !!c.table && chartTables.has(c.id);
     const head = `
       <div class="cc-head">
         ${c.icon || ''}
-        <div class="cc-titles"><div class="cc-name">${c.name}</div>${c.sub ? `<div class="cc-sub">${c.sub}</div>` : ''}</div>
+        <div class="cc-titles"><div class="cc-name${c.range ? ' has-range' : ''}"><span>${c.name}</span>${c.range ? rangeMenuHtml() : ''}</div>${c.sub ? `<div class="cc-sub">${c.sub}</div>` : ''}</div>
         ${c.open ? `<button type="button" class="link-btn cc-more" data-cc-open>Details${CHEVRON_RIGHT_SVG}</button>` : ''}
       </div>`;
     if (c.empty) {
@@ -2461,7 +2560,7 @@
     return `<div class="card chart-card" data-chart-card="${c.id}">${head}${c.extra || ''}
       <div class="cc-plot"${asTable ? ' hidden' : ''}>${c.plot}</div>
       ${c.table ? `<div class="cc-table"${asTable ? '' : ' hidden'}>${chartTableHtml(c.table)}</div>` : ''}
-      ${c.legend || c.table ? `<div class="cc-foot"><div class="cc-key">${c.legend || ''}</div>${c.table ? `<button type="button" class="link-btn" data-cc-table aria-pressed="${asTable}">${asTable ? 'Show chart' : 'Show table'}</button>` : ''}</div>` : ''}
+      ${c.legend || c.table || c.swap ? `<div class="cc-foot"><div class="cc-key">${c.legend || ''}</div><div class="cc-links">${c.swap ? `<button type="button" class="link-btn" data-cc-swap>${c.swap.label}</button>` : ''}${c.table ? `<button type="button" class="link-btn" data-cc-table aria-pressed="${asTable}">${asTable ? 'Show chart' : 'Show table'}</button>` : ''}</div></div>` : ''}
       ${c.note ? `<p class="cc-note">${c.note}</p>` : ''}
       ${cardGoalsHtml(c.goals)}
     </div>`;
@@ -2474,6 +2573,8 @@
       const more = el.querySelector('[data-cc-open]');
       if (more && c.open) more.addEventListener('click', c.open);
       el.querySelectorAll('[data-goal-i]').forEach((b) => b.addEventListener('click', () => c.goals[Number(b.dataset.goalI)].open()));
+      const swapBtn = el.querySelector('[data-cc-swap]');
+      if (swapBtn && c.swap) swapBtn.addEventListener('click', c.swap.run);
       const tbl = el.querySelector('[data-cc-table]');
       if (tbl) tbl.addEventListener('click', () => {
         const on = !chartTables.has(c.id);
@@ -2538,7 +2639,8 @@
   // Values are in display units so the axis and the readout agree.
   function sessionSeries(ex, metric) {
     const byDate = {};
-    entriesFor(ex.id).forEach((e) => { (byDate[e.date] = byDate[e.date] || []).push(...(e.sets || [])); });
+    // A light session still adds volume; it is left out of the top-set and 1RM lines.
+    entriesFor(ex.id).filter((e) => metric === 'vol' || !e.light).forEach((e) => { (byDate[e.date] = byDate[e.date] || []).push(...(e.sets || [])); });
     const out = [];
     Object.keys(byDate).sort().forEach((date) => {
       const sets = byDate[date];
@@ -2582,7 +2684,7 @@
   }
 
   function movementMetrics(ex) {
-    if (ex.kind === 'weight') return [['1rm', 'Est. 1RM'], ['top', 'Top set'], ['vol', 'Volume']];
+    if (ex.kind === 'weight') return [['top', 'Top set'], ['1rm', 'Est. 1RM'], ['vol', 'Volume']];
     if (ex.kind === 'reps') return isTimed(ex) ? [['top', 'Longest'], ['vol', 'Total time']] : [['top', 'Best set'], ['vol', 'Total reps']];
     const hasPace = entriesFor(ex.id).some((e) => entryValue(ex, e, 'pace') != null);
     return hasPace ? [['dist', 'Distance'], ['pace', 'Pace']] : [['dist', 'Distance']];
@@ -2614,75 +2716,27 @@
     const base = { id: `mv-${metric}`, name: exerciseLabelHtml(ex), extra };
     if (all.length < 2) return { ...base, empty: { text: 'Log a second session to draw a line.', have: all.length, need: 2 } };
     if (pts.length < 2) return { ...base, sub: `Last session ${chartDay(all[all.length - 1].date)}`, empty: { text: `Fewer than 2 sessions in ${rangeInfo()[4]}. Try a longer range.` } };
-    const subs = [];
-    let band = null;
-    const showsLoad = ex.kind === 'weight' && metric !== 'vol';
-    const lvl = ex.kind === 'weight' ? strengthLevelInfo(ex) : null;
-    const res = lvl && !lvl.missing && lvl.results.find((r) => r.mode === '1rm');
-    if (res && res.value != null) {
-      const t = res.tier;
-      const lo = t ? res.thresholds[t - 1] : 0;
-      const hi = t < 5 ? res.thresholds[t] : null;
-      subs.push(hi != null ? `${S.TIER_LABELS[t]} now, ${fmtWeight(hi - res.value)} to ${S.TIER_LABELS[t + 1]}` : `${S.TIER_LABELS[t]} now`);
-      if (metric === '1rm') {
-        const vals = pts.map((p) => p.value);
-        const pad = Math.max((Math.max(...vals) - Math.min(...vals)) * 0.6, Math.max(...vals) * 0.05);
-        const blo = Math.max(Units.lbToDisplay(lo), Math.min(...vals) - pad);
-        const bhi = Math.min(hi != null ? Units.lbToDisplay(hi) : Infinity, Math.max(...vals) + pad);
-        if (bhi > blo) band = { lo: blo, hi: bhi, text: S.TIER_LABELS[t] };
-      }
-    }
+    const subs = [plural(pts.length, 'session')];
+    // The goal is drawn only on the measure it is set in: the heaviest set, or estimated
+    // 1RM for a goal picked from the strength standards.
     let goal = null;
-    if (showsLoad && ex.goal) {
+    if (ex.kind === 'weight' && ex.goal && metric === (ex.goalMode === 'standard' ? '1rm' : 'top')) {
       const g = Units.lbToDisplay(ex.goal);
       if (goalFits(g, pts.map((p) => p.value))) goal = g;
-      else subs.push(`Goal ${fmtWeight(ex.goal)} ${g > pts[pts.length - 1].value ? 'above' : 'below'}`);
+      else subs.push(`goal ${fmtWeight(ex.goal)} is ${g > pts[pts.length - 1].value ? 'above' : 'below'} the chart`);
     }
     const name = metrics.find((m) => m[0] === metric)[1];
     return {
       ...base,
       sub: subs.join(' · '),
       plot: Charts.line({
-        from, to: todayISO(), dots: pts, connect: true, goal, goalText: goal != null ? `Goal ${round(goal, 1)}` : '', band,
+        from, to: todayISO(), dots: pts, connect: true, goal, goalText: goal != null ? `Goal ${round(goal, 1)}` : '',
         format: metric === 'pace' ? (v) => `${Math.floor(v / 60)}:${String(Math.round(v % 60)).padStart(2, '0')}` : Charts.compact,
         tipRows: (d) => { const p = pts.find((q) => q.date === d); return [[name, `${fmt(p.value)}${p.detail ? ` ${p.detail}` : ''}`]]; },
         label: `${exerciseLabel(ex)}, ${name} over ${rangeInfo()[3]}: from ${fmt(pts[0].value)} to ${fmt(pts[pts.length - 1].value)}`,
       }),
-      legend: band ? keyItem('sw band', 'Your strength level') : '',
       table: { head: ['Date', name], rows: pts.map((p) => [chartDay(p.date), `${fmt(p.value)}${p.detail ? ` ${p.detail}` : ''}`]) },
     };
-  }
-
-  function movementTiles(ex) {
-    const from = rangeFrom();
-    const entries = entriesFor(ex.id).filter((e) => e.date >= from && e.date <= todayISO());
-    const sessions = new Set(entries.map((e) => e.date)).size;
-    const tiles = [];
-    if (ex.kind === 'weight') {
-      const orm = sessionSeries(ex, '1rm').filter((p) => p.date >= from);
-      if (orm.length) {
-        const last = orm[orm.length - 1].value;
-        const change = last - orm[0].value;
-        tiles.push({ value: round(last, 1), unit: Units.weightUnitLabel(), label: orm.length > 1 && Math.abs(change) >= 0.05 ? `Est. 1RM, ${change > 0 ? 'up' : 'down'} ${Math.abs(round(change, 1))}` : 'Est. 1RM' });
-      }
-      const sets = entries.flatMap((e) => e.sets || []).filter((st) => st.reps > 0 && st.weight != null);
-      if (sets.length) {
-        const top = sets.reduce((a, b) => (b.weight > a.weight || (b.weight === a.weight && b.reps > a.reps) ? b : a));
-        tiles.push({ value: `${round(Units.lbToDisplay(top.weight), 1)} × ${top.reps}`, label: 'Heaviest set' });
-      }
-    } else if (ex.kind === 'reps') {
-      const pts = sessionSeries(ex, 'top').filter((p) => p.date >= from);
-      const tot = sessionSeries(ex, 'vol').filter((p) => p.date >= from);
-      if (pts.length) tiles.push({ value: fmtCount(ex, Math.max(...pts.map((p) => p.value))), label: isTimed(ex) ? 'Longest hold' : 'Best set' });
-      if (tot.length) tiles.push({ value: fmtCount(ex, tot.reduce((t, p) => t + p.value, 0)), label: isTimed(ex) ? 'Total time' : 'Total reps' });
-    } else {
-      const dist = cardioSeries(ex, 'dist').filter((p) => p.date >= from);
-      const pace = cardioSeries(ex, 'pace').filter((p) => p.date >= from);
-      if (dist.length) tiles.push({ value: fmtDistance(Math.max(...dist.map((p) => p.raw))), label: 'Longest' });
-      if (pace.length) tiles.push({ value: fmtPace(Math.min(...pace.map((p) => p.raw))), label: 'Best pace' });
-    }
-    tiles.push({ value: String(sessions), label: sessions === 1 ? 'Session' : 'Sessions' });
-    return tiles;
   }
 
   function weeklyVolumeCard() {
@@ -2720,11 +2774,11 @@
       const done = sets.filter((st) => st.reps > 0 && st.weight != null);
       if (!done.length) return out;
       const heavy = pick(done, (b, a) => b.weight > a.weight || (b.weight === a.weight && b.reps > a.reps));
-      out.push({ label: 'Heaviest', sub: fmtDateShort(heavy.date), value: `${fmtWeight(heavy.weight)} × ${heavy.reps}` });
+      out.push({ label: 'Best set', sub: fmtDateShort(heavy.date), value: `${fmtWeight(heavy.weight)} × ${heavy.reps}` });
       const ests = done.map((st) => ({ st, e: S.estimateOneRM(st.weight, st.reps) })).filter((x) => x.e);
       if (ests.length) {
         const b = pick(ests, (x, y) => x.e.value > y.e.value);
-        out.push({ label: 'Est. 1RM', sub: `${fmtDateShort(b.st.date)} · from ${fmtWeight(b.st.weight)} × ${b.st.reps}`, value: fmtWeight(b.e.value) });
+        out.push({ label: 'Best est. 1RM', sub: `${fmtDateShort(b.st.date)} · from ${fmtWeight(b.st.weight)} × ${b.st.reps}`, value: fmtWeight(b.e.value) });
       }
       const most = pick(done, (b, a) => b.reps > a.reps || (b.reps === a.reps && b.weight > a.weight));
       out.push({ label: 'Most reps', sub: `${fmtDateShort(most.date)} · at ${fmtWeight(most.weight)}`, value: `${most.reps} reps` });
@@ -2745,51 +2799,54 @@
     return out;
   }
 
-  function openWorkoutCharts(exId) {
+  // A Details sheet lists its area's items; a row opens that item's page.
+  function areaListHtml(title, rows) {
+    return `<div class="section-head"><h2>${title}</h2></div>
+      <div class="card card-list">${rows.map((r) => `
+        <div class="entry-row area-row" data-item-id="${r.id}">
+          ${r.icon}
+          <div class="entry-row-main"><div class="entry-row-title">${r.name}</div>${r.sub ? `<div class="entry-row-sub">${r.sub}</div>` : ''}</div>
+          <div class="rec-value">${r.value}</div>${CHEVRON_RIGHT_SVG}
+        </div>`).join('')}</div>`;
+  }
+  function wireAreaList(body, open) {
+    body.querySelectorAll('.area-row').forEach((row) => wireOpenable(row, () => open(row.dataset.itemId)));
+  }
+
+  function openWorkoutCharts() {
     const movements = activeExercises()
       .filter((ex) => !isDailyEx(ex) && entriesFor(ex.id).length)
       .sort((a, b) => entriesFor(b.id).length - entriesFor(a.id).length);
-    let selId = movements.some((m) => m.id === exId) ? exId : movements[0] && movements[0].id;
-    const metricFor = {};
-    openChartSheet('Workout', itemIconHtml('dumbbell'), (body, repaint) => {
-      const ex = exerciseById(selId);
+    openChartSheet('Workout', itemIconHtml('dumbbell'), (body) => {
       const cards = [];
       let html = '';
-      if (ex) {
-        const metrics = movementMetrics(ex);
-        if (!metricFor[ex.id] || !metrics.some((m) => m[0] === metricFor[ex.id])) {
-          metricFor[ex.id] = ex.kind === 'weight' && !(strengthLevelInfo(ex) || {}).results ? 'top' : metrics[0][0];
-        }
-        const card = movementCard(ex, metricFor[ex.id]);
-        cards.push(card);
-        const recs = movementRecords(ex);
-        html += `
-          <div class="f-scroll"><div class="f-chips" id="chartMoveChips" role="radiogroup" aria-label="Movement">${movements.map((m) => chipHtml(m.id, exerciseLabelHtml(m), null, m.id === selId)).join('')}</div></div>
-          ${chartCardHtml(card)}
-          ${kpiRowHtml(movementTiles(ex))}`;
-        const vol = weeklyVolumeCard();
-        if (vol) { cards.push(vol); html += chartCardHtml(vol); }
-        if (recs.length) {
-          html += `<div class="section-head"><h2>Records</h2><span class="muted-text">${exerciseLabelHtml(ex)}</span></div>
-            <div class="card card-list">${recs.map((r) => `<div class="entry-row rec-row"><div class="entry-row-main"><div class="entry-row-title">${r.label}</div><div class="entry-row-sub">${r.sub}</div></div><div class="rec-value">${r.value}</div></div>`).join('')}</div>`;
-        }
+      const vol = weeklyVolumeCard();
+      if (vol) { vol.range = true; cards.push(vol); html += chartCardHtml(vol); }
+      if (movements.length) {
+        html += areaListHtml('Exercises', movements.map((ex) => {
+          const last = entriesFor(ex.id).reduce((m, e) => (e.date > m ? e.date : m), '');
+          return { id: ex.id, icon: exerciseIconHtml(ex, true), name: exerciseLabelHtml(ex), value: (movementRecords(ex)[0] || {}).value || '', sub: `Last ${chartDay(last)}` };
+        }));
       } else {
-        const vol = weeklyVolumeCard();
-        if (vol) { cards.push(vol); html += chartCardHtml(vol); }
-        html += '<div class="empty-state"><p>Log a lift, a bodyweight exercise or a run and its chart shows up here.</p></div>';
+        html += '<div class="empty-state"><p>Log a lift, a bodyweight exercise or a run and it shows up here.</p></div>';
       }
       body.innerHTML = html;
-      const chips = body.querySelector('#chartMoveChips');
-      if (chips) {
-        wireFScroll(chips);
-        refreshFScroll(chips);
-        chips.addEventListener('click', (ev) => { const b = ev.target.closest('[data-chip]'); if (b) { selId = b.dataset.chip; repaint(); } });
-        const on = chips.querySelector('[aria-checked="true"]');
-        if (on) chips.scrollLeft = Math.max(0, on.offsetLeft - 20);
-      }
-      const seg = body.querySelector('.cc-metric');
-      if (seg) seg.addEventListener('click', (ev) => { const b = ev.target.closest('[data-seg]'); if (b) { metricFor[selId] = b.dataset.seg; repaint(); } });
+      wireAreaList(body, (id) => openExerciseDetail(id, { label: 'Workout', run: openWorkoutCharts }));
       wireChartCards(body, cards);
+    });
+  }
+
+  function openDailyCharts() {
+    const items = activeExercises().filter(isDailyEx);
+    const iconHtml = `<span class="item-icon" aria-hidden="true">${STATIC_ICONS.daily}</span>`;
+    openChartSheet('Daily', iconHtml, (body) => {
+      const card = { ...dailyOverviewCard(), id: 'daily-sheet', icon: '', name: 'Last weeks', open: null };
+      body.innerHTML = chartCardHtml(card) + areaListHtml('Today', items.map((ex) => {
+        const p = todayProgressOf(ex);
+        return { id: ex.id, icon: exerciseIconHtml(ex, true), name: exerciseLabelHtml(ex), value: p.pct == null ? '' : `${p.curText} ${p.goalText}` };
+      }));
+      wireAreaList(body, (id) => openExerciseDetail(id, { label: 'Daily', run: openDailyCharts }));
+      wireChartCards(body, [card]);
     });
   }
 
@@ -2799,19 +2856,29 @@
   // moves in the Workout area only (not cardio or Daily targets). See S.REFERENCES 'weeklySets'.
   function muscleSetsByWeek(weeks) {
     const items = [];
+    // Warm-ups are left out: a weighted set under S.WARMUP_CUTOFF of that day's heaviest set
+    // of the same exercise does not count.
+    const top = {};
+    state.entries.forEach((e) => (e.sets || []).forEach((st) => {
+      const k = e.exerciseId + e.date;
+      if (st.reps > 0 && st.weight > (top[k] || 0)) top[k] = st.weight;
+    }));
     state.entries.forEach((e) => {
       if (e.date > todayISO()) return;
       const ex = exerciseById(e.exerciseId);
       if (!ex || isDailyEx(ex) || !(ex.kind === 'weight' || ex.kind === 'reps')) return;
-      const sets = (e.sets || []).filter((st) => st.reps > 0).length;
+      const floor = ex.kind === 'weight' ? (top[e.exerciseId + e.date] || 0) * S.WARMUP_CUTOFF : 0;
+      const sets = (e.sets || []).filter((st) => st.reps > 0 && (st.weight || 0) >= floor).length;
       const group = exerciseGroup(ex);
       if (sets && group !== 'cardio') items.push({ date: e.date, group, sets });
     });
     return window.FitCalc.setsPerGroupWeek(items, weeks);
   }
 
+  const MAP_GROUPS = ['chest', 'back', 'legs', 'shoulders', 'arms', 'core'];
+
   function muscleSetsCard() {
-    if (!domainTracked('workout')) return null;
+    if (!domainTracked('workout') || !state.settings.showMuscleSets) return null;
     const weeks = rangeWeeks();
     const byGroup = muscleSetsByWeek(weeks);
     const groups = EXERCISE_GROUPS.map(([g]) => g).filter((g) => byGroup[g]);
@@ -2825,13 +2892,25 @@
       avg: done(g).length ? mean(done(g)) : null,
     }));
     const lastWeekHit = rows.filter((r) => (r.prev || 0) >= target).length;
+    const asMap = state.settings.muscleView !== 'bars';
+    const swap = { label: asMap ? 'Show bars' : 'Show map', run: () => { state.settings.muscleView = asMap ? 'bars' : 'map'; if (save()) renderProgressCharts(); } };
+    const label = `Sets per muscle group this week so far: ${rows.map((r) => `${r.label} ${r.value}`).join(', ')}. ${target} sets a week is marked.`;
+    // The map shades the six areas a body has; each step is a share of the weekly target.
+    const level = (v) => (v <= 0 ? 0 : v >= target ? 3 : v >= target / 2 ? 2 : 1);
+    const areas = MAP_GROUPS.map((g) => ({ g, label: EXERCISE_GROUP_LABELS[g], value: byGroup[g] ? byGroup[g][now] : 0 }));
+    const half = target / 2;
     return {
-      id: 'muscles', icon: itemIconHtml('biceps'), name: 'Sets per muscle',
+      id: 'muscles', icon: itemIconHtml('biceps'), name: 'Sets per muscle', swap,
       sub: now > 0 ? `Last week ${lastWeekHit} of ${plural(rows.length, 'muscle group')} reached ${target} sets` : 'This week so far',
-      plot: Charts.hbars(rows, { mark: target, markText: `${target} sets`, label: `Sets per muscle group this week so far: ${rows.map((r) => `${r.label} ${r.value}`).join(', ')}. ${target} sets a week is marked.` }),
-      legend: [keyItem('sw now', 'This week, so far'), now > 0 ? keyItem('tk', 'Last week') : '', keyItem('ln goal', `${target} sets a week`)].join(''),
+      plot: asMap
+        ? `<div class="mm-wrap">${Charts.bodyMap(Object.fromEntries(areas.map((a) => [a.g, level(a.value)])), Object.fromEntries(areas.map((a) => [a.g, `${a.label}: ${plural(a.value, 'set')} this week`])), label)}
+            <dl class="mm-list">${areas.map((a) => `<div><dt><i class="sw mm-l${level(a.value)}"></i>${a.label}</dt><dd>${a.value}</dd></div>`).join('')}</dl></div>`
+        : Charts.hbars(rows, { mark: target, markText: `${target} sets`, label }),
+      legend: asMap
+        ? [keyItem('sw mm-l0', '0'), keyItem('sw mm-l1', `1 to ${Math.ceil(half) - 1}`), keyItem('sw mm-l2', `${Math.ceil(half)} to ${target - 1}`), keyItem('sw mm-l3', `${target} or more sets this week`)].join('')
+        : [keyItem('sw now', 'This week, so far'), now > 0 ? keyItem('tk', 'Last week') : '', keyItem('ln goal', `${target} sets a week`)].join(''),
       table: { head: ['Muscle', 'This week', 'Last week', `Avg, ${rangeInfo()[1]}`], rows: rows.map((r) => [r.label, `${r.value} so far`, r.prev != null ? String(r.prev) : '—', r.avg != null ? String(round(r.avg, 1)) : '—']) },
-      note: 'Every logged set of a lift or bodyweight move counts toward its exercise\'s muscle group. Change the group in Manage.',
+      note: `Working sets of lifts and bodyweight moves count toward the exercise's muscle group. Warm-up sets, under ${S.WARMUP_CUTOFF * 100}% of that day's heaviest set, are left out.`,
     };
   }
 
@@ -2861,10 +2940,11 @@
     if (!domainTracked('daily')) return null;
     const items = activeExercises().filter(isDailyEx);
     if (!items.length) return null;
-    const base = { id: 'daily', icon: `<span class="item-icon" aria-hidden="true">${STATIC_ICONS.daily}</span>`, name: 'Daily', open: () => { historyCategory = 'daily'; switchTab('history'); } };
+    const base = { id: 'daily', icon: `<span class="item-icon" aria-hidden="true">${STATIC_ICONS.daily}</span>`, name: 'Daily', open: openDailyCharts };
     if (!items.some((ex) => entriesFor(ex.id).length)) return { ...base, empty: { text: 'Check in on a Daily item and your days show up here.' } };
     const dates = daysBetween(addDays(todayISO(), -13), todayISO());
-    const rows = items.map((ex) => {
+    const goal = workoutGoalOn();
+    const rows = items.filter((ex) => !goal || ex.kind === 'habit').map((ex) => {
       const byDate = {};
       entriesFor(ex.id).forEach((e) => { (byDate[e.date] = byDate[e.date] || []).push(e); });
       const first = Object.keys(byDate).sort()[0];
@@ -2872,10 +2952,18 @@
       const past = cells.slice(0, -1);
       return { name: exerciseLabel(ex), cells, done: past.filter((c) => c === 'done').length, part: past.filter((c) => c === 'part').length, miss: past.filter((c) => c === 'miss').length };
     });
+    if (goal) {
+      const worked = workoutDates();
+      const first = [...worked].sort()[0];
+      const cells = dates.map((d) => (worked.has(d) ? 'done' : d === todayISO() ? 'open' : !first || d < first ? 'off' : 'miss'));
+      const past = cells.slice(0, -1);
+      rows.unshift({ name: 'Workout', cells, done: past.filter((c) => c === 'done').length, part: 0, miss: past.filter((c) => c === 'miss').length });
+    }
     const ranked = rows.slice().sort((a, b) => b.done - a.done);
     let sub;
     if (rows.length === 1) sub = `Done ${rows[0].done} of the last 13 days`;
     else if (!ranked[0].done) sub = 'Nothing checked in the last 2 weeks';
+    else if (goal) sub = `Worked out on ${rows[0].done} of the last 13 days`;
     else if (ranked[1].done === ranked[0].done || ranked[1].done >= 9) sub = `${escapeHtml(ranked[0].name)} and ${escapeHtml(ranked[1].name)} are the steadiest`;
     else sub = `${escapeHtml(ranked[0].name)} is the steadiest`;
     const tips = dates.map((d, i) => ({ title: dayTitle(d), rows: rows.map((r) => ['', `${r.name}: ${DAILY_STATE_LABELS[r.cells[i]]}`]) }));
@@ -2884,7 +2972,7 @@
       sub,
       plot: Charts.heatmap(rows, dates, tips, `Daily items over the last 14 days: ${rows.map((r) => `${r.name} done ${r.done} of 13`).join(', ')}`),
       legend: ['done', 'part', 'miss', 'off'].map((k) => keyItem(`sw hm-${k}`, DAILY_STATE_LABELS[k])).join(''),
-      note: 'Weekly items only get a square on the days they are due. Today stays open until midnight.',
+      note: `${goal ? 'A lift, a run or any daily reps counts as that day\'s workout. ' : ''}Weekly items only get a square on the days they are due. Today stays open until midnight.`,
       table: { head: ['Item', 'Done', 'Partly', 'Missed'], rows: rows.map((r) => [escapeHtml(r.name), String(r.done), String(r.part), String(r.miss)]) },
     };
   }
@@ -3054,24 +3142,17 @@
     return parts.length ? `<p class="cc-note">${parts.join(' ')}</p>` : '';
   }
 
-  function openBodyCharts(trackerId) {
+  // With one tracker there is nothing to list, so Details goes straight to its page.
+  function openBodyCharts() {
     const trackers = activeTrackers();
-    let selId = trackers.some((t) => t.id === trackerId) ? trackerId : trackers[0] && trackers[0].id;
-    openChartSheet('Body', itemIconHtml('scale'), (body, repaint) => {
-      const t = trackerById(selId);
-      if (!t) { body.innerHTML = '<div class="empty-state"><p>Add a tracker in Manage, Body, and its chart shows up here.</p></div>'; return; }
-      const card = trackerChartCard(t, { withEstimate: true });
-      body.innerHTML = `
-        <div class="f-scroll"><div class="f-chips" id="chartTrackerChips" role="radiogroup" aria-label="Tracker">${trackers.map((x) => chipHtml(x.id, escapeHtml(x.name), null, x.id === selId)).join('')}</div></div>
-        ${chartCardHtml(card)}
-        ${card.empty ? '' : kpiRowHtml(trackerTiles(t))}
-        ${card.empty ? '' : bodyNoteHtml(t)}`;
-      const chips = body.querySelector('#chartTrackerChips');
-      wireFScroll(chips);
-      refreshFScroll(chips);
-      chips.addEventListener('click', (ev) => { const b = ev.target.closest('[data-chip]'); if (b) { selId = b.dataset.chip; repaint(); } });
-      wireChartCards(body, [card]);
-    });
+    if (trackers.length === 1) { openTrackerDetail(trackers[0].id); return; }
+    openModal(`
+      <div class="modal-title-row"><h2 class="title-with-icon">${itemIconHtml('scale')}Body</h2><button class="modal-close" data-action="close-modal" aria-label="Close">${CLOSE_ICON_SVG}</button></div>
+      <div class="chart-sheet" id="bodyAreaList">${trackers.length ? areaListHtml('Trackers', trackers.map((t) => {
+        const latest = latestMeasurement(t.id);
+        return { id: t.id, icon: trackerIconHtml(t, true), name: escapeHtml(t.name), value: latest ? fmtTrackerValue(t, latest.value) : '', sub: latest ? `Last ${chartDay(latest.date)}` : 'No entries yet' };
+      })) : '<div class="empty-state"><p>Add a tracker in Manage, Body, and it shows up here.</p></div>'}</div>`, { tall: true });
+    wireAreaList(document.getElementById('bodyAreaList'), (id) => openTrackerDetail(id, { label: 'Body', run: openBodyCharts }));
   }
 
   /* Water */
@@ -3273,6 +3354,7 @@
       let html = '';
       if (food) {
         const cal = caloriesCard();
+        cal.range = true;
         cards.push(cal);
         html += chartCardHtml(cal);
         const st = foodRangeStats();
@@ -3284,7 +3366,7 @@
         }
         [proteinCard(), macroSplitCard()].filter(Boolean).forEach((c) => { cards.push(c); html += chartCardHtml(c); });
       }
-      if (water) { const w = waterDetailCard(); cards.push(w); html += chartCardHtml(w); }
+      if (water) { const w = waterDetailCard(); w.range = !food; cards.push(w); html += chartCardHtml(w); }
       body.innerHTML = `${html}<p class="cc-note">A day counts once it is over. Days with nothing logged are left out of averages rather than counted as zero.</p>`;
       wireChartCards(body, cards);
     });
@@ -3296,23 +3378,23 @@
 
   /* Overview and sheets */
 
-  function overviewTiles() {
+  function overviewTiles(quiet = {}) {
     const from = rangeFrom();
     const tiles = [];
-    if (domainTracked('workout')) {
+    if (domainTracked('workout') && !quiet.workout) {
       const days = new Set(state.entries.filter((e) => !isDailyEntry(e) && e.date >= from && e.date <= todayISO()).map((e) => e.date)).size;
       if (state.entries.some((e) => !isDailyEntry(e))) tiles.push({ value: String(days), label: 'Workout days' });
     }
     const wt = trackerById(BODY_WEIGHT_TRACKER_ID);
-    if (domainTracked('measurements') && wt && !wt.archived) {
+    if (domainTracked('measurements') && wt && !wt.archived && !quiet.body) {
       const tr = trackerTrend(wt);
       if (tr.avg.length >= 2) tiles.push({ value: signed(tr.avg[tr.avg.length - 1].value - tr.avg[0].value), unit: Units.weightUnitLabel(), label: 'Weight change' });
     }
-    if (domainTracked('food')) {
+    if (domainTracked('food') && !quiet.food) {
       const st = foodRangeStats();
       if (st.avg != null) tiles.push({ value: fmtInt(st.avg), label: 'Avg kcal, full days' });
     }
-    if (domainTracked('water') && state.water.goalMl && state.waterEntries.length && tiles.length < 3) {
+    if (domainTracked('water') && !quiet.water && state.water.goalMl && state.waterEntries.length && tiles.length < 3) {
       const byDate = waterByDate();
       const met = daysBetween(from, addDays(todayISO(), -1)).filter((d) => byDate[d] >= state.water.goalMl).length;
       tiles.push({ value: String(met), label: 'Days at water goal' });
@@ -3326,6 +3408,34 @@
     return outer - 34;
   }
 
+  // An area that is on but has had no entry for QUIET_DAYS stops taking a full card and a
+  // tile on Progress. It comes back with the next entry.
+  const QUIET_DAYS = 14;
+  const QUIET_AREAS = {
+    workout: { name: 'Workout', setting: 'trackWorkout', log: 'workout', dates: () => state.entries.filter((e) => !isDailyEntry(e)).map((e) => e.date) },
+    daily: { name: 'Daily', setting: 'trackHabits', log: 'daily', dates: () => state.entries.filter(isDailyEntry).map((e) => e.date) },
+    body: { name: 'Body', setting: 'trackMeasurements', log: 'measurements', dates: () => state.measurements.map((m) => m.date) },
+    water: { name: 'Water', setting: 'trackWater', log: 'water', dates: () => state.waterEntries.map((w) => w.date) },
+    food: { name: 'Food', setting: 'trackFood', log: 'food', dates: () => state.food.entries.map((f) => f.date) },
+  };
+  // Card id -> days since the last entry, for areas that have gone quiet. Never-used areas
+  // keep their normal empty card, which explains what will show.
+  function quietAreas() {
+    const out = {};
+    Object.keys(QUIET_AREAS).forEach((id) => {
+      const last = QUIET_AREAS[id].dates().reduce((m, d) => (d > m ? d : m), '');
+      if (last && dayGap(last, todayISO()) >= QUIET_DAYS) out[id] = dayGap(last, todayISO());
+    });
+    return out;
+  }
+  function quietCardHtml(c, days) {
+    const area = QUIET_AREAS[c.id];
+    return `<div class="card chart-card is-quiet" data-chart-card="${c.id}">
+      <div class="cc-head">${c.icon || ''}<div class="cc-titles"><div class="cc-name">${c.name}</div><div class="cc-sub">Nothing logged in ${days} days</div></div></div>
+      <div class="btn-row"><button type="button" class="btn btn-secondary btn-sm" data-quiet-log="${area.log}">Log</button><button type="button" class="btn btn-secondary btn-sm" data-quiet-off="${c.id}">Turn off</button></div>
+    </div>`;
+  }
+
   function renderProgressCharts() {
     const wrap = document.getElementById('chartsOverview');
     Charts.setWidth(chartWidthIn(wrap));
@@ -3337,10 +3447,20 @@
       if (c.id === 'workout') c.goals = goals.filter((g) => g.type === 'lift' || g.type === 'cardio');
       if (c.id === 'body') c.goals = goals.filter((g) => g.type === 'body');
     });
+    const quiet = quietAreas();
+    const cardHtml = (c) => (quiet[c.id] ? quietCardHtml(c, quiet[c.id]) : chartCardHtml(c));
     document.getElementById('dashboardEmpty').hidden = cards.length > 0;
-    wrap.innerHTML = cards.length ? `${rangeSegHtml()}${kpiRowHtml(overviewTiles())}${cards.map(chartCardHtml).join('')}` : '';
+    document.getElementById('progressRange').innerHTML = cards.length ? rangeMenuHtml() : '';
+    wrap.innerHTML = cards.length ? `${kpiRowHtml(overviewTiles(quiet))}${cards.filter((c) => !(c.id === 'muscles' && quiet.workout)).map(cardHtml).join('')}` : '';
     if (!cards.length) return;
-    wrap.querySelector('.chart-range').addEventListener('click', (ev) => { const b = ev.target.closest('[data-seg]'); if (b) { chartRange = b.dataset.seg; renderProgressCharts(); } });
+    wrap.querySelectorAll('[data-quiet-log]').forEach((b) => b.addEventListener('click', () => openLogCategory(b.dataset.quietLog)));
+    wrap.querySelectorAll('[data-quiet-off]').forEach((b) => b.addEventListener('click', () => {
+      const area = QUIET_AREAS[b.dataset.quietOff];
+      state.settings[area.setting] = false;
+      if (!save()) return;
+      renderAll();
+      toast(`${area.name} is off. Turn it back on in Settings.`);
+    }));
     wireChartCards(wrap, cards);
   }
 
@@ -3357,19 +3477,10 @@
   function openChartSheet(title, iconHtml, paint) {
     openModal(`
       <div class="modal-title-row"><h2 class="title-with-icon">${iconHtml}${title}</h2><button class="modal-close" data-action="close-modal" aria-label="Close">${CLOSE_ICON_SVG}</button></div>
-      ${rangeSegHtml()}
       <div class="chart-sheet" id="chartSheetBody"></div>`, { tall: true });
-    const sheet = modalSheet();
-    const body = sheet.querySelector('#chartSheetBody');
+    const body = modalSheet().querySelector('#chartSheetBody');
     const repaint = () => { Charts.setWidth(chartWidthIn(body)); paint(body, repaint); };
-    sheet.querySelector('.chart-range').addEventListener('click', (ev) => {
-      const b = ev.target.closest('[data-seg]');
-      if (!b) return;
-      chartRange = b.dataset.seg;
-      sheet.querySelectorAll('.chart-range [data-seg]').forEach((x) => x.setAttribute('aria-checked', String(x.dataset.seg === chartRange)));
-      repaint();
-      if (!document.getElementById('view-progress').hidden) renderProgressCharts();
-    });
+    sheetRepaint = repaint;
     repaint();
   }
 
@@ -4151,8 +4262,10 @@
   }
 
   // Transient UI state (never saved).
-  const logEx = { seg: null, group: 'all', query: '', showAll: false, pickerOpen: false };
-  const LOG_LIST_LIMIT = 5;
+  // seg: 'mine' (starred, then recent) | 'fav' | 'recent' | 'all'.
+  const logEx = { seg: 'mine', group: 'all', query: '', showAll: false, pickerOpen: false };
+  const LOG_LIST_LIMIT = 6;
+  const PICKER_SHOWS = [['mine', 'Starred and recent'], ['fav', 'Favorites'], ['recent', 'Recent'], ['all', 'All']];
 
   function toggleExerciseFavorite(id) {
     const ex = exerciseById(id);
@@ -4170,21 +4283,17 @@
     const favs = active.filter(isFavoriteExercise);
     const recent = active.filter((e) => lastMap[e.id]).sort((a, b) => lastMap[b.id].k.localeCompare(lastMap[a.id].k));
     const byName = (a, b) => a.name.localeCompare(b.name);
-    if (!logEx.seg) logEx.seg = favs.length ? 'fav' : recent.length ? 'recent' : 'all';
     const searching = !!q;
     const seg = searching ? 'all' : logEx.seg;
-
-    document.getElementById('logExSeg').innerHTML = segHtml([['fav', 'Favorites'], ['recent', 'Recent'], ['all', `All ${active.length}`]], seg);
-
-    let base = seg === 'fav' ? favs : seg === 'recent' ? recent : active.slice().sort(byName);
+    const mine = favs.concat(recent.filter((e) => !isFavoriteExercise(e)));
+    let base = seg === 'mine' ? (mine.length ? mine : active.slice().sort(byName)) : seg === 'fav' ? favs : seg === 'recent' ? recent : active.slice().sort(byName);
     if (searching) base = active.filter((e) => exerciseLabel(e).toLowerCase().includes(q) || exerciseGroupLabel(e).toLowerCase().includes(q)).sort(byName);
 
     const counts = {};
     base.forEach((e) => { const g = exerciseGroup(e); counts[g] = (counts[g] || 0) + 1; });
     if (logEx.group !== 'all' && !counts[logEx.group]) logEx.group = 'all';
-    setChips(document.getElementById('logExChips'),
-      chipHtml('all', 'All', null, logEx.group === 'all') +
-      EXERCISE_GROUPS.filter(([g]) => counts[g]).map(([g, label]) => chipHtml(g, label, counts[g], logEx.group === g)).join(''));
+    logEx.groups = EXERCISE_GROUPS.filter(([g]) => counts[g]).map(([g, label]) => [g, label, counts[g]]);
+    syncPickerFilter('logEx', searching ? null : pickerFilterText(logEx.seg, logEx.group === 'all' ? '' : EXERCISE_GROUP_LABELS[logEx.group]));
 
     const filtered = logEx.group === 'all' ? base : base.filter((e) => exerciseGroup(e) === logEx.group);
     const limited = !searching && logEx.group === 'all' && !logEx.showAll && filtered.length > LOG_LIST_LIMIT;
@@ -4195,8 +4304,8 @@
       let msg;
       if (!active.length) msg = 'No exercises yet.';
       else if (searching) msg = `No exercises match “${escapeHtml(logEx.query.trim())}”.`;
-      else if (seg === 'fav') msg = 'No favorites yet — tap the ☆ on an exercise to pin it here.';
-      else if (seg === 'recent') msg = 'Nothing logged yet — exercises you log show up here.';
+      else if (seg === 'fav') msg = 'No favorites yet. Tap the ☆ on an exercise to keep it here.';
+      else if (seg === 'recent') msg = 'Nothing logged yet. Exercises you log show up here.';
       else msg = 'No exercises in this group.';
       list.innerHTML = `<p class="muted-text org-empty">${msg}</p>` +
         (!active.length || searching ? `<button type="button" class="btn btn-secondary btn-sm" data-org-add="exercise">Add exercise</button>` : '');
@@ -4214,6 +4323,8 @@
     const more = document.getElementById('logExShowAll');
     more.hidden = !limited;
     if (limited) more.innerHTML = `${seg === 'fav' ? 'Show all favorites' : seg === 'recent' ? 'Show all recent' : `Show all ${filtered.length}`} ${uiIcon('chevron-right')}`;
+    // Starred and recent is a short list, so its way out is the whole list.
+    if (seg === 'mine' && !searching && logEx.group === 'all') { more.hidden = active.length <= shown.length; more.innerHTML = `Show all ${active.length} exercises ${uiIcon('chevron-right')}`; }
   }
 
   function renderLogExerciseHead() {
@@ -4283,24 +4394,47 @@
     if (!form.hidden && form.scrollIntoView) form.scrollIntoView({ block: 'nearest' });
   }
 
+  // "Favorites · Chest", or nothing for the default list.
+  function pickerFilterText(seg, groupLabel) {
+    const parts = [seg === 'mine' ? '' : PICKER_SHOWS.find((s) => s[0] === seg)[1], groupLabel].filter(Boolean);
+    return parts.join(' · ');
+  }
+  // The filter button lights up while a filter is on, and a line under search says which.
+  function syncPickerFilter(prefix, text) {
+    document.getElementById(`${prefix}FilterBtn`).classList.toggle('is-on', !!text);
+    const note = document.getElementById(`${prefix}FilterNote`);
+    note.hidden = !text;
+    if (text) note.querySelector('span').textContent = `Showing ${text}`;
+  }
+  function wirePickerFilter(prefix, current) {
+    document.getElementById(`${prefix}FilterBtn`).addEventListener('click', () => openPickerFilter(current));
+    document.getElementById(`${prefix}FilterNote`).querySelector('button').addEventListener('click', () => { const c = current(); c.set((c.shows || PICKER_SHOWS)[0][0], 'all'); });
+  }
+  // One sheet for every picker: what to show, and which group. A tap applies at once.
+  function openPickerFilter(current) {
+    const paint = () => {
+      const c = current();
+      openModal(`
+        <div class="modal-title-row"><h2>${c.title}</h2><button class="modal-close" data-action="close-modal" aria-label="Close">${CLOSE_ICON_SVG}</button></div>
+        <div class="form-card">
+          <div class="field"><span class="field-label">Show</span><div class="f-chips is-wrap" id="pickerShow" role="radiogroup" aria-label="Show">${(c.shows || PICKER_SHOWS).map(([v, label, n]) => chipHtml(v, label, n == null ? null : n, c.show === v)).join('')}</div></div>
+          ${c.groups.length > 1 ? `<div class="field"><span class="field-label">${c.groupLabel}</span><div class="f-chips is-wrap" id="pickerGroup" role="radiogroup" aria-label="${c.groupLabel}">${chipHtml('all', 'All', null, c.group === 'all')}${c.groups.map(([v, label, n]) => chipHtml(v, label, n, c.group === v)).join('')}</div></div>` : ''}
+          <button type="button" class="btn btn-primary btn-block" data-action="close-modal">Done</button>
+        </div>`);
+      const on = (id, apply) => { const el = document.getElementById(id); if (el) el.addEventListener('click', (ev) => { const b = ev.target.closest('[data-chip]'); if (b) { apply(b.dataset.chip); paint(); } }); };
+      on('pickerShow', (v) => c.set(v, 'all'));
+      on('pickerGroup', (v) => c.set(c.show, v));
+    };
+    paint();
+  }
+
   function wireLogExercisePicker() {
-    const chips = document.getElementById('logExChips');
-    wireFScroll(chips);
-    document.getElementById('logExSeg').addEventListener('click', (ev) => {
-      const b = ev.target.closest('[data-seg]');
-      if (!b) return;
-      logEx.seg = b.dataset.seg; logEx.group = 'all'; logEx.showAll = false; logEx.query = '';
-      document.getElementById('logExSearch').value = '';
-      renderLogExercisePicker();
-    });
+    wirePickerFilter('logEx', () => ({
+      title: 'Filter exercises', groupLabel: 'Muscle group', show: logEx.seg, group: logEx.group, groups: logEx.groups || [],
+      set: (seg, group) => { logEx.seg = seg; logEx.group = group; logEx.showAll = false; renderLogExercisePicker(); },
+    }));
     document.getElementById('logExSearch').addEventListener('input', (ev) => {
       logEx.query = ev.target.value; logEx.group = 'all';
-      renderLogExercisePicker();
-    });
-    chips.addEventListener('click', (ev) => {
-      const b = ev.target.closest('[data-chip]');
-      if (!b) return;
-      logEx.group = b.dataset.chip;
       renderLogExercisePicker();
     });
     const list = document.getElementById('logExList');
@@ -4314,16 +4448,18 @@
     };
     list.addEventListener('click', pick);
     list.addEventListener('keydown', onEnterOrSpace(pick));
-    document.getElementById('logExShowAll').addEventListener('click', () => { logEx.showAll = true; renderLogExercisePicker(); });
+    document.getElementById('logExShowAll').addEventListener('click', () => { if (logEx.seg === 'mine') logEx.seg = 'all'; logEx.showAll = true; renderLogExercisePicker(); });
     document.getElementById('logSwitchBtn').addEventListener('click', () => { logEx.pickerOpen = !logEx.pickerOpen; syncLogWorkoutUI(); });
     document.getElementById('logExerciseHead').addEventListener('click', (ev) => {
       if (ev.target.closest('#logChangeBtn')) { logEx.pickerOpen = true; syncLogWorkoutUI(); }
     });
   }
 
-  const manageEx = { query: '', filter: 'all', open: {} };
-  const MANAGE_EX_FILTERS = [['all', 'All'], ['goal', 'Goals'], ['accessory', 'Other']];
+  const manageEx = { query: '', filter: 'used', open: {} };
+  // 'used' is the default: logged, starred or with a goal. The catalog fills All.
+  const MANAGE_EX_FILTERS = [['used', 'In use'], ['all', 'All'], ['goal', 'Goals'], ['accessory', 'Other']];
   function manageExMatchesFilter(ex, f) {
+    if (f === 'used') return isFavoriteExercise(ex) || sectionOf(ex) === 'goal' || entriesFor(ex.id).length > 0;
     return f === 'all' || sectionOf(ex) === f;
   }
 
@@ -4353,15 +4489,15 @@
     const fcounts = {};
     MANAGE_EX_FILTERS.forEach(([f]) => { fcounts[f] = queried.filter((ex) => manageExMatchesFilter(ex, f)).length; });
     if (!fcounts[manageEx.filter]) manageEx.filter = 'all';
-    setChips(document.getElementById('exManageChips'),
-      MANAGE_EX_FILTERS.filter(([f]) => f === 'all' || fcounts[f]).map(([f, label]) => chipHtml(f, label, fcounts[f], manageEx.filter === f)).join(''));
+    manageEx.shows = MANAGE_EX_FILTERS.filter(([f]) => f === 'used' || f === 'all' || fcounts[f]).map(([f, label]) => [f, label, fcounts[f]]);
+    syncPickerFilter('exManage', q || manageEx.filter === 'used' ? null : MANAGE_EX_FILTERS.find(([f]) => f === manageEx.filter)[1]);
 
     const visible = queried.filter((ex) => manageExMatchesFilter(ex, manageEx.filter));
     const active = visible.filter((e) => !e.archived);
     const archived = visible.filter((e) => e.archived);
     const pinned = active.filter(isFavoriteExercise);
     const rest = active.filter((e) => !isFavoriteExercise(e));
-    const sections = [{ key: 'pinned', label: '★ Pinned', items: pinned }];
+    const sections = [{ key: 'pinned', label: '★ Favorites', items: pinned }];
     EXERCISE_GROUPS.forEach(([g, label]) => sections.push({ key: g, label, items: rest.filter((e) => exerciseGroup(e) === g) }));
     sections.push({ key: 'archived', label: 'Archived', items: archived });
 
@@ -4389,14 +4525,11 @@
   }
 
   function wireManageExercises() {
-    wireFScroll(document.getElementById('exManageChips'));
     document.getElementById('exManageSearch').addEventListener('input', (ev) => { manageEx.query = ev.target.value; renderExerciseManageList(); });
-    document.getElementById('exManageChips').addEventListener('click', (ev) => {
-      const b = ev.target.closest('[data-chip]');
-      if (!b) return;
-      manageEx.filter = b.dataset.chip;
-      renderExerciseManageList();
-    });
+    wirePickerFilter('exManage', () => ({
+      title: 'Filter exercises', shows: manageEx.shows || MANAGE_EX_FILTERS, show: manageEx.filter, group: 'all', groups: [],
+      set: (filter) => { manageEx.filter = filter; renderExerciseManageList(); },
+    }));
     document.getElementById('exerciseManageList').addEventListener('click', (ev) => {
       const star = ev.target.closest('[data-fav]');
       if (star) { toggleExerciseFavorite(star.dataset.fav); return; }
@@ -4666,14 +4799,11 @@
   // on; Daily (habits and daily reps) follows trackHabits (js/features.js).
   function domainTracked(id) { return F.domainTracked(state.settings, id); }
 
-  // Log and History offer only domains that are on. Manage offers all five
-  // (ALL_DOMAIN_CATEGORIES).
+  // Log, History and Manage offer only domains that are on. Settings switches them.
   function availableDomainCategories() {
     return DOMAIN_ORDER.filter(domainTracked).map((id) => ({ id, label: DOMAIN_LABELS[id] }));
   }
 
-  // Manage always offers all five domains: it is where an off domain is turned back on.
-  const ALL_DOMAIN_CATEGORIES = DOMAIN_ORDER.map((id) => ({ id, label: DOMAIN_LABELS[id] }));
 
   // Domain tab markup shared by Log, History and Manage. An off domain gets
   // `.is-toggled-off` (dimmed but still tappable); only Manage shows one.
@@ -4823,9 +4953,15 @@
 
   function renderLogWaterPanel() {
     document.getElementById('logWaterUnitLabel').textContent = Units.volumeUnitLabel();
-    const wrap = document.getElementById('waterCupButtons');
-    wrap.innerHTML = cupButtonsHtml();
-    wrap.querySelectorAll('.cup-btn').forEach((btn) => btn.addEventListener('click', () => {
+    const wrap = document.getElementById('waterCupList');
+    wrap.hidden = state.water.cups.length === 0;
+    wrap.innerHTML = state.water.cups.map((cup) => `
+      <div class="entry-row">
+        <span class="item-icon item-icon-sm" aria-hidden="true">${itemIconSvg(cupIconKey(cup))}</span>
+        <div class="entry-row-main"><div class="entry-row-title">${escapeHtml(cup.name)}</div><div class="entry-row-sub">${fmtVolume(cup.amountMl)}</div></div>
+        <button type="button" class="add-btn" data-cup-id="${cup.id}" aria-label="Log one ${escapeHtml(cup.name)}">${uiIcon('plus')}</button>
+      </div>`).join('');
+    wrap.querySelectorAll('[data-cup-id]').forEach((btn) => btn.addEventListener('click', () => {
       const cup = cupById(btn.dataset.cupId);
       if (cup) logWaterAmount(cup.amountMl, cup.id);
     }));
@@ -4872,6 +5008,46 @@
      it): a tap-to-check list of the habits due today, then the daily rep targets with a meter and a Log
      button (which opens the same rep form as Workout). Nothing here is new data: it is
      the Home "Daily targets" list, given its own home. */
+  /* The daily Workout goal
+     Daily rep items (push-ups, crunches) are there for days without the gym, so with
+     settings.dailyWorkoutGoal on they are not judged one by one: the day has one Workout
+     goal, met by any lift, run or daily reps logged that day. Habits stay daily checks. */
+  const dailyRepItems = () => activeExercises().filter((e) => isDailyEx(e) && e.kind !== 'habit');
+  function workoutGoalOn() {
+    return state.settings.dailyWorkoutGoal && domainTracked('daily') && (state.settings.trackWorkout || cardioTracked() || dailyRepItems().length > 0);
+  }
+  // Dates with any lift, run or daily reps logged.
+  function workoutDates() {
+    const out = new Set();
+    state.entries.forEach((e) => { const ex = exerciseById(e.exerciseId); if (ex && ex.kind !== 'habit') out.add(e.date); });
+    return out;
+  }
+  const workedOutToday = () => workoutDates().has(todayISO());
+  // Today's Daily list as { done, total }: habits due, plus the Workout goal or each rep item.
+  function dailyTally() {
+    const { habits, reps } = dailyItemsToday();
+    const goal = workoutGoalOn();
+    const done = habits.filter(dailyComplete).length + (goal ? (workedOutToday() ? 1 : 0) : reps.filter(dailyComplete).length);
+    return { done, total: habits.length + (goal ? 1 : reps.length) };
+  }
+  function workoutGoalRowHtml() {
+    const done = workedOutToday();
+    return `
+      <div class="glance-row${done ? ' is-complete' : ''}" data-workout-goal>
+        <div class="glance-open">
+          ${itemIconHtml('dumbbell')}
+          <div class="glance-main">
+            <div class="glance-line">
+              <span class="glance-name">Workout</span>
+              <span class="glance-value">${done ? `${CHECK_ICON_SVG}<span>Done</span>` : '<span class="muted-text">Not yet today</span>'}</span>
+            </div>
+            <div class="meter meter-sm"><div class="meter-fill${done ? ' is-complete' : ''}" style="--fill:${done ? 100 : 0}%"></div></div>
+          </div>
+        </div>
+        <button type="button" class="btn btn-secondary btn-sm glance-btn" data-action="log-workout">Log</button>
+      </div>`;
+  }
+
   function dailyItemsToday() {
     const all = activeExercises().filter(isDailyEx);
     return { habits: all.filter((e) => e.kind === 'habit' && habitDueToday(e)), reps: all.filter((e) => e.kind !== 'habit') };
@@ -4904,13 +5080,14 @@
     if (panel.hidden) return;
     const { habits, reps } = dailyItemsToday();
     const all = habits.concat(reps);
-    const section = (title, items, rowFn) => items.length ? `
-      <div class="section-head daily-head"><h2>${title}</h2><span class="muted-text">${items.filter(dailyComplete).length} of ${items.length}</span></div>
+    const goal = workoutGoalOn();
+    const section = (title, items, rowFn, note) => items.length ? `
+      <div class="section-head daily-head"><h2>${title}</h2><span class="muted-text">${note || `${items.filter(dailyComplete).length} of ${items.length}`}</span></div>
       <div class="card card-list">${items.map(rowFn).join('')}</div>` : '';
     panel.innerHTML = `
       ${all.length ? '' : '<p class="muted-text">Nothing is due today. Add a habit or a daily rep target to get started.</p>'}
       ${section('Habits', habits, dailyHabitRowHtml)}
-      ${section('Daily reps', reps, (ex) => dailyTargetRowHtml(ex, 'Log'))}
+      ${section('Daily reps', reps, (ex) => dailyTargetRowHtml(ex, 'Log'), goal ? (workedOutToday() ? 'Workout done today' : 'Any of these counts as today\'s workout') : '')}
       <button type="button" class="card daily-add" data-action="add-daily">${uiIcon('plus')}<span>Add to Daily</span></button>`;
     panel.querySelectorAll('.glance-row').forEach((row) => {
       const exId = row.getAttribute('data-exercise-id');
@@ -5021,8 +5198,8 @@
       <div class="entry-row" data-entry-id="${entry.id}">
         ${exerciseIconHtml(ex, true)}
         <div class="entry-row-main">
-          <div class="entry-row-title">${escapeHtml(ex ? exerciseLabel(ex) : 'Deleted exercise')}</div>
-          <div class="entry-row-sub">${escapeHtml(entrySummaryText(ex, entry))}${entry.note ? ` — “${escapeHtml(entry.note)}”` : ''}</div>
+          <div class="entry-row-title">${escapeHtml(ex ? exerciseLabel(ex) : 'Deleted exercise')}${entry.light ? ' <span class="tag">Light</span>' : ''}</div>
+          <div class="entry-row-sub">${escapeHtml(entrySummaryText(ex, entry))}${entry.note ? ` · ${escapeHtml(entry.note)}` : ''}</div>
         </div>
         <div class="entry-row-date">${fmtDateShort(entry.date)}</div>
       </div>`;
@@ -5302,7 +5479,7 @@
   }
 
   // Transient UI state (never saved).
-  const foodLog = { seg: null, cat: 'all', query: '', showAll: false, manualOpen: false };
+  const foodLog = { seg: 'mine', cat: 'all', query: '', showAll: false, manualOpen: false };
   const FOOD_LIST_LIMIT = 5;
   let savedFoodDate = null;
 
@@ -5353,13 +5530,11 @@
     };
   }
   function dailyGlance() {
-    const { habits, reps } = dailyItemsToday();
-    const all = habits.concat(reps);
-    const done = all.filter(dailyComplete).length;
-    const left = all.length - done;
+    const { done, total } = dailyTally();
+    const left = total - done;
     return {
-      html: glanceHtml({ eyebrow: 'Today', value: done, unit: `of ${all.length} done`,
-        row2: `${glanceMeter(all.length ? (done / all.length) * 100 : 0, all.length && !left ? ' is-complete' : '')}<span class="lg-tx">${!all.length ? 'Nothing due' : left ? `${left} left` : 'All done'}</span>` }),
+      html: glanceHtml({ eyebrow: 'Today', value: done, unit: `of ${total} done`,
+        row2: `${glanceMeter(total ? (done / total) * 100 : 0, total && !left ? ' is-complete' : '')}<span class="lg-tx">${!total ? 'Nothing due' : left ? `${left} left` : 'All done'}</span>` }),
     };
   }
   function bodyGlance() {
@@ -5436,20 +5611,17 @@
     const favs = foods.filter((f) => f.favorite);
     const recent = foods.filter((f) => lastUsed[f.id]).sort((a, b) => lastUsed[b.id].localeCompare(lastUsed[a.id]));
     const byName = (a, b) => a.name.localeCompare(b.name);
-    if (!foodLog.seg) foodLog.seg = favs.length ? 'fav' : recent.length ? 'recent' : 'all';
     const searching = !!q;
     const seg = searching ? 'all' : foodLog.seg;
-    document.getElementById('foodSeg').innerHTML = segHtml([['fav', 'Favorites'], ['recent', 'Recent'], ['all', `All ${foods.length}`]], seg);
-
-    let base = seg === 'fav' ? favs : seg === 'recent' ? recent : foods.slice().sort(byName);
+    const mine = favs.concat(recent.filter((f) => !f.favorite));
+    let base = seg === 'mine' ? (mine.length ? mine : foods.slice().sort(byName)) : seg === 'fav' ? favs : seg === 'recent' ? recent : foods.slice().sort(byName);
     if (searching) base = foods.filter((f) => f.name.toLowerCase().includes(q)).sort(byName);
 
     const counts = {};
     base.forEach((f) => { const c = f.category || 'other'; counts[c] = (counts[c] || 0) + 1; });
     if (foodLog.cat !== 'all' && !counts[foodLog.cat]) foodLog.cat = 'all';
-    setChips(document.getElementById('savedFoodCategorySegmented'),
-      chipHtml('all', 'All', null, foodLog.cat === 'all') +
-      SAVED_FOOD_CATEGORIES.filter((c) => counts[c.value]).map((c) => chipHtml(c.value, SAVED_FOOD_CHIP_LABELS[c.value], counts[c.value], foodLog.cat === c.value)).join(''));
+    foodLog.groups = SAVED_FOOD_CATEGORIES.filter((c) => counts[c.value]).map((c) => [c.value, SAVED_FOOD_CHIP_LABELS[c.value], counts[c.value]]);
+    syncPickerFilter('food', searching ? null : pickerFilterText(foodLog.seg, foodLog.cat === 'all' ? '' : SAVED_FOOD_CHIP_LABELS[foodLog.cat]));
 
     const filtered = foodLog.cat === 'all' ? base : base.filter((f) => (f.category || 'other') === foodLog.cat);
     const limited = !searching && foodLog.cat === 'all' && !foodLog.showAll && filtered.length > FOOD_LIST_LIMIT;
@@ -5457,10 +5629,11 @@
     const more = document.getElementById('foodShowAll');
     more.hidden = !limited;
     if (limited) more.innerHTML = `${seg === 'fav' ? 'Show all favorites' : seg === 'recent' ? 'Show all recent' : `Show all ${filtered.length}`} ${uiIcon('chevron-right')}`;
+    if (seg === 'mine' && !searching && foodLog.cat === 'all') { more.hidden = foods.length <= shown.length; more.innerHTML = `Show all ${foods.length} foods ${uiIcon('chevron-right')}`; }
 
     if (!shown.length) {
       list.innerHTML = `<p class="muted-text org-empty">${searching ? `No saved foods match “${escapeHtml(foodLog.query.trim())}”.`
-        : seg === 'fav' ? 'No favorites yet — tap the ☆ on a saved food to pin it here.'
+        : seg === 'fav' ? 'No favorites yet. Tap the ☆ on a saved food to keep it here.'
         : seg === 'recent' ? 'Nothing logged from a saved food yet.' : 'No saved foods in this category.'}</p>`;
       return;
     }
@@ -5545,24 +5718,13 @@
   }
 
   function wireFoodLog() {
-    const chips = document.getElementById('savedFoodCategorySegmented');
-    wireFScroll(chips);
     const reset = () => { expandedSavedFoodId = null; savedFoodQty = 1; };
-    document.getElementById('foodSeg').addEventListener('click', (ev) => {
-      const b = ev.target.closest('[data-seg]');
-      if (!b) return;
-      foodLog.seg = b.dataset.seg; foodLog.cat = 'all'; foodLog.showAll = false; foodLog.query = '';
-      document.getElementById('foodSearch').value = '';
-      reset(); renderSavedFoodLogList();
-    });
+    wirePickerFilter('food', () => ({
+      title: 'Filter foods', groupLabel: 'Type', show: foodLog.seg, group: foodLog.cat, groups: foodLog.groups || [],
+      set: (seg, cat) => { foodLog.seg = seg; foodLog.cat = cat; foodLog.showAll = false; reset(); renderSavedFoodLogList(); },
+    }));
     document.getElementById('foodSearch').addEventListener('input', (ev) => {
       foodLog.query = ev.target.value; foodLog.cat = 'all';
-      reset(); renderSavedFoodLogList();
-    });
-    chips.addEventListener('click', (ev) => {
-      const b = ev.target.closest('[data-chip]');
-      if (!b) return;
-      foodLog.cat = b.dataset.chip;
       reset(); renderSavedFoodLogList();
     });
     const list = document.getElementById('savedFoodLogList');
@@ -5582,7 +5744,7 @@
     list.addEventListener('keydown', (ev) => {
       if ((ev.key === 'Enter' || ev.key === ' ') && ev.target.classList.contains('saved-food-log-row')) { ev.preventDefault(); pick(ev); }
     });
-    document.getElementById('foodShowAll').addEventListener('click', () => { foodLog.showAll = true; renderSavedFoodLogList(); });
+    document.getElementById('foodShowAll').addEventListener('click', () => { if (foodLog.seg === 'mine') foodLog.seg = 'all'; foodLog.showAll = true; renderSavedFoodLogList(); });
     document.getElementById('logFoodManualBtn').addEventListener('click', () => { foodLog.manualOpen = !foodLog.manualOpen; renderLogView(); });
     document.getElementById('logFoodCreateBtn').addEventListener('click', () => openSavedFoodForm(null));
   }
@@ -5666,6 +5828,12 @@
     });
   }
 
+  // The Light session switch shows for lifts and rep exercises, and starts off for each entry.
+  function syncLogLight(ex) {
+    document.getElementById('logLightRow').hidden = !canBeLight(ex);
+    document.getElementById('logLightSwitch').setAttribute('aria-checked', 'false');
+  }
+
   function handleLogSubmit(ev) {
     ev.preventDefault();
     const select = document.getElementById('logExercise');
@@ -5689,11 +5857,13 @@
       if (note) sameDay.note = sameDay.note && !sameDay.note.includes(note) ? `${sameDay.note} · ${note}` : (sameDay.note || note);
       message = `Added ${fields.sets.length === 1 ? 'a set' : `${fields.sets.length} sets`} to ${date === todayISO() ? 'today’s' : 'that day’s'} ${ex.name}`;
     } else {
-      state.entries.push(Object.assign({ id: genId('en'), exerciseId: ex.id, date, note: note || null }, fields));
+      const light = canBeLight(ex) && isOn(document.getElementById('logLightSwitch'));
+      state.entries.push(Object.assign({ id: genId('en'), exerciseId: ex.id, date, note: note || null }, fields, light ? { light: true } : {}));
     }
     if (!save()) return;
     toast(message);
     document.getElementById('logNote').value = '';
+    syncLogLight(ex);
     renderDynamicFields(document.getElementById('logDynamicFields'), ex);
     renderLogExerciseHead();
     renderRecentEntries();
@@ -5715,7 +5885,7 @@
   const CAL_DOT_SLOTS = [['workout', 'cal-dot-workout'], ['daily', 'cal-dot-daily'], ['water', 'cal-dot-water'], ['food', 'cal-dot-food'], ['measurements', 'cal-dot-body']];
 
   function dayActivity(dateIso) {
-    // A domain switched off in Manage shows no dot.
+    // A domain that is switched off shows no dot.
     const dayEntries = state.entries.filter((e) => e.date === dateIso);
     const workout = domainTracked('workout') && dayEntries.some((e) => !isDailyEntry(e));
     const daily = domainTracked('daily') && dayEntries.some(isDailyEntry);
@@ -5795,8 +5965,9 @@
     const select = document.getElementById('historyFilter');
     const prev = select.value;
     const daily = historyCategory === 'daily';
-    const groups = groupBySection(state.exercises.filter((e) => isDailyEx(e) === daily));
-    let html = `<option value="__all__">${daily ? 'All habits and daily reps' : 'All exercises'}</option>`;
+    // Only what has entries: filtering to something never logged would show nothing.
+    const groups = groupBySection(state.exercises.filter((e) => isDailyEx(e) === daily && entriesFor(e.id).length));
+    let html = `<option value="__all__">${daily ? 'All daily items' : 'All exercises'}</option>`;
     ['goal', 'daily', 'accessory'].forEach((sec) => {
       if (!groups[sec].length) return;
       html += `<optgroup label="${SECTION_LABELS[sec]}">` +
@@ -5911,6 +6082,7 @@
         <label class="field"><span class="field-label">Date</span><input type="date" id="editEntryDate" value="${entry.date}" /></label>
         <div id="editEntryFields"></div>
         <label class="field"><span class="field-label">Note</span><input type="text" id="editEntryNote" value="${entry.note ? escapeHtml(entry.note) : ''}" maxlength="200" /></label>
+        ${canBeLight(ex) ? `<div class="setting-row"><span>Light session <span class="muted-text">(not a working day: left out of the trend and tips)</span></span>${switchHtml('id="editEntryLightSwitch"', 'Light session', entry.light)}</div>` : ''}
         <div class="btn-row">
           <button class="btn btn-primary btn-block" id="saveEntryBtn">Save changes</button>
         </div>
@@ -5918,6 +6090,8 @@
       </div>
     `);
     if (ex) renderDynamicFields(document.getElementById('editEntryFields'), ex, entry);
+    const lightSwitch = document.getElementById('editEntryLightSwitch');
+    if (lightSwitch) lightSwitch.addEventListener('click', () => lightSwitch.setAttribute('aria-checked', String(!isOn(lightSwitch))));
     document.getElementById('saveEntryBtn').addEventListener('click', () => {
       if (!ex) { closeModal(); return; }
       const fields = readDynamicFields(document.getElementById('editEntryFields'), ex);
@@ -5928,6 +6102,7 @@
       entry.date = newDate;
       entry.note = document.getElementById('editEntryNote').value.trim() || null;
       Object.assign(entry, fields);
+      if (lightSwitch && isOn(lightSwitch)) entry.light = true; else delete entry.light;
       if (!save()) return;
       closeModal();
       toast('Entry updated');
@@ -5969,173 +6144,206 @@
     select.dispatchEvent(new Event('change'));
   }
 
-  // A habit's detail: today's count, how often the target was met lately, and its
-  // entries. There is no trend chart: there is nothing to measure but "done".
-  function renderHabitDetail(ex) {
-    const goal = ex.goal || 1;
-    const entries = entriesFor(ex.id).slice().sort((a, b) => (b.date + b.id).localeCompare(a.date + a.id));
-    const perDay = {};
-    entries.forEach((e) => { perDay[e.date] = (perDay[e.date] || 0) + 1; });
-    let hit = 0;
-    for (let i = 0; i < 30; i++) {
-      const d = new Date(todayISO() + 'T00:00:00');
-      d.setDate(d.getDate() - i);
-      if ((perDay[localDateISO(d)] || 0) >= goal) hit++;
-    }
+  /* Item pages
+     One layout for every exercise, daily item and tracker, whichever row opened it: the
+     number and its goal, Log and Edit goal, one chart on the shared range, records, the
+     latest entries, then optional insights. The modal holds one sheet, so a page opened
+     from a Details sheet keeps its way back in `itemBack`. */
+  let itemBack = null;
+  // Folding rows the reader opened, kept while the app is open.
+  const openFolds = new Set();
+  const itemMetric = {};
+  const ITEM_ENTRY_LIMIT = 3;
+
+  function openItemSheet(iconHtml, titleHtml, editLabel, paint) {
     openModal(`
+      ${itemBack ? `<button type="button" class="modal-back-link" id="itemBackBtn">${BACK_CHEVRON_ICON_SVG}${itemBack.label}</button>` : ''}
       <div class="modal-title-row">
-        <h2 class="title-with-icon">${exerciseIconHtml(ex)}${exerciseLabelHtml(ex)}</h2>
+        <h2 class="title-with-icon">${iconHtml}${titleHtml}</h2>
         <div class="modal-title-actions">
-          <button class="icon-btn" id="editExerciseBtn" aria-label="Edit habit">${EDIT_ICON_SVG}</button>
+          <button class="icon-btn" id="itemEditBtn" aria-label="${editLabel}">${EDIT_ICON_SVG}</button>
           <button class="modal-close" data-action="close-modal" aria-label="Close">${CLOSE_ICON_SVG}</button>
         </div>
       </div>
-      <div class="card">
-        <div class="ex-card-badge badge-standalone">${kindBadge(ex)}${escapeHtml(exerciseGoalSummary(ex))}</div>
-        ${habitPanelHtml(ex)}
-        <p class="muted-text">${habitRepeatDays(ex) === 1 ? `Target met on ${hit} of the last 30 days.` : `Done ${hit} time${hit === 1 ? '' : 's'} in the last 30 days, about ${Math.floor(30 / habitRepeatDays(ex))} due.`}</p>
-      </div>
-      <div class="btn-row detail-actions">
-        <button type="button" class="btn btn-primary" id="habitDoneBtn">Done</button>
-        <button type="button" class="btn btn-secondary" id="editGoalFromDetailBtn">Edit goal</button>
-      </div>
-      <div class="btn-row">
-        <button class="btn btn-secondary" id="archiveExerciseBtn">${ex.archived ? 'Unarchive' : 'Archive'}</button>
-      </div>
-      <div class="section-head"><h2>All entries</h2></div>
-      <div class="entry-list" id="exerciseEntryList">${entries.map((e) => entryRowHtml(e)).join('') || '<p class="muted-text">No entries yet.</p>'}</div>
-    `, { tall: true });
-    wireEntryRowClicks(document.getElementById('exerciseEntryList'));
-    document.getElementById('editExerciseBtn').addEventListener('click', () => openExerciseForm(ex.id));
-    document.getElementById('habitDoneBtn').addEventListener('click', () => logHabit(ex.id));
-    document.getElementById('editGoalFromDetailBtn').addEventListener('click', () => editGoalShortcut(() => openExerciseForm(ex.id), 'goalFieldWrap'));
-    document.getElementById('archiveExerciseBtn').addEventListener('click', () => {
-      ex.archived = !ex.archived;
-      if (!save()) return;
-      closeModal();
-      toast(ex.archived ? 'Exercise archived' : 'Exercise unarchived');
-      renderAll();
-    });
+      <div class="item-page" id="itemBody"></div>`, { tall: true });
+    const sheet = modalSheet();
+    const body = sheet.querySelector('#itemBody');
+    const repaint = () => { Charts.setWidth(chartWidthIn(body)); paint(body, repaint); };
+    sheetRepaint = repaint;
+    const back = sheet.querySelector('#itemBackBtn');
+    if (back) back.addEventListener('click', () => { const b = itemBack; itemBack = null; b.run(); });
+    repaint();
   }
 
-  // `chartMetric` picks which goal the trend chart plots for a cardio exercise with
-  // two goals; ignored otherwise.
-  function renderExerciseDetail(exId, scale, chartMetric) {
+  function recordsHtml(recs) {
+    if (!recs.length) return '';
+    return `<div class="section-head"><h2>Records</h2></div>
+      <div class="card card-list">${recs.map((r) => `<div class="entry-row rec-row"><div class="entry-row-main"><div class="entry-row-title">${r.label}</div><div class="entry-row-sub">${r.sub}</div></div><div class="rec-value">${r.value}</div></div>`).join('')}</div>`;
+  }
+
+  // A row that says its answer in one line and opens to the detail underneath.
+  function foldHtml(key, title, summary, inner) {
+    return `<details class="card item-fold" data-fold="${key}"${openFolds.has(key) ? ' open' : ''}>
+      <summary><span class="fold-title">${title}</span>${summary ? `<span class="fold-value">${summary}</span>` : ''}${CHEVRON_RIGHT_SVG}</summary>
+      ${inner}
+    </details>`;
+  }
+
+  // The newest few entries, folded away. The whole list lives in History, filtered to this item.
+  function itemEntriesHtml(rows, latest) {
+    if (!rows.length) return '';
+    return foldHtml('entries', 'Latest entries', latest ? `Last ${chartDay(latest)}` : '', `
+      <div class="entry-list" id="itemEntryList">${rows.slice(0, ITEM_ENTRY_LIMIT).join('')}</div>
+      <button type="button" class="link-btn" id="itemHistoryBtn">See all${rows.length > ITEM_ENTRY_LIMIT ? ` ${rows.length}` : ''} in History</button>`);
+  }
+
+  // Inside an item's own page the name is already the title, so a row leads with what was logged.
+  function itemEntryRowHtml(entry) {
+    const ex = exerciseById(entry.exerciseId);
+    return `
+      <div class="entry-row" data-entry-id="${entry.id}">
+        <div class="entry-row-main">
+          <div class="entry-row-title">${escapeHtml(entrySummaryText(ex, entry))}${entry.light ? ' <span class="tag">Light</span>' : ''}</div>
+          ${entry.note ? `<div class="entry-row-sub">${escapeHtml(entry.note)}</div>` : ''}
+        </div>
+        <div class="entry-row-date">${fmtDateShort(entry.date)}</div>
+      </div>`;
+  }
+  function itemMeasurementRowHtml(m) {
+    const tracker = trackerById(m.trackerId);
+    const quality = tracker.kind === 'sleep' && m.quality != null ? ` · Quality ${fmtQuality(m.quality)}` : '';
+    return `
+      <div class="entry-row" data-measurement-id="${m.id}">
+        <div class="entry-row-main">
+          <div class="entry-row-title">${escapeHtml(fmtTrackerValue(tracker, m.value))}${quality}</div>
+          ${m.note ? `<div class="entry-row-sub">${escapeHtml(m.note)}</div>` : ''}
+        </div>
+        <div class="entry-row-date">${fmtDateShort(m.date)}</div>
+      </div>`;
+  }
+
+  // "Novice, 5.3 lb to Intermediate": the level in one line.
+  function levelSummaryText(ex) {
+    const info = strengthLevelInfo(ex);
+    const r = info && !info.missing && info.results && info.results.find((x) => x.value != null);
+    if (!r) return '';
+    const next = r.tier < 5 ? r.thresholds[r.tier] : null;
+    if (next == null) return S.TIER_LABELS[r.tier];
+    const gap = next - r.value;
+    return `${S.TIER_LABELS[r.tier]}, ${r.mode === 'reps' ? plural(Math.ceil(gap), 'rep') : fmtWeight(gap)} to ${S.TIER_LABELS[r.tier + 1]}`;
+  }
+
+  function wireItemPage(body, repaint, cards, toHistory) {
+    body.querySelectorAll('.item-fold').forEach((fold) => fold.addEventListener('toggle', () => {
+      if (fold.open) openFolds.add(fold.dataset.fold); else openFolds.delete(fold.dataset.fold);
+    }));
+    const all = body.querySelector('#itemHistoryBtn');
+    if (all) all.addEventListener('click', toHistory);
+    wireChartCards(body, cards);
+  }
+
+  // Opens History on every date, filtered to one exercise where the area has a filter.
+  function showInHistory(category, exId) {
+    closeModal();
+    historyCategory = category;
+    historySelectedDate = null;
+    switchTab('history');
+    const select = document.getElementById('historyFilter');
+    if (!exId || ![...select.options].some((o) => o.value === exId)) return;
+    select.value = exId;
+    renderHistory();
+  }
+
+  // Edit goal reuses the edit form with everything but its goal fields hidden, so both
+  // paths save through the same code.
+  function showGoalOnly() {
+    const sheet = modalSheet();
+    const keep = ['goalFieldWrap', 'saveExerciseBtn', 'trkGoalFieldWrap', 'trkDirectionField', 'saveTrackerBtn'];
+    [...sheet.querySelector('.form-card').children].forEach((el) => { if (!keep.includes(el.id)) el.classList.add('goal-only-hidden'); });
+    sheet.querySelector('h2').textContent = 'Edit goal';
+  }
+
+  // The best set leads for a lift, because that is what a fixed goal is measured on.
+  function exerciseHeadlineHtml(ex) {
+    const badge = (extra = '') => `<div class="ex-card-badge badge-standalone">${kindBadge(ex)}${extra}</div>`;
+    if (ex.kind === 'habit') {
+      const goal = ex.goal || 1;
+      const perDay = {};
+      entriesFor(ex.id).forEach((e) => { perDay[e.date] = (perDay[e.date] || 0) + 1; });
+      let hit = 0;
+      for (let i = 0; i < 30; i++) if ((perDay[addDays(todayISO(), -i)] || 0) >= goal) hit++;
+      const every = habitRepeatDays(ex);
+      return `${badge(escapeHtml(exerciseGoalSummary(ex)))}
+        ${habitPanelHtml(ex)}
+        <p class="muted-text">${every === 1 ? `Target met on ${hit} of the last 30 days.` : `Done ${plural(hit, 'time')} in the last 30 days, about ${Math.floor(30 / every)} due.`}</p>`;
+    }
+    if (ex.kind === 'cardio') {
+      const metrics = cardioMetricsOf(ex);
+      return badge() + (metrics.length
+        ? metrics.map((m) => progressBlockHtml(ex, m, { labeled: metrics.length > 1 })).join('')
+        : '<p class="muted-text">No distance or pace goal set yet.</p>');
+    }
+    const best = ex.kind === 'weight' && ex.goalMode !== 'standard' ? (movementRecords(ex)[0] || {}).value : null;
+    const last = sessionSeries(ex, 'top').pop();
+    return `${badge()}${progressBlockHtml(ex, undefined, { current: best })}
+      ${last ? `<p class="item-facts muted-text">Latest ${movementFormat(ex, 'top')(last.value)}${last.detail ? ` ${last.detail}` : ''}, ${chartDay(last.date)}</p>` : ''}`;
+  }
+
+  function renderExerciseDetail(exId) {
     const ex = exerciseById(exId);
     if (!ex) return;
-    if (ex.kind === 'habit') { renderHabitDetail(ex); return; }
-    const cardioMetrics = ex.kind === 'cardio' ? cardioMetricsOf(ex) : null;
-    const activeMetric = cardioMetrics ? (cardioMetrics.includes(chartMetric) ? chartMetric : cardioMetrics[0]) : undefined;
-
-    const entries = entriesFor(exId).slice().sort((a, b) => a.date.localeCompare(b.date));
-    const scaledEntries = scale === 'last10' ? entries.slice(-10) : entries;
-    const chartPoints = scaledEntries.map((e) => ({ date: e.date, value: entryValue(ex, e, activeMetric) })).filter((p) => p.value != null);
-    const chartGoal = cardioMetrics ? (activeMetric ? cardioGoalFor(ex, activeMetric) : null) : ex.goal;
-    const suggestions = suggestNextTarget(ex);
-
-    const progressHtml = cardioMetrics
-      ? (cardioMetrics.length
-          ? cardioMetrics.map((m) => progressBlockHtml(ex, m, { labeled: cardioMetrics.length > 1 })).join('')
-          : '<p class="muted-text">No distance or pace goal set yet.</p>')
-      : progressBlockHtml(ex);
-
-    const standardsHtml = ex.kind !== 'cardio' && state.settings.showStrengthLevel ? strengthStandardsDetailHtml(ex)
-      : ex.kind === 'cardio' && state.settings.showPaceLevel ? runStandardsDetailHtml(ex)
-      : '';
-
-    openModal(`
-      <div class="modal-title-row">
-        <h2 class="title-with-icon">${exerciseIconHtml(ex)}${exerciseLabelHtml(ex)}</h2>
-        <div class="modal-title-actions">
-          <button class="icon-btn" id="editExerciseBtn" aria-label="Edit exercise">${EDIT_ICON_SVG}</button>
-          <button class="modal-close" data-action="close-modal" aria-label="Close">${CLOSE_ICON_SVG}</button>
+    const habit = ex.kind === 'habit';
+    openItemSheet(exerciseIconHtml(ex), exerciseLabelHtml(ex), habit ? 'Edit habit' : 'Edit exercise', (body, repaint) => {
+      const entries = entriesFor(exId).slice().sort((a, b) => (b.date + b.id).localeCompare(a.date + a.id));
+      const cards = [];
+      if (!habit) {
+        const metrics = movementMetrics(ex);
+        if (!metrics.some((m) => m[0] === itemMetric[exId])) itemMetric[exId] = metrics[0][0];
+        cards.push({ ...movementCard(ex, itemMetric[exId]), name: 'Trend', range: true });
+      }
+      const suggestions = habit || !state.settings.showSuggestions ? [] : suggestNextTarget(ex);
+      const levels = habit ? ''
+        : ex.kind === 'cardio' ? (state.settings.showPaceLevel ? runStandardsDetailHtml(ex) : '')
+        : (state.settings.showStrengthLevel ? strengthStandardsDetailHtml(ex) : '');
+      body.innerHTML = `
+        <div class="card">${exerciseHeadlineHtml(ex)}</div>
+        <div class="btn-row detail-actions">
+          <button type="button" class="btn btn-primary" id="itemLogBtn">${habit ? 'Done' : 'Log'}</button>
+          <button type="button" class="btn btn-secondary" id="itemGoalBtn">Edit goal</button>
         </div>
-      </div>
-      <div class="card">
-        <div class="ex-card-badge badge-standalone">${kindBadge(ex)}</div>
-        ${progressHtml}
-      </div>
-
-      <div class="btn-row detail-actions">
-        <button type="button" class="btn btn-primary" id="logEntryFromDetailBtn">Log entry</button>
-        <button type="button" class="btn btn-secondary" id="editGoalFromDetailBtn">Edit goal</button>
-      </div>
-
-      ${suggestions.map((sugg, i) => `
-        <div class="card suggestion-card" data-sugg-idx="${i}">
-          <div class="suggestion-label">Next session${sugg.metric ? ` · ${sugg.metric === 'pace' ? 'Pace' : 'Distance'}` : ''}</div>
-          <div class="suggestion-headline">${escapeHtml(sugg.headline)}</div>
-          ${sugg.detail || sugg.method ? `<div class="suggestion-tap-hint">Why? &rsaquo;</div>` : ''}
-        </div>`).join('')}
-
-      ${standardsHtml}
-
-      <div class="section-head">
-        <h2>Trend</h2>
-        <div class="segmented" id="chartScaleSegmented" role="radiogroup" aria-label="Chart range">
-          <button type="button" data-scale="last10" role="radio">Last 10</button>
-          <button type="button" data-scale="all" role="radio">All time</button>
-        </div>
-      </div>
-      ${cardioMetrics && cardioMetrics.length > 1 ? `
-      <div class="segmented" id="chartMetricSegmented" role="radiogroup" aria-label="Chart metric">
-        <button type="button" data-metric="distance" role="radio">Distance</button>
-        <button type="button" data-metric="pace" role="radio">Pace</button>
-      </div>` : ''}
-      <div class="chart-wrap">${Charts.lineChart(chartPoints, { goal: chartGoal, formatValue: (v) => formatValueForExercise(ex, v, activeMetric) })}</div>
-
-      <div class="btn-row">
-        <button class="btn btn-secondary" id="archiveExerciseBtn">${ex.archived ? 'Unarchive' : 'Archive'}</button>
-      </div>
-
-      <div class="section-head"><h2>All entries</h2></div>
-      <div class="entry-list" id="exerciseEntryList">${entries.slice().reverse().map((e) => entryRowHtml(e)).join('') || '<p class="muted-text">No entries yet.</p>'}</div>
-    `, { tall: true });
-    document.querySelectorAll('#chartScaleSegmented button').forEach((btn) => {
-      btn.setAttribute('aria-checked', String(btn.dataset.scale === scale));
-      btn.addEventListener('click', () => renderExerciseDetail(exId, btn.dataset.scale, activeMetric));
-    });
-    const metricSeg = document.getElementById('chartMetricSegmented');
-    if (metricSeg) {
-      metricSeg.querySelectorAll('button').forEach((btn) => {
-        btn.setAttribute('aria-checked', String(btn.dataset.metric === activeMetric));
-        btn.addEventListener('click', () => renderExerciseDetail(exId, scale, btn.dataset.metric));
+        ${suggestions.map((sugg, i) => `
+          <div class="card suggestion-card" data-sugg-idx="${i}">
+            <div class="suggestion-label">Next session${sugg.metric ? ` · ${sugg.metric === 'pace' ? 'Pace' : 'Distance'}` : ''}</div>
+            <div class="suggestion-headline">${escapeHtml(sugg.headline)}</div>
+            ${sugg.detail || sugg.method ? '<div class="suggestion-tap-hint">Why? &rsaquo;</div>' : ''}
+          </div>`).join('')}
+        ${levels.trim() ? foldHtml('level', ex.kind === 'cardio' ? 'Running level' : 'Strength level', ex.kind === 'cardio' ? '' : levelSummaryText(ex), levels) : ''}
+        ${cards.length ? chartCardHtml(cards[0]) : ''}
+        ${recordsHtml(habit ? [] : movementRecords(ex))}
+        ${itemEntriesHtml(entries.map(itemEntryRowHtml), entries.length ? entries[0].date : '')}`;
+      wireItemPage(body, repaint, cards, () => showInHistory(isDailyEx(ex) ? 'daily' : 'workout', exId));
+      const seg = body.querySelector('.cc-metric');
+      if (seg) seg.addEventListener('click', (ev) => { const b = ev.target.closest('[data-seg]'); if (b) { itemMetric[exId] = b.dataset.seg; repaint(); } });
+      if (entries.length) wireEntryRowClicks(body.querySelector('#itemEntryList'));
+      body.querySelectorAll('.suggestion-card[data-sugg-idx]').forEach((card) => {
+        const sugg = suggestions[Number(card.dataset.suggIdx)];
+        if (sugg && (sugg.detail || sugg.method)) wireOpenable(card, () => openSuggestionInfoModal(exId, sugg));
       });
-    }
-    wireEntryRowClicks(document.getElementById('exerciseEntryList'));
-    document.querySelectorAll('.suggestion-card[data-sugg-idx]').forEach((card) => {
-      const sugg = suggestions[Number(card.dataset.suggIdx)];
-      if (!sugg || (!sugg.detail && !sugg.method)) return; // nothing further to show for a bare placeholder suggestion
-      wireOpenable(card, () => openSuggestionInfoModal(exId, scale, activeMetric, sugg));
+      body.querySelector('#itemLogBtn').addEventListener('click', () => (habit ? logHabit(exId) : logExerciseFromDetail(exId)));
+      body.querySelector('#itemGoalBtn').addEventListener('click', () => openExerciseForm(exId, null, { goalOnly: true }));
     });
-    document.getElementById('editExerciseBtn').addEventListener('click', () => openExerciseForm(ex.id));
-    document.getElementById('logEntryFromDetailBtn').addEventListener('click', () => logExerciseFromDetail(ex.id));
-    document.getElementById('editGoalFromDetailBtn').addEventListener('click', () => editGoalShortcut(() => openExerciseForm(ex.id), 'goalFieldWrap'));
-    document.getElementById('archiveExerciseBtn').addEventListener('click', () => {
-      ex.archived = !ex.archived;
-      if (!save()) return;
-      closeModal();
-      toast(ex.archived ? 'Exercise archived' : 'Exercise unarchived');
-      renderAll();
-    });
+    document.getElementById('itemEditBtn').addEventListener('click', () => openExerciseForm(exId));
   }
 
-  // Detail screens' "Edit goal" shortcut: opens the normal edit form and puts the cursor on the goal.
-  function editGoalShortcut(openForm, wrapId) {
-    openForm();
-    const wrap = document.getElementById(wrapId);
-    const target = wrap && wrap.querySelector('input, button');
-    if (target) { wrap.scrollIntoView({ block: 'center' }); target.focus(); }
-  }
-
-  function openExerciseDetail(exId) {
-    renderExerciseDetail(exId, state.settings.chartScale);
+  function openExerciseDetail(exId, back) {
+    itemBack = back || null;
+    renderExerciseDetail(exId);
   }
 
   // The "Why?" screen for a suggestion: this suggestion's method note plus the
   // general progression logic (see suggestWeightOrReps()/suggestCardioMetric()).
   // The modal is one sheet with no stack, so Back re-renders the exercise detail.
-  function openSuggestionInfoModal(exId, scale, activeMetric, sugg) {
+  function openSuggestionInfoModal(exId, sugg) {
     const ex = exerciseById(exId);
     openModal(`
       <button type="button" class="modal-back-link" data-action="back-to-exercise">${BACK_CHEVRON_ICON_SVG}${ex ? exerciseLabelHtml(ex) : 'Back'}</button>
@@ -6161,12 +6369,12 @@
         <p class="muted-text">These are general heuristics — RPE/RIR-based autoregulation plus simple session-to-session trends — not personalized coaching. They don't know about a rough night's sleep, an old injury, or how the bar actually felt today. Treat them as a sensible default and adjust for how you're actually feeling. Logging an RPE after your top set or run is what unlocks the sharper version of this.</p>
       </div>
     `);
-    document.querySelector('[data-action="back-to-exercise"]').addEventListener('click', () => renderExerciseDetail(exId, scale, activeMetric));
+    document.querySelector('[data-action="back-to-exercise"]').addEventListener('click', () => renderExerciseDetail(exId));
   }
 
   // `preset` ({ kind, section }) only sets the starting choices of a NEW exercise; Manage > Daily
   // passes a habit.
-  function openExerciseForm(exId, preset) {
+  function openExerciseForm(exId, preset, opts = {}) {
     const editing = !!exId;
     const ex = editing ? exerciseById(exId) : null;
     const hasEntries = editing && entriesFor(exId).length > 0;
@@ -6236,6 +6444,7 @@
       </div>
     `);
 
+    if (opts.goalOnly) showGoalOnly();
     let selectedKind = kind;
     let selectedUnit = ex && ex.unit === 'time' ? 'time' : 'reps';
     let selectedSection = section;
@@ -6578,7 +6787,7 @@
         ${trackerIconHtml(tracker, true)}
         <div class="entry-row-main">
           <div class="entry-row-title">${escapeHtml(tracker ? tracker.name : 'Deleted tracker')}</div>
-          <div class="entry-row-sub">${escapeHtml(valueText)}${qualityText}${m.note ? ` — “${escapeHtml(m.note)}”` : ''}</div>
+          <div class="entry-row-sub">${escapeHtml(valueText)}${qualityText}${m.note ? ` · ${escapeHtml(m.note)}` : ''}</div>
         </div>
         <div class="entry-row-date">${fmtDateShort(m.date)}</div>
       </div>`;
@@ -6641,84 +6850,79 @@
 
   // Like renderExerciseDetail but simpler: current value, goal, meter, trend chart
   // and entry list, with no suggestion or PR grid.
-  function renderTrackerDetail(trackerId, scale) {
-    const tracker = trackerById(trackerId);
-    if (!tracker) return;
-    const history = measurementsFor(trackerId).slice().sort((a, b) => a.date.localeCompare(b.date));
-    const scaled = scale === 'last10' ? history.slice(-10) : history;
-    const chartPoints = scaled.map((m) => ({ date: m.date, value: m.value }));
-    const latest = latestMeasurement(trackerId);
-    const value = latest ? latest.value : null;
-    const { pct, achieved } = trackerProgressPct(tracker, value);
-
-    const qualityLine = tracker.kind === 'sleep' && latest && latest.quality != null
-      ? `<div class="insight-line">Last quality ${fmtQuality(latest.quality)}</div>` : '';
-    // BMI (Weight) and the fuller sleep breakdown (Sleep) show here, gated by their
-    // Settings -> Insights toggles.
-    const insightDetailHtml = tracker.id === BODY_WEIGHT_TRACKER_ID && state.settings.showWeightInsights ? bmiDetailHtml()
-      : tracker.kind === 'sleep' && state.settings.showSleepInsights ? sleepInsightDetailHtml()
-      : '';
-    openModal(`
-      <div class="modal-title-row">
-        <h2 class="title-with-icon">${trackerIconHtml(tracker)}${escapeHtml(tracker.name)}</h2>
-        <div class="modal-title-actions">
-          <button class="icon-btn" id="editTrackerBtn" aria-label="Edit tracker">${EDIT_ICON_SVG}</button>
-          <button class="modal-close" data-action="close-modal" aria-label="Close">${CLOSE_ICON_SVG}</button>
-        </div>
-      </div>
-      <div class="card">
-        <div class="ex-card-values">
-          <div class="ex-card-current">${fmtTrackerValue(tracker, value)}</div>
-          ${tracker.goal != null ? `<div class="ex-card-goal">/ ${trackerGoalLabel(tracker).replace('Goal ', '')}</div>` : ''}
-        </div>
-        ${qualityLine}
-        ${tracker.goal != null ? `<div class="meter"><div class="meter-fill ${achieved ? 'is-complete' : ''}" style="--fill:${Math.min(100, pct)}%"></div></div>
-        <div class="ex-card-foot"><span class="ex-card-pct ${achieved ? 'is-complete' : ''}">${achieved ? '✓ Goal reached' : `${Math.round(pct)}% to goal`}</span></div>
-        ${!achieved && trackerProgressDeltaText(tracker, value) ? `<div class="insight-line muted-text">${trackerProgressDeltaText(tracker, value)}</div>` : ''}` : ''}
-      </div>
-
-      <div class="btn-row detail-actions">
-        <button type="button" class="btn btn-primary" id="logEntryFromDetailBtn">Log entry</button>
-        <button type="button" class="btn btn-secondary" id="editGoalFromDetailBtn">Edit goal</button>
-      </div>
-
-      ${insightDetailHtml}
-
-      <div class="section-head">
-        <h2>Trend</h2>
-        <div class="segmented" id="trkChartScaleSegmented" role="radiogroup" aria-label="Chart range">
-          <button type="button" data-scale="last10" role="radio">Last 10</button>
-          <button type="button" data-scale="all" role="radio">All time</button>
-        </div>
-      </div>
-      <div class="chart-wrap">${Charts.lineChart(chartPoints, { goal: tracker.goal, formatValue: (v) => fmtTrackerValue(tracker, v) })}</div>
-
-      <div class="btn-row">
-        <button class="btn btn-secondary" id="archiveTrackerBtn">${tracker.archived ? 'Unarchive' : 'Archive'}</button>
-      </div>
-
-      <div class="section-head"><h2>All entries</h2></div>
-      <div class="entry-list" id="trackerEntryList">${history.slice().reverse().map((m) => measurementRowHtml(m)).join('') || '<p class="muted-text">No entries yet.</p>'}</div>
-    `, { tall: true });
-    document.querySelectorAll('#trkChartScaleSegmented button').forEach((btn) => {
-      btn.setAttribute('aria-checked', String(btn.dataset.scale === scale));
-      btn.addEventListener('click', () => renderTrackerDetail(trackerId, btn.dataset.scale));
-    });
-    wireMeasurementRowClicks(document.getElementById('trackerEntryList'));
-    document.getElementById('editTrackerBtn').addEventListener('click', () => openTrackerForm(tracker.id));
-    document.getElementById('logEntryFromDetailBtn').addEventListener('click', () => logTrackerFromDetail(tracker.id));
-    document.getElementById('editGoalFromDetailBtn').addEventListener('click', () => editGoalShortcut(() => openTrackerForm(tracker.id), 'trkGoalFieldWrap'));
-    document.getElementById('archiveTrackerBtn').addEventListener('click', () => {
-      tracker.archived = !tracker.archived;
-      if (!save()) return;
-      closeModal();
-      toast(tracker.archived ? 'Tracker archived' : 'Tracker unarchived');
-      renderAll();
-    });
+  // How far the latest reading is from the goal and which way the last four weeks point.
+  // A percentage only means something once there is a start to measure from.
+  function trackerGapText(tracker, value) {
+    const gap = Math.abs(tracker.goal - value);
+    const side = value < tracker.goal ? 'below' : 'above';
+    const tr = trackerTrend(tracker);
+    const slope = tr.trend ? tr.trend.slope : 0;
+    const travel = Math.abs(slope) < 1e-6 ? '' : (tracker.goal - value) * slope > 0 ? ', moving toward it' : ', moving away';
+    return `${fmtTrackerValue(tracker, gap)} ${side} goal${travel}`;
   }
 
-  function openTrackerDetail(trackerId) {
-    renderTrackerDetail(trackerId, state.settings.chartScale);
+  function trackerHeadlineHtml(tracker) {
+    const latest = latestMeasurement(tracker.id);
+    const value = latest ? latest.value : null;
+    const hasGoal = tracker.goal != null && value != null;
+    const { pct, achieved } = trackerProgressPct(tracker, value);
+    const meter = hasGoal && (achieved || trackerStart(tracker) != null);
+    return `
+      <div class="ex-card-values">
+        <div class="ex-card-current">${fmtTrackerValue(tracker, value)}</div>
+        ${tracker.goal != null ? `<div class="ex-card-goal">/ ${trackerGoalLabel(tracker).replace('Goal ', '')}</div>` : ''}
+      </div>
+      ${tracker.kind === 'sleep' && latest && latest.quality != null ? `<div class="insight-line">Last quality ${fmtQuality(latest.quality)}</div>` : ''}
+      ${meter ? `<div class="meter"><div class="meter-fill ${achieved ? 'is-complete' : ''}" style="--fill:${Math.min(100, pct)}%"></div></div>` : ''}
+      ${hasGoal ? `<div class="ex-card-foot"><span class="ex-card-pct ${achieved ? 'is-complete' : ''}">${achieved ? '✓ Goal reached' : trackerGapText(tracker, value)}</span></div>` : ''}`;
+  }
+
+  function trackerRecords(tracker) {
+    const list = measurementsFor(tracker.id);
+    if (list.length < 2 || tracker.unitKind === 'rating') return [];
+    const hi = list.reduce((a, b) => (b.value > a.value ? b : a));
+    const lo = list.reduce((a, b) => (b.value < a.value ? b : a));
+    return [
+      { label: 'Highest', sub: fmtDateShort(hi.date), value: fmtTrackerValue(tracker, hi.value) },
+      { label: 'Lowest', sub: fmtDateShort(lo.date), value: fmtTrackerValue(tracker, lo.value) },
+    ];
+  }
+
+  function renderTrackerDetail(trackerId) {
+    const tracker = trackerById(trackerId);
+    if (!tracker) return;
+    openItemSheet(trackerIconHtml(tracker), escapeHtml(tracker.name), 'Edit tracker', (body, repaint) => {
+      const history = measurementsFor(trackerId).slice().sort((a, b) => (b.date + b.id).localeCompare(a.date + a.id));
+      const card = { ...trackerChartCard(tracker, { withEstimate: true }), name: 'Trend', range: true };
+      // BMI and the sleep breakdown, each behind its own switch in Settings.
+      const isWeight = tracker.id === BODY_WEIGHT_TRACKER_ID && state.settings.showWeightInsights;
+      const isSleep = tracker.kind === 'sleep' && state.settings.showSleepInsights;
+      const bmi = isWeight ? (weightInsights() || {}).bmi : null;
+      const insightFold = isWeight ? foldHtml('bmi', 'BMI', bmi ? `${bmi.value} · ${bmi.category}` : '', bmiDetailHtml())
+        : isSleep ? foldHtml('sleep', 'Sleep insights', '', sleepInsightDetailHtml())
+        : '';
+      body.innerHTML = `
+        <div class="card">${trackerHeadlineHtml(tracker)}</div>
+        <div class="btn-row detail-actions">
+          <button type="button" class="btn btn-primary" id="itemLogBtn">Log</button>
+          <button type="button" class="btn btn-secondary" id="itemGoalBtn">Edit goal</button>
+        </div>
+        ${insightFold}
+        ${chartCardHtml(card)}
+        ${card.empty ? '' : kpiRowHtml(trackerTiles(tracker)) + bodyNoteHtml(tracker)}
+        ${recordsHtml(trackerRecords(tracker))}
+        ${itemEntriesHtml(history.map(itemMeasurementRowHtml), history.length ? history[0].date : '')}`;
+      wireItemPage(body, repaint, [card], () => showInHistory('measurements'));
+      if (history.length) wireMeasurementRowClicks(body.querySelector('#itemEntryList'));
+      body.querySelector('#itemLogBtn').addEventListener('click', () => logTrackerFromDetail(trackerId));
+      body.querySelector('#itemGoalBtn').addEventListener('click', () => openTrackerForm(trackerId, { goalOnly: true }));
+    });
+    document.getElementById('itemEditBtn').addEventListener('click', () => openTrackerForm(trackerId));
+  }
+
+  function openTrackerDetail(trackerId, back) {
+    itemBack = back || null;
+    renderTrackerDetail(trackerId);
   }
 
   const UNIT_KIND_LABELS = { weight: 'Weight', length: 'Length', percent: 'Percent', hours: 'Hours', rating: 'Rating (1–5)', count: 'Custom number' };
@@ -6734,7 +6938,7 @@
     }
   }
 
-  function openTrackerForm(trackerId) {
+  function openTrackerForm(trackerId, opts = {}) {
     const editing = !!trackerId;
     const tracker = editing ? trackerById(trackerId) : null;
     const hasEntries = editing && measurementsFor(trackerId).length > 0;
@@ -6764,7 +6968,7 @@
 
         <div id="trkGoalFieldWrap"></div>
 
-        <div class="field">
+        <div class="field" id="trkDirectionField">
           <span class="field-label">Direction <span class="muted-text">(which way is progress, if a goal is set)</span></span>
           <div class="segmented" id="trkDirectionSegmented" role="radiogroup">
             <button type="button" data-direction="up" role="radio">Higher is better</button>
@@ -6783,6 +6987,7 @@
       </div>
     `);
 
+    if (opts.goalOnly) showGoalOnly();
     let selectedUnitKind = unitKind;
     const iconField = wireIconField('trkIcon', () => trackerDefaultIcon({ kind: tracker && tracker.kind, unitKind: selectedUnitKind }), tracker && tracker.icon);
     let selectedDirection = direction;
@@ -6960,16 +7165,18 @@
 
   /* Manage
      One tab with five domain panels (Workout, Daily, Body, Water, Food) switched by
-     manageCategorySegmented. All five always show (ALL_DOMAIN_CATEGORIES), since this is
-     where an off domain is turned back on. Each has a "Track this" switch
-     (renderDomainTrackToggle()); Settings holds app-wide preferences only. */
+     manageCategorySegmented. Only areas that are on show; Settings > What you track
+     switches them (renderDomainTrackToggle() hides a panel's fields when its area is off). */
 
   let manageCategory = 'workout';
 
   function setManageCategory(cat) {
-    manageCategory = cat;
+    const cats = availableDomainCategories();
+    if (!cats.some((c) => c.id === cat)) cat = cats.length ? cats[0].id : null;
+    manageCategory = cat || manageCategory;
+    document.getElementById('manageAllOffHint').hidden = cats.length > 0;
     const seg = document.getElementById('manageCategorySegmented');
-    seg.innerHTML = domainTabsHtml(ALL_DOMAIN_CATEGORIES, manageCategory);
+    seg.innerHTML = domainTabsHtml(cats, cat);
     seg.querySelectorAll('button').forEach((b) => {
       b.addEventListener('click', () => setManageCategory(b.dataset.domainCat));
     });
@@ -7178,6 +7385,7 @@
     showWeightInsightsSwitch: 'showWeightInsights', showStrengthLevelSwitch: 'showStrengthLevel',
     showPaceLevelSwitch: 'showPaceLevel', showSleepInsightsSwitch: 'showSleepInsights',
     showMacroGuidanceSwitch: 'showMacroGuidance', showRpeSwitch: 'showRpe',
+    showSuggestionsSwitch: 'showSuggestions', showMuscleSetsSwitch: 'showMuscleSets', dailyWorkoutGoalSwitch: 'dailyWorkoutGoal',
   };
   // Home-block switches write into settings.homeSections rather than a flat key.
   const homeSwitches = {
@@ -7191,6 +7399,14 @@
 
   function renderSettings() {
     syncSwitches();
+    // What you track: an area's own switches show only while the area is on, and a row
+    // tied to one kind of item only while such an item is active.
+    document.querySelectorAll('#trackList [data-sub-of]').forEach((row) => {
+      row.hidden = !state.settings[row.dataset.subOf] || (row.dataset.needs === 'sleep' && !activeTrackers().some((t) => t.kind === 'sleep'));
+    });
+    document.getElementById('homeMiniRow').hidden = !state.settings.trackWater && !state.settings.trackMeasurements;
+    document.getElementById('distanceUnitSegmented').closest('.setting-row').hidden = !state.settings.trackCardio;
+    document.getElementById('volumeUnitSegmented').closest('.setting-row').hidden = !state.settings.trackWater;
     document.querySelectorAll('#themeSegmented button').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.themeChoice === state.settings.theme)));
     document.querySelectorAll('#weightUnitSegmented button').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.unitChoice === state.settings.weightUnit)));
     document.querySelectorAll('#distanceUnitSegmented button').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.unitChoice === state.settings.distanceUnit)));
@@ -7210,8 +7426,8 @@
     document.getElementById('profileAgeVal').textContent = state.profile.age != null ? String(state.profile.age) : 'Not set';
     document.getElementById('profileSexVal').textContent = state.profile.sex === 'male' ? 'Male' : state.profile.sex === 'female' ? 'Female' : 'Not set';
 
-    document.querySelectorAll('#dashboardChartScaleSegmented button').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.scaleChoice === state.settings.chartScale)));
-    document.querySelectorAll('#insightsWindowSegmented button').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.windowChoice === String(state.settings.insightsWindowDays))));
+
+
   }
 
   // Settings > About the numbers: built from FitStandards.REFERENCES so the
@@ -7219,16 +7435,28 @@
   function openReferencesModal() {
     const link = (r) => (r && r.url ? `<a href="${escapeHtml(r.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(r.label)}</a>` : r ? escapeHtml(r.label) : '');
     const badge = (k) => `<span class="tag${k === 'reference' ? ' tag-good' : ''}">${k === 'reference' ? 'Published reference' : 'App assumption'}</span>`;
-    openModal(`
-      <div class="modal-title-row"><h2>About the numbers</h2><button class="modal-close" data-action="close-modal" aria-label="Close">${CLOSE_ICON_SVG}</button></div>
-      <p class="muted-text">Fit Log estimates are general guides, not medical advice. A published reference comes from a named source. An app assumption is a sensible default the app chose.</p>
-      ${S.REFERENCES.map((r) => `
+    const card = (r) => `
         <div class="card ref-card">
           <div class="ref-head"><h3>${escapeHtml(r.title)}</h3>${badge(r.kind)}</div>
           <p>${escapeHtml(r.summary)}</p>
           ${r.caveat ? `<p class="muted-text">${escapeHtml(r.caveat)}</p>` : ''}
           ${r.source || r.alt ? `<p class="muted-text ref-src">Source: ${[link(r.source), link(r.alt)].filter(Boolean).join(' &middot; ')}</p>` : '<p class="muted-text ref-src">No single published source.</p>'}
-        </div>`).join('')}
+        </div>`;
+    // A topic is in use while the feature it explains is switched on.
+    const st = state.settings;
+    const on = {
+      sleep: st.trackMeasurements && activeTrackers().some((t) => t.kind === 'sleep'),
+      weeklySets: st.trackWorkout && st.showMuscleSets, oneRM: st.trackWorkout, nextSession: st.trackWorkout && st.showSuggestions,
+      liftLevels: st.trackWorkout && st.showStrengthLevel, runLevels: st.trackCardio && st.showPaceLevel,
+      bmi: st.trackMeasurements && st.showWeightInsights, calories: st.trackFood, protein: st.trackFood, dv: st.trackFood, water: st.trackWater,
+    };
+    const inUse = (r) => on[r.id] !== false;
+    const unused = S.REFERENCES.filter((r) => !inUse(r));
+    openModal(`
+      <div class="modal-title-row"><h2>About the numbers</h2><button class="modal-close" data-action="close-modal" aria-label="Close">${CLOSE_ICON_SVG}</button></div>
+      <p class="muted-text">Fit Log estimates are general guides, not medical advice. A published reference comes from a named source. An app assumption is a sensible default the app chose.</p>
+      ${S.REFERENCES.filter(inUse).map(card).join('')}
+      ${unused.length ? `<details class="item-fold is-plain"><summary><span class="fold-title">Not in use (${unused.length})</span>${CHEVRON_RIGHT_SVG}</summary>${unused.map(card).join('')}</details>` : ''}
       <p class="muted-text">Standards version ${S.version}, reviewed ${S.reviewed}.</p>
     `, { tall: true });
   }
@@ -7355,7 +7583,7 @@
     return seq;
   }
   const SETUP_STEP_LEADS = {
-    interests: 'Pick only what you will use. Anything left off stays out of sight, and you can turn it on later in Manage.',
+    interests: 'Pick only what you will use. Anything left off stays out of sight, and you can turn it on later in Settings.',
     about: 'All optional. Each answer powers one thing, and every one can be skipped.',
     lifting: 'Every lift is added to your library for you. Tick the ones you want a goal for; each goal can be changed later.',
     cardio: 'Every cardio activity is added to your library for you. Tick the ones you want a distance or pace goal for.',
@@ -8297,6 +8525,7 @@
       logEx.pickerOpen = false;
       logWorkoutBorrowed = isDailyEx(exerciseById(ev.target.value));
       renderDynamicFields(document.getElementById('logDynamicFields'), exerciseById(ev.target.value));
+      syncLogLight(exerciseById(ev.target.value));
       syncLogWorkoutUI();
       renderRecentEntries();
     });
@@ -8325,6 +8554,15 @@
     document.getElementById('logFoodForm').addEventListener('submit', handleLogFoodSubmit);
 
     document.getElementById('historyFilter').addEventListener('change', renderHistory);
+    document.getElementById('manageAreasBtn').addEventListener('click', openSettings);
+    document.addEventListener('change', (ev) => { if (ev.target.matches && ev.target.matches('[data-range-menu]')) onRangeChange(ev.target.value); });
+    document.getElementById('logLightSwitch').addEventListener('click', (ev) => ev.currentTarget.setAttribute('aria-checked', String(!isOn(ev.currentTarget))));
+    document.getElementById('view-manage').addEventListener('click', (ev) => {
+      if (ev.target.closest('button, a, input, select')) return;
+      const row = ev.target.closest('.entry-row.is-manage');
+      if (row && row.dataset.exerciseId) openExerciseDetail(row.dataset.exerciseId);
+      else if (row && row.dataset.trackerId) openTrackerDetail(row.dataset.trackerId);
+    });
     // historyCategorySegmented's buttons are wired by renderHistoryCategorySegmented()
     // on each rebuild; manageCategorySegmented does the same via setManageCategory().
     document.getElementById('calPrevBtn').addEventListener('click', () => {
@@ -8513,19 +8751,6 @@
       renderAll();
     });
 
-    document.getElementById('dashboardChartScaleSegmented').addEventListener('click', (ev) => {
-      const btn = ev.target.closest('button'); if (!btn) return;
-      state.settings.chartScale = btn.dataset.scaleChoice;
-      if (!save()) return;
-      renderAll();
-    });
-    document.getElementById('insightsWindowSegmented').addEventListener('click', (ev) => {
-      const btn = ev.target.closest('button'); if (!btn) return;
-      state.settings.insightsWindowDays = parseInt(btn.dataset.windowChoice, 10);
-      if (!save()) return;
-      renderAll();
-    });
-
     document.getElementById('aboutNumbersBtn').addEventListener('click', openReferencesModal);
     document.getElementById('exportBtn').addEventListener('click', exportBackup);
     document.getElementById('eraseAllBtn').addEventListener('click', eraseAllData);
@@ -8619,13 +8844,17 @@
       if (!ev.newValue) { location.reload(); return; }
       if (needsRecovery || needsSetup) return;
       let incoming;
-      try { incoming = upgradeData(JSON.parse(ev.newValue)); } catch (e) { return; }
+      try {
+        const parsed = JSON.parse(ev.newValue);
+        if (typeof parsed.version === 'number' && parsed.version > SCHEMA_VERSION) dataIsNewer = true;
+        incoming = upgradeData(parsed);
+      } catch (e) { return; }
       state = incoming;
       // Open sheets hold references into the old state, so close them rather than let a save
       // write stale objects back.
       if (!modalRoot().hidden) closeModal();
       renderAll();
-      toast('Updated from another window.');
+      if (dataIsNewer) warnNewerData(); else toast('Updated from another window.');
     });
 
     let lastSeenDay = todayISO();

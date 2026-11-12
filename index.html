@@ -98,11 +98,11 @@
 
     <!-- PROGRESS - one card per tracked area: its chart, then its long-term goals -->
     <section id="view-progress" class="view" data-view="progress" hidden>
-      <div class="section-head"><h2>Progress</h2></div>
+      <div class="section-head"><h2>Progress</h2><span id="progressRange"></span></div>
       <div id="progressCharts">
         <div id="chartsOverview" class="charts-overview"></div>
         <div id="dashboardEmpty" class="empty-state" hidden>
-          <p>Nothing to chart yet. Turn on an area in Manage and log something, and its chart shows up here.</p>
+          <p>Nothing to chart yet. Turn on an area in Settings and log something, and its chart shows up here.</p>
         </div>
       </div>
     </section>
@@ -114,7 +114,7 @@
       </div>
       <div class="domain-tabs" id="logCategorySegmented" role="radiogroup" aria-label="What to log"></div>
       <div id="logAllOffHint" class="empty-state" hidden>
-        <p>Every area is turned off. Turn one back on in Manage to start logging.</p>
+        <p>Every area is turned off. Turn one back on in Settings to start logging.</p>
       </div>
 
       <!-- Log -> Daily: habits and daily rep targets (rendered by renderLogDailyPanel). -->
@@ -129,12 +129,8 @@
            "Switch exercise" row. #logExercise stays the single source of
            truth for the chosen exercise (hidden). -->
       <div id="logExercisePicker" class="form-card is-bare" style="gap:12px" hidden>
-        <div class="field">
-          <span class="field-label">Exercises — tap one to log it</span>
-          <div class="segmented seg-sm" id="logExSeg" role="radiogroup" aria-label="Which exercises to list"></div>
-        </div>
-        <label class="search"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg><input type="search" id="logExSearch" placeholder="Search exercises" aria-label="Search exercises" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="search" /></label>
-        <div class="f-scroll incard"><div class="f-chips" id="logExChips" role="radiogroup"></div><button type="button" class="f-more" aria-label="See more filters"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg></button></div>
+        <div class="search-row"><label class="search"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg><input type="search" id="logExSearch" placeholder="Search exercises" aria-label="Search exercises" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="search" /></label><button type="button" class="icon-btn filter-btn" id="logExFilterBtn" aria-label="Filter"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M7 12h10"/><path d="M10 18h4"/></svg></button></div>
+        <p class="filter-note" id="logExFilterNote" hidden><span></span><button type="button" class="link-btn">Clear</button></p>
         <div id="logExList" class="entry-list"></div>
         <button type="button" class="showall" id="logExShowAll" hidden></button>
       </div>
@@ -154,6 +150,10 @@
             <span class="field-label">Note (optional)</span>
             <input type="text" id="logNote" placeholder="How did it feel?" maxlength="200" />
           </label>
+          <div class="setting-row" id="logLightRow" hidden>
+            <span>Light session <span class="muted-text">(not a working day: left out of the trend and tips)</span></span>
+            <button type="button" class="switch" id="logLightSwitch" role="switch" aria-checked="false" aria-label="Light session"><span class="switch-track"><span class="switch-thumb"></span></span></button>
+          </div>
         </div>
         <button type="submit" class="btn btn-primary btn-block">Save entry</button>
       </form>
@@ -198,8 +198,7 @@
       </form>
 
       <div id="logWaterPanel" class="card form-card" hidden>
-        <span class="field-label">Tap a cup to log it for today</span>
-        <div id="waterCupButtons" class="cup-button-row"></div>
+        <div id="waterCupList" class="entry-list"></div>
         <label class="field">
           <span class="field-label">Custom amount (<span id="logWaterUnitLabel"></span>)</span>
           <div class="inline-time-fields">
@@ -212,9 +211,8 @@
       <!-- Log -> Food leads with saved foods (the one-tap path used every
            day); typing a food in by hand is collapsed under it. -->
       <div id="savedFoodsWrap" class="form-card is-bare" style="gap:12px" hidden>
-        <div class="segmented seg-sm" id="foodSeg" role="radiogroup" aria-label="Which saved foods to list"></div>
-        <label class="search"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg><input type="search" id="foodSearch" placeholder="Search my foods" aria-label="Search my foods" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="search" /></label>
-        <div class="f-scroll incard"><div class="f-chips" id="savedFoodCategorySegmented" role="radiogroup"></div><button type="button" class="f-more" aria-label="See more filters"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg></button></div>
+        <div class="search-row"><label class="search"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg><input type="search" id="foodSearch" placeholder="Search my foods" aria-label="Search my foods" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="search" /></label><button type="button" class="icon-btn filter-btn" id="foodFilterBtn" aria-label="Filter"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M7 12h10"/><path d="M10 18h4"/></svg></button></div>
+        <p class="filter-note" id="foodFilterNote" hidden><span></span><button type="button" class="link-btn">Clear</button></p>
         <div id="savedFoodLogList" class="entry-list"></div>
         <button type="button" class="showall" id="foodShowAll" hidden></button>
       </div>
@@ -280,7 +278,7 @@
       </div>
     </section>
 
-    <!-- MANAGE: one panel per area (Workout, Daily, Body, Water, Food), each with a "Track this" switch. -->
+    <!-- MANAGE: one panel per area that is on (Workout, Daily, Body, Water, Food). Areas are switched in Settings. -->
     <section id="view-manage" class="view" data-view="manage" hidden>
       <div class="section-head">
         <h2>Manage</h2>
@@ -288,18 +286,10 @@
       <!-- Filled by setManageCategory(). Manage always lists all five areas (ALL_DOMAIN_CATEGORIES),
            since it is where an area that is off gets turned back on. -->
       <div class="domain-tabs" id="manageCategorySegmented" role="radiogroup" aria-label="Manage category"></div>
+      <p class="muted-text" id="manageAllOffHint" hidden>Nothing is being tracked yet.</p>
+      <button type="button" class="link-btn manage-areas-link" id="manageAreasBtn">Turn areas on or off</button>
 
       <div id="manageExercisesPanel">
-        <div class="card card-list">
-          <div class="setting-row">
-            <span class="setting-row-label"><span class="setting-icon" data-icon="workout"></span><span>Lifting</span></span>
-            <button type="button" class="switch" id="trackWorkoutSwitch" role="switch" aria-checked="false" aria-label="Track lifting"><span class="switch-track"><span class="switch-thumb"></span></span></button>
-          </div>
-          <div class="setting-row">
-            <span class="setting-row-label"><span class="setting-icon" data-icon="footprints"></span><span>Running &amp; cardio</span></span>
-            <button type="button" class="switch" id="trackCardioSwitch" role="switch" aria-checked="false" aria-label="Track running and cardio"><span class="switch-track"><span class="switch-thumb"></span></span></button>
-          </div>
-        </div>
         <p class="muted-text" id="trackWorkoutOffHint" hidden>Workout is off — hidden from Home, Log, and History. Nothing already logged is lost; turn it back on to see it again.</p>
 
         <div id="workoutTrackedFields">
@@ -309,19 +299,13 @@
             <h2>Exercises</h2>
             <div class="head-actions"><button class="btn btn-secondary btn-sm" data-action="open-catalog" data-cat-tab-open="exercises">From catalog</button><button class="btn btn-secondary btn-sm btn-icon-label" data-action="add-exercise"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg><span>Add</span></button></div>
           </div>
-          <label class="search"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg><input type="search" id="exManageSearch" placeholder="Search exercises" aria-label="Search exercises" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="search" /></label>
-          <div class="f-scroll pg"><div class="f-chips" id="exManageChips" role="radiogroup"></div><button type="button" class="f-more" aria-label="See more filters"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg></button></div>
+          <div class="search-row"><label class="search"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg><input type="search" id="exManageSearch" placeholder="Search exercises" aria-label="Search exercises" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="search" /></label><button type="button" class="icon-btn filter-btn" id="exManageFilterBtn" aria-label="Filter"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M7 12h10"/><path d="M10 18h4"/></svg></button></div>
+          <p class="filter-note" id="exManageFilterNote" hidden><span></span><button type="button" class="link-btn">Clear</button></p>
           <div id="exerciseManageList" class="org-list"></div>
         </div>
       </div>
 
       <div id="manageDailyPanel" hidden>
-        <div class="card card-list">
-          <div class="setting-row">
-            <span class="setting-row-label"><span class="setting-icon" data-icon="daily"></span><span>Track this</span></span>
-            <button type="button" class="switch" id="trackHabitsSwitch" role="switch" aria-checked="false" aria-label="Track Daily"><span class="switch-track"><span class="switch-thumb"></span></span></button>
-          </div>
-        </div>
         <p class="muted-text" id="trackDailyOffHint" hidden>Daily is off — hidden from Home, Log, and History. Nothing already logged is lost; turn it back on to see it again.</p>
 
         <div id="dailyTrackedFields">
@@ -335,12 +319,6 @@
       </div>
 
       <div id="manageMeasurementsPanel" hidden>
-        <div class="card card-list">
-          <div class="setting-row">
-            <span class="setting-row-label"><span class="setting-icon" data-icon="measurements"></span><span>Track this</span></span>
-            <button type="button" class="switch" id="trackMeasurementsSwitch" role="switch" aria-checked="false" aria-label="Track Body"><span class="switch-track"><span class="switch-thumb"></span></span></button>
-          </div>
-        </div>
         <p class="muted-text" id="trackMeasurementsOffHint" hidden>Body is off — hidden from Home, Log, and History. Nothing already logged is lost; turn it back on to see it again.</p>
 
         <div id="measurementsTrackedFields">
@@ -354,12 +332,6 @@
       </div>
 
       <div id="manageWaterPanel" hidden>
-        <div class="card card-list">
-          <div class="setting-row">
-            <span class="setting-row-label"><span class="setting-icon" data-icon="water"></span><span>Track this</span></span>
-            <button type="button" class="switch" id="trackWaterSwitch" role="switch" aria-checked="false" aria-label="Track water"><span class="switch-track"><span class="switch-thumb"></span></span></button>
-          </div>
-        </div>
         <p class="muted-text" id="trackWaterOffHint" hidden>Water is off — hidden from Home, Log, and History. Nothing already logged is lost; turn it back on to see it again.</p>
 
         <div id="waterTrackedFields">
@@ -380,12 +352,6 @@
       </div>
 
       <div id="manageFoodPanel" hidden>
-        <div class="card card-list">
-          <div class="setting-row">
-            <span class="setting-row-label"><span class="setting-icon" data-icon="food"></span><span>Track this</span></span>
-            <button type="button" class="switch" id="trackFoodSwitch" role="switch" aria-checked="false" aria-label="Track food"><span class="switch-track"><span class="switch-thumb"></span></span></button>
-          </div>
-        </div>
         <p class="muted-text" id="trackFoodOffHint" hidden>Food is off — hidden from Home, Log, and History. Nothing already logged is lost; turn it back on to see it again.</p>
 
         <div id="foodTrackedFields">
@@ -526,30 +492,86 @@
         </div>
       </div>
 
-      <div class="section-head"><h2>Logging</h2></div>
-      <div class="card card-list">
+      <div class="section-head"><h2>What you track</h2></div>
+      <div class="card card-list" id="trackList">
         <div class="setting-row">
-          <span class="setting-row-label"><span class="setting-icon" data-icon="gauge"></span><span>RPE <span class="muted-text">(how hard each set felt, 1 to 10)</span></span></span>
-          <button type="button" class="switch" id="showRpeSwitch" role="switch" aria-checked="true" aria-label="RPE"><span class="switch-track"><span class="switch-thumb"></span></span></button>
+          <span class="setting-row-label"><span class="setting-icon" data-icon="workout"></span><span>Lifting</span></span>
+          <button type="button" class="switch" id="trackWorkoutSwitch" role="switch" aria-checked="false" aria-label="Track lifting"><span class="switch-track"><span class="switch-thumb"></span></span></button>
         </div>
-        <p class="muted-text field-hint">Off hides the RPE field on sets and runs. Ratings you already logged are kept.</p>
+        <div class="setting-row is-sub" data-sub-of="trackWorkout">
+          <span>Workout today <span class="muted-text">(a block on Home)</span></span>
+          <button type="button" class="switch" id="homeTrainingSwitch" role="switch" aria-checked="false" aria-label="Workout today"><span class="switch-track"><span class="switch-thumb"></span></span></button>
+        </div>
+        <div class="setting-row is-sub" data-sub-of="trackWorkout">
+          <span>Sets per muscle <span class="muted-text">(a card on Progress)</span></span>
+          <button type="button" class="switch" id="showMuscleSetsSwitch" role="switch" aria-checked="false" aria-label="Sets per muscle"><span class="switch-track"><span class="switch-thumb"></span></span></button>
+        </div>
+        <div class="setting-row is-sub" data-sub-of="trackWorkout">
+          <span>Next session tips <span class="muted-text">(what to try next time)</span></span>
+          <button type="button" class="switch" id="showSuggestionsSwitch" role="switch" aria-checked="false" aria-label="Next session tips"><span class="switch-track"><span class="switch-thumb"></span></span></button>
+        </div>
+        <div class="setting-row is-sub" data-sub-of="trackWorkout">
+          <span>Strength level <span class="muted-text">(against other lifters)</span></span>
+          <button type="button" class="switch" id="showStrengthLevelSwitch" role="switch" aria-checked="false" aria-label="Strength level"><span class="switch-track"><span class="switch-thumb"></span></span></button>
+        </div>
+        <div class="setting-row is-sub" data-sub-of="trackWorkout">
+          <span>RPE <span class="muted-text">(how hard each set felt, 1 to 10)</span></span>
+          <button type="button" class="switch" id="showRpeSwitch" role="switch" aria-checked="false" aria-label="RPE"><span class="switch-track"><span class="switch-thumb"></span></span></button>
+        </div>
+        <div class="setting-row">
+          <span class="setting-row-label"><span class="setting-icon" data-icon="footprints"></span><span>Running and cardio</span></span>
+          <button type="button" class="switch" id="trackCardioSwitch" role="switch" aria-checked="false" aria-label="Track running and cardio"><span class="switch-track"><span class="switch-thumb"></span></span></button>
+        </div>
+        <div class="setting-row is-sub" data-sub-of="trackCardio">
+          <span>Running level <span class="muted-text">(against 5K times)</span></span>
+          <button type="button" class="switch" id="showPaceLevelSwitch" role="switch" aria-checked="false" aria-label="Running level"><span class="switch-track"><span class="switch-thumb"></span></span></button>
+        </div>
+        <div class="setting-row">
+          <span class="setting-row-label"><span class="setting-icon" data-icon="daily"></span><span>Daily</span></span>
+          <button type="button" class="switch" id="trackHabitsSwitch" role="switch" aria-checked="false" aria-label="Track Daily"><span class="switch-track"><span class="switch-thumb"></span></span></button>
+        </div>
+        <div class="setting-row is-sub" data-sub-of="trackHabits">
+          <span>Daily today <span class="muted-text">(a block on Home)</span></span>
+          <button type="button" class="switch" id="homeChecklistSwitch" role="switch" aria-checked="false" aria-label="Daily today"><span class="switch-track"><span class="switch-thumb"></span></span></button>
+        </div>
+        <div class="setting-row is-sub" data-sub-of="trackHabits">
+          <span>One workout goal <span class="muted-text">(a gym session or any daily reps count for the day)</span></span>
+          <button type="button" class="switch" id="dailyWorkoutGoalSwitch" role="switch" aria-checked="false" aria-label="One workout goal"><span class="switch-track"><span class="switch-thumb"></span></span></button>
+        </div>
+        <div class="setting-row">
+          <span class="setting-row-label"><span class="setting-icon" data-icon="measurements"></span><span>Body</span></span>
+          <button type="button" class="switch" id="trackMeasurementsSwitch" role="switch" aria-checked="false" aria-label="Track Body"><span class="switch-track"><span class="switch-thumb"></span></span></button>
+        </div>
+        <div class="setting-row is-sub" data-sub-of="trackMeasurements">
+          <span>Weight trend and BMI</span>
+          <button type="button" class="switch" id="showWeightInsightsSwitch" role="switch" aria-checked="false" aria-label="Weight trend and BMI"><span class="switch-track"><span class="switch-thumb"></span></span></button>
+        </div>
+        <div class="setting-row is-sub" data-sub-of="trackMeasurements" data-needs="sleep">
+          <span>Sleep insights <span class="muted-text">(last 7 nights)</span></span>
+          <button type="button" class="switch" id="showSleepInsightsSwitch" role="switch" aria-checked="false" aria-label="Sleep insights"><span class="switch-track"><span class="switch-thumb"></span></span></button>
+        </div>
+        <div class="setting-row">
+          <span class="setting-row-label"><span class="setting-icon" data-icon="water"></span><span>Water</span></span>
+          <button type="button" class="switch" id="trackWaterSwitch" role="switch" aria-checked="false" aria-label="Track water"><span class="switch-track"><span class="switch-thumb"></span></span></button>
+        </div>
+        <div class="setting-row">
+          <span class="setting-row-label"><span class="setting-icon" data-icon="food"></span><span>Food</span></span>
+          <button type="button" class="switch" id="trackFoodSwitch" role="switch" aria-checked="false" aria-label="Track food"><span class="switch-track"><span class="switch-thumb"></span></span></button>
+        </div>
+        <div class="setting-row is-sub" data-sub-of="trackFood">
+          <span>Food today <span class="muted-text">(a block on Home)</span></span>
+          <button type="button" class="switch" id="homeNutritionSwitch" role="switch" aria-checked="false" aria-label="Food today"><span class="switch-track"><span class="switch-thumb"></span></span></button>
+        </div>
+        <div class="setting-row is-sub" data-sub-of="trackFood">
+          <span>Macro guidance <span class="muted-text">(% of Daily Values)</span></span>
+          <button type="button" class="switch" id="showMacroGuidanceSwitch" role="switch" aria-checked="false" aria-label="Macro guidance"><span class="switch-track"><span class="switch-thumb"></span></span></button>
+        </div>
+        <p class="muted-text field-hint">An area that is off is hidden everywhere. Nothing already logged is lost. Levels use the sex and age in Profile.</p>
       </div>
 
       <div class="section-head"><h2>Home screen</h2></div>
       <div class="card card-list">
-        <div class="setting-row">
-          <span class="setting-row-label"><span class="setting-icon" data-icon="check"></span><span>Daily <span class="muted-text">(habits and reps)</span></span></span>
-          <button type="button" class="switch" id="homeChecklistSwitch" role="switch" aria-checked="true" aria-label="Daily"><span class="switch-track"><span class="switch-thumb"></span></span></button>
-        </div>
-        <div class="setting-row">
-          <span class="setting-row-label"><span class="setting-icon" data-icon="dumbbell"></span><span>Workout today <span class="muted-text">(what you logged)</span></span></span>
-          <button type="button" class="switch" id="homeTrainingSwitch" role="switch" aria-checked="true" aria-label="Workout today"><span class="switch-track"><span class="switch-thumb"></span></span></button>
-        </div>
-        <div class="setting-row">
-          <span class="setting-row-label"><span class="setting-icon" data-icon="apple"></span><span>Food today <span class="muted-text">(calories and macros)</span></span></span>
-          <button type="button" class="switch" id="homeNutritionSwitch" role="switch" aria-checked="true" aria-label="Food today"><span class="switch-track"><span class="switch-thumb"></span></span></button>
-        </div>
-        <div class="setting-row">
+        <div class="setting-row" id="homeMiniRow">
           <span class="setting-row-label"><span class="setting-icon" data-icon="water"></span><span>Water and trackers <span class="muted-text">(quick log tiles)</span></span></span>
           <button type="button" class="switch" id="homeMiniSwitch" role="switch" aria-checked="true" aria-label="Water and trackers"><span class="switch-track"><span class="switch-thumb"></span></span></button>
         </div>
@@ -558,46 +580,6 @@
           <button type="button" class="switch" id="homeGoalsSwitch" role="switch" aria-checked="true" aria-label="Goals"><span class="switch-track"><span class="switch-thumb"></span></span></button>
         </div>
         <p class="muted-text field-hint">Hiding a block only changes what Home shows. Nothing is deleted.</p>
-      </div>
-
-      <div class="section-head"><h2>Insights</h2></div>
-      <div class="card card-list">
-        <div class="setting-row">
-          <span class="setting-row-label"><span class="setting-icon" data-icon="chart"></span><span>Chart range</span></span>
-          <div class="segmented" id="dashboardChartScaleSegmented" role="radiogroup" aria-label="Chart range">
-            <button type="button" data-scale-choice="last10" role="radio">Last 10</button>
-            <button type="button" data-scale-choice="all" role="radio">Lifetime</button>
-          </div>
-        </div>
-        <div class="setting-row">
-          <span class="setting-row-label"><span class="setting-icon" data-icon="calendar"></span><span>Weight trend window</span></span>
-          <div class="segmented" id="insightsWindowSegmented" role="radiogroup" aria-label="Weight trend window">
-            <button type="button" data-window-choice="30" role="radio">1 mo</button>
-            <button type="button" data-window-choice="90" role="radio">3 mo</button>
-            <button type="button" data-window-choice="365" role="radio">1 yr</button>
-          </div>
-        </div>
-        <div class="setting-row">
-          <span class="setting-row-label"><span class="setting-icon" data-icon="scale"></span><span>Body weight insights <span class="muted-text">(trend + BMI)</span></span></span>
-          <button type="button" class="switch" id="showWeightInsightsSwitch" role="switch" aria-checked="false" aria-label="Body weight insights"><span class="switch-track"><span class="switch-thumb"></span></span></button>
-        </div>
-        <div class="setting-row">
-          <span class="setting-row-label"><span class="setting-icon" data-icon="trophy"></span><span>Strength level <span class="muted-text">(lifts and bodyweight moves)</span></span></span>
-          <button type="button" class="switch" id="showStrengthLevelSwitch" role="switch" aria-checked="false" aria-label="Strength level"><span class="switch-track"><span class="switch-thumb"></span></span></button>
-        </div>
-        <div class="setting-row">
-          <span class="setting-row-label"><span class="setting-icon" data-icon="footprints"></span><span>Running level <span class="muted-text">(runs vs. 5K tiers)</span></span></span>
-          <button type="button" class="switch" id="showPaceLevelSwitch" role="switch" aria-checked="false" aria-label="Running level"><span class="switch-track"><span class="switch-thumb"></span></span></button>
-        </div>
-        <div class="setting-row">
-          <span class="setting-row-label"><span class="setting-icon" data-icon="moon"></span><span>Sleep insights <span class="muted-text">(last 7 nights)</span></span></span>
-          <button type="button" class="switch" id="showSleepInsightsSwitch" role="switch" aria-checked="false" aria-label="Sleep insights"><span class="switch-track"><span class="switch-thumb"></span></span></button>
-        </div>
-        <div class="setting-row">
-          <span class="setting-row-label"><span class="setting-icon" data-icon="apple"></span><span>Macro guidance <span class="muted-text">(%DV for Fat, Sugar, Sodium, etc.)</span></span></span>
-          <button type="button" class="switch" id="showMacroGuidanceSwitch" role="switch" aria-checked="false" aria-label="Macro guidance"><span class="switch-track"><span class="switch-thumb"></span></span></button>
-        </div>
-        <p class="muted-text field-hint">Strength and running levels use Strength Level and Running Level benchmarks, split by sex (and age, for running) set in Profile above.</p>
       </div>
 
       <div class="section-head"><h2>Backup</h2></div>
