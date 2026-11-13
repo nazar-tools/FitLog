@@ -126,17 +126,29 @@
     return { slope, last: my + slope * (xs[n - 1] - mx) };
   }
 
-  /** Sets per group for each of `weeks` (Monday ISO dates, oldest first). `items` are
-   *  { date, group, sets }; anything outside the weeks is ignored. Returns { group: counts[] }. */
-  function setsPerGroupWeek(items, weeks) {
+  /* Weekly sets per muscle. items: [{ date, sets, primary: [muscle], secondary: [muscle] }].
+     A set counts 1 for each primary muscle and `share` of a set for each secondary one.
+     `areaOf` maps a muscle to its body area; an area takes, per set, the largest count any of
+     its muscles got, so one squat set is one set for the legs however many leg muscles it works.
+     Returns { muscles: { id: [per week] }, areas: { id: [per week] } }. */
+  function setsPerMuscleWeek(items, weeks, areaOf, share) {
     const index = Object.fromEntries(weeks.map((w, i) => [w, i]));
-    const out = {};
+    const muscles = {};
+    const areas = {};
+    const add = (out, key, i, n) => { (out[key] = out[key] || weeks.map(() => 0))[i] += n; };
     items.forEach((it) => {
       const i = index[weekStartISO(it.date)];
       if (i === undefined) return;
-      (out[it.group] = out[it.group] || weeks.map(() => 0))[i] += it.sets;
+      const best = {};
+      const count = (m, n) => {
+        add(muscles, m, i, n * it.sets);
+        if (areaOf[m]) best[areaOf[m]] = Math.max(best[areaOf[m]] || 0, n);
+      };
+      it.primary.forEach((m) => count(m, 1));
+      it.secondary.forEach((m) => count(m, share));
+      Object.keys(best).forEach((area) => add(areas, area, i, best[area] * it.sets));
     });
-    return out;
+    return { muscles, areas };
   }
 
   /** Plates for one side of a bar that load `total` as closely as possible without going
@@ -264,7 +276,7 @@
     return { key, label: std.label, group: std.group, load: std.load, metric: std.metric, results, best };
   }
 
-  const api = { localDateISO, addDaysISO, platesPerSide, setsPerGroupWeek, weekStarts, trailingAverage, linearTrend, activityDays, computeStreak, computeWeekStreak, longestStreak, weekStartISO, loggingRhythm, sleepInsights, bestEstimatedOneRM, bestReps, bestAddedOneRM, strengthLevel };
+  const api = { localDateISO, addDaysISO, platesPerSide, setsPerMuscleWeek, weekStarts, trailingAverage, linearTrend, activityDays, computeStreak, computeWeekStreak, longestStreak, weekStartISO, loggingRhythm, sleepInsights, bestEstimatedOneRM, bestReps, bestAddedOneRM, strengthLevel };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.FitCalc = api;
 })(typeof window !== 'undefined' ? window : globalThis);

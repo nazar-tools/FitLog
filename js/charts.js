@@ -312,8 +312,8 @@ const Charts = (() => {
     return boxHtml(svg, t, label);
   }
 
-  /* Body map: a front and a back figure with one shape per muscle, each shaded by the level
-     (0 to 3) of the muscle group it belongs to. The drawing is the app's own: every shape is
+  /* Body map: a front and a back figure with one shape per muscle, each shaded by that
+     muscle's own level (0 to 3). The drawing is the app's own: every shape is
      a short list of points on a 200 x 400 figure, rounded into a smooth outline. Points are
      given for the left half; `pair` shapes are mirrored, `mid` shapes run down the centre
      line and close with their own mirror image. */
@@ -325,27 +325,29 @@ const Charts = (() => {
     ['pair', [[61, 196], [59, 228], [62, 262], [65, 280], [62, 306], [66, 346], [71, 374], [88, 374], [91, 346], [94, 306], [93, 280], [97, 262], [99, 230], [99, 200]]],
     ['pair', [[66, 374], [62, 383], [67, 389], [88, 389], [92, 382], [89, 374]]],
   ];
-  // One shape per muscle and side, so no area is drawn in more detail than another.
-  const BODY_ARM = [
-    ['arms', 'pair', [[45, 101], [57, 97], [60, 118], [55, 142], [46, 144], [40, 123]]],
-    ['arms', 'pair', [[40, 150], [53, 147], [50, 170], [43, 202], [29, 202], [33, 174]]],
+  // One shape per muscle and side, so no area is drawn in more detail than another. The upper
+  // arm is the biceps from the front and the triceps from behind.
+  const bodyArm = (upperArm) => [
+    [upperArm, 'pair', [[45, 101], [57, 97], [60, 118], [55, 142], [46, 144], [40, 123]]],
+    ['forearms', 'pair', [[40, 150], [53, 147], [50, 170], [43, 202], [29, 202], [33, 174]]],
     ['shoulders', 'pair', [[63, 64], [51, 68], [43, 80], [42, 94], [49, 101], [57, 92], [63, 78]]],
   ];
-  const BODY_FRONT = BODY_ARM.concat([
-    ['back', 'pair', [[91, 52], [89, 61], [70, 64], [82, 57]]],
+  const BODY_FRONT = bodyArm('biceps').concat([
+    ['upperBack', 'pair', [[91, 52], [89, 61], [70, 64], [82, 57]]],
     ['chest', 'pair', [[67, 69], [84, 67], [98, 71], [98, 99], [86, 108], [70, 105], [61, 94], [62, 79]]],
-    ['core', 'mid', [[88, 110], [87, 134], [88, 160], [93, 182]]],
-    ['core', 'pair', [[68, 109], [83, 111], [84, 135], [84, 162], [75, 170], [67, 152], [64, 129]]],
-    ['legs', 'pair', [[62, 200], [78, 197], [93, 202], [95, 236], [90, 268], [79, 274], [68, 270], [61, 246], [59, 222]]],
-    ['legs', 'pair', [[66, 288], [79, 284], [87, 300], [86, 330], [80, 362], [72, 364], [65, 330], [63, 306]]],
+    ['abs', 'mid', [[88, 110], [87, 134], [88, 160], [93, 182]]],
+    ['abs', 'pair', [[68, 109], [83, 111], [84, 135], [84, 162], [75, 170], [67, 152], [64, 129]]],
+    ['quads', 'pair', [[62, 200], [75, 197], [85, 201], [87, 234], [85, 264], [78, 274], [68, 270], [61, 246], [59, 222]]],
+    ['adductors', 'pair', [[89, 203], [99, 206], [99, 240], [95, 266], [91, 262], [90, 236]]],
+    ['calves', 'pair', [[66, 288], [79, 284], [87, 300], [86, 330], [80, 362], [72, 364], [65, 330], [63, 306]]],
   ]);
-  const BODY_BACK = BODY_ARM.concat([
-    ['back', 'mid', [[93, 48], [88, 59], [67, 64], [82, 75], [92, 97], [96, 115]]],
-    ['back', 'pair', [[63, 98], [80, 85], [93, 105], [96, 139], [89, 161], [75, 153], [66, 127]]],
-    ['back', 'mid', [[92, 147], [88, 161], [89, 177], [96, 187]]],
-    ['legs', 'pair', [[61, 192], [72, 186], [88, 186], [98, 192], [98, 214], [90, 226], [74, 228], [62, 218]]],
-    ['legs', 'pair', [[61, 232], [78, 231], [97, 230], [97, 258], [90, 274], [80, 278], [70, 274], [63, 262]]],
-    ['legs', 'pair', [[64, 286], [78, 281], [91, 286], [92, 312], [86, 344], [78, 348], [69, 344], [62, 314]]],
+  const BODY_BACK = bodyArm('triceps').concat([
+    ['upperBack', 'mid', [[93, 48], [88, 59], [67, 64], [82, 75], [92, 97], [96, 115]]],
+    ['lats', 'pair', [[63, 98], [80, 85], [93, 105], [96, 139], [89, 161], [75, 153], [66, 127]]],
+    ['lowerBack', 'mid', [[92, 147], [88, 161], [89, 177], [96, 187]]],
+    ['glutes', 'pair', [[61, 192], [72, 186], [88, 186], [98, 192], [98, 214], [90, 226], [74, 228], [62, 218]]],
+    ['hamstrings', 'pair', [[61, 232], [78, 231], [97, 230], [97, 258], [90, 274], [80, 278], [70, 274], [63, 262]]],
+    ['calves', 'pair', [[64, 286], [78, 281], [91, 286], [92, 312], [86, 344], [78, 348], [69, 344], [62, 314]]],
   ]);
 
   // A closed, rounded outline through the points (Catmull-Rom, written as cubic Béziers).
@@ -365,11 +367,11 @@ const Charts = (() => {
     return kind === 'mid' ? [blobPath(pts.concat(flipX(pts).reverse()))] : [blobPath(pts), blobPath(flipX(pts))];
   }
 
-  // levels: { chest, back, legs, shoulders, arms, core } -> 0 to 3. `titles` names each group's value.
+  // levels: { chest, lats, quads, ... } -> 0 to 3. `titles` names each muscle's value.
   function bodyMap(levels, titles, label) {
     const figure = (muscles, dx, name) => {
       const sil = `<ellipse class="mm-sil" cx="100" cy="27" rx="19.5" ry="24"></ellipse>${BODY_SIL.map(([kind, pts]) => bodyShapes(kind, pts).map((d) => `<path class="mm-sil" d="${d}"></path>`).join('')).join('')}`;
-      const parts = muscles.map(([group, kind, pts]) => bodyShapes(kind, pts).map((d) => `<path class="mm-m l${levels[group] || 0}" d="${d}"><title>${esc(titles[group] || '')}</title></path>`).join('')).join('');
+      const parts = muscles.map(([muscle, kind, pts]) => bodyShapes(kind, pts).map((d) => `<path class="mm-m l${levels[muscle] || 0}" data-muscle="${muscle}" d="${d}"><title>${esc(titles[muscle] || '')}</title></path>`).join('')).join('');
       return `<g transform="translate(${dx} 0)">${sil}${parts}<text class="ct" x="100" y="410" text-anchor="middle">${name}</text></g>`;
     };
     return `<svg viewBox="0 0 410 416" class="chart-svg mm" role="img" aria-label="${esc(label)}">${figure(BODY_FRONT, 0, 'Front')}${figure(BODY_BACK, 210, 'Back')}</svg>`;

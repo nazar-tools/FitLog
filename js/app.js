@@ -182,10 +182,14 @@
 
   // Returns false on failure (it shows its own failure toast). Callers must
   // check it and skip any success toast or modal close: `if (!save()) return;`.
+  // What each form field held when the cursor last went into it (see hasUnsavedTyping).
+  let fieldsOnFocus = new WeakMap();
+
   function save() {
     if (dataIsNewer) { warnNewerData(); return false; }
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      fieldsOnFocus = new WeakMap();
       return true;
     } catch (e) {
       // Most likely the storage quota is full. Say so rather than lose the entry silently.
@@ -1229,6 +1233,148 @@
     handle.addEventListener('pointercancel', endDrag);
   }
 
+  /* Gestures (touch)
+     Sideways on a page moves along one strip: Home, Progress, then each category of Log,
+     History and Manage in turn. Down on a sheet, from anywhere while its content is at the
+     top, drags it away to close. Right on a sheet with a Back link goes back, and right on
+     Settings closes it. A swipe that starts on something that scrolls sideways, on a chart or
+     in a field belongs to that element. The outer edges of the screen are left to the
+     system's own back gesture. */
+  const PAGE_ORDER = ['dashboard', 'progress', 'log', 'history', 'manage'];
+  const SWIPE_MIN = 56;
+  const SWIPE_EDGE = 24;
+  // Set for the one tab switch a swipe makes, so the page slides in from the side it came from.
+  let slideFrom = null;
+
+  function scrollsSideways(el, root) {
+    for (let n = el; n && n !== root; n = n.parentElement) {
+      if (n.scrollWidth > n.clientWidth + 1 && /auto|scroll/.test(getComputedStyle(n).overflowX)) return true;
+    }
+    return false;
+  }
+  // The part of a sheet that scrolls under the finger: an inner list, else the sheet itself.
+  function sheetScroller(el, sheet) {
+    for (let n = el; n && n !== sheet; n = n.parentElement) {
+      if (n.scrollHeight > n.clientHeight + 1 && /auto|scroll/.test(getComputedStyle(n).overflowY)) return n;
+    }
+    return sheet;
+  }
+  // Something typed into a form and not saved yet: a field that no longer holds what it held
+  // when the cursor last went into it. A swipe must never throw that away. Saving wipes the
+  // record, and search boxes do not count.
+  function hasUnsavedTyping(root) {
+    return [...root.querySelectorAll('input:not([type="search"]), textarea')]
+      .some((f) => f.offsetParent && fieldsOnFocus.has(f) && f.value !== fieldsOnFocus.get(f));
+  }
+  const categoryTabs = (view) => [...view.querySelectorAll('.domain-tabs:not([hidden]) [data-domain-cat]')];
+
+  // step is 1 for a swipe to the left (onward) and -1 for a swipe to the right (back).
+  function swipePage(step) {
+    const view = document.querySelector('.view:not([hidden])');
+    const typing = document.activeElement && document.activeElement.matches('input, textarea');
+    if (!view || typing) return;
+    if (hasUnsavedTyping(view)) { toast('Save or clear what you typed before swiping away'); return; }
+    const from = step > 0 ? 'right' : 'left';
+    if (view.dataset.view === 'settings') {
+      if (step < 0) { slideFrom = from; closeSettings(); }
+      return;
+    }
+    const at = PAGE_ORDER.indexOf(view.dataset.view);
+    if (at < 0) return;
+    const tabs = categoryTabs(view);
+    const cat = tabs.findIndex((t) => t.getAttribute('aria-checked') === 'true');
+    if (cat >= 0 && tabs[cat + step]) {
+      tabs[cat + step].click();
+      view.dataset.from = from;
+      markEntering(view);
+      window.scrollTo(0, 0);
+      return;
+    }
+    const next = PAGE_ORDER[at + step];
+    if (!next) return;
+    slideFrom = from;
+    switchTab(next);
+    // A page entered from the left starts at its first category, from the right at its last.
+    const arrived = categoryTabs(document.querySelector(`.view[data-view="${next}"]`));
+    const want = arrived[step > 0 ? 0 : arrived.length - 1];
+    if (want && want.getAttribute('aria-checked') !== 'true') want.click();
+  }
+
+  // The touch in progress, from finger down to finger up.
+  let gesture = null;
+  // Listens without `passive`, on the sheets only: a sheet being dragged away must not also
+  // scroll or bounce.
+  function onSheetTouchMove(ev) {
+    const g = gesture;
+    if (!g || !g.sheet) return;
+    const dx = ev.touches[0].clientX - g.x;
+    const dy = ev.touches[0].clientY - g.y;
+    if (!g.decided) {
+      if (Math.abs(dx) < 6 && Math.abs(dy) < 6) return;
+      g.decided = true;
+      g.drag = g.atTop && dy > Math.abs(dx);
+      if (g.drag) g.sheet.classList.add('is-dragging');
+    }
+    if (!g.drag) return;
+    if (ev.cancelable) ev.preventDefault();
+    g.dy = Math.max(0, dy);
+    g.sheet.style.transform = `translateY(${g.dy}px)`;
+  }
+  // Lets go of a dragged sheet: slide it away and close it, or spring it back open.
+  function settleSheet(sheet, close) {
+    sheet.classList.remove('is-dragging');
+    sheet.style.transform = close ? 'translateY(100%)' : '';
+    if (!close) return;
+    setTimeout(() => {
+      if (sheet.matches('dialog')) { sheet.close(); sheet.style.transform = ''; }
+      else if (!modalRoot().hidden) closeModal();
+    }, 200);
+  }
+
+  function wireGestures() {
+    document.addEventListener('focusin', (ev) => {
+      if (ev.target.matches('input, textarea')) fieldsOnFocus.set(ev.target, ev.target.value);
+    });
+    document.addEventListener('touchstart', (ev) => {
+      gesture = null;
+      const el = ev.target;
+      if (ev.touches.length !== 1 || !el.closest || el.closest('input, textarea, select, .modal-handle')) return;
+      // A sheet is the modal sheet or the plate calculator, which opens above everything.
+      const sheet = el.closest('#modalSheet, dialog[open]');
+      if (!sheet && !modalRoot().hidden) return;
+      const t = ev.touches[0];
+      gesture = { x: t.clientX, y: t.clientY, at: ev.timeStamp, el, sheet, atTop: !!sheet && sheetScroller(el, sheet).scrollTop <= 0, decided: false, drag: false, dy: 0 };
+    }, { passive: true });
+    modalRoot().addEventListener('touchmove', onSheetTouchMove, { passive: false });
+    document.addEventListener('touchend', (ev) => {
+      const s = gesture;
+      gesture = null;
+      if (!s) return;
+      const dx = ev.changedTouches[0].clientX - s.x;
+      const dy = ev.changedTouches[0].clientY - s.y;
+      const ms = Math.max(1, ev.timeStamp - s.at);
+      if (s.drag) {
+        // Far enough, or a quick flick, lets go of the sheet; anything less springs back.
+        const far = s.dy > Math.min(140, s.sheet.getBoundingClientRect().height * 0.2);
+        settleSheet(s.sheet, far || (s.dy > 48 && s.dy / ms > 0.5));
+        return;
+      }
+      const sideways = Math.abs(dx) >= SWIPE_MIN && Math.abs(dx) > Math.abs(dy) * 1.5 && ms < 700;
+      if (!sideways || s.x < SWIPE_EDGE || s.x > window.innerWidth - SWIPE_EDGE) return;
+      if (s.el.closest('.chart-box') || scrollsSideways(s.el, s.sheet || document.body)) return;
+      if (s.sheet) {
+        const back = dx > 0 && s.sheet.querySelector('.modal-back-link');
+        if (back) back.click();
+        return;
+      }
+      swipePage(dx < 0 ? 1 : -1);
+    }, { passive: true });
+    document.addEventListener('touchcancel', () => {
+      if (gesture && gesture.drag) settleSheet(gesture.sheet, false);
+      gesture = null;
+    }, { passive: true });
+  }
+
   // The dialog closes itself before running onConfirm: callbacks must not call closeModal().
   function confirmDialog(title, body, confirmLabel, onConfirm, danger) {
     openModal(`
@@ -1456,6 +1602,7 @@
     // Keys stay inside the calculator, so Escape or Tab never reaches a sheet underneath it.
     plateDialogEl.addEventListener('keydown', (ev) => ev.stopPropagation());
     plateDialogEl.addEventListener('click', (ev) => { if (ev.target === plateDialogEl) plateDialogEl.close(); });
+    plateDialogEl.addEventListener('touchmove', onSheetTouchMove, { passive: false });
     document.body.appendChild(plateDialogEl);
     return plateDialogEl;
   }
@@ -2157,8 +2304,9 @@
     const wrap = document.getElementById('dailyTargetsWrap');
     wrap.hidden = !show;
     if (!show) { wrap.innerHTML = ''; return; }
-    // Until something is logged, the rep items wait as one-tap chips under the Workout goal.
-    const idle = goal && !workedOutToday() ? dailyRepItems() : [];
+    // Rep items not started today wait as one-tap chips under the Workout goal, whether or not
+    // the goal is met: an item done every day must stay within reach on a gym day too.
+    const idle = goal ? dailyRepItems().filter((e) => !started(e)) : [];
     wrap.innerHTML = (goal ? workoutGoalRowHtml() : '')
       + daily.filter((e) => e.kind !== 'habit').map((e) => dailyTargetRowHtml(e, 'Log')).join('')
       + (idle.length ? `<div class="home-card-foot"><div class="quick-chips">${idle.map((e) => `<button type="button" class="quick-chip" data-quick-ex="${e.id}">${itemIconSvg(exerciseIconKey(e))}<span>${exerciseLabelHtml(e)}</span></button>`).join('')}</div></div>` : '')
@@ -2867,8 +3015,8 @@
 
   /* Sets per muscle */
 
-  // Logged sets per muscle group, Monday to Sunday, for the range's weeks: lifts and bodyweight
-  // moves in the Workout area only (not cardio or Daily targets). See S.REFERENCES 'weeklySets'.
+  // Working sets per muscle and per body area, Monday to Sunday, for the range's weeks: every lift
+  // and bodyweight exercise, Daily items included, cardio left out. See S.REFERENCES 'weeklySets'.
   function muscleSetsByWeek(weeks) {
     const items = [];
     // Warm-ups are left out: a weighted set under S.WARMUP_CUTOFF of that day's heaviest set
@@ -2881,13 +3029,14 @@
     state.entries.forEach((e) => {
       if (e.date > todayISO()) return;
       const ex = exerciseById(e.exerciseId);
-      if (!ex || isDailyEx(ex) || !(ex.kind === 'weight' || ex.kind === 'reps')) return;
+      if (!ex || !countsForMuscles(ex)) return;
       const floor = ex.kind === 'weight' ? (top[e.exerciseId + e.date] || 0) * S.WARMUP_CUTOFF : 0;
       const sets = (e.sets || []).filter((st) => st.reps > 0 && (st.weight || 0) >= floor).length;
-      const group = exerciseGroup(ex);
-      if (sets && group !== 'cardio') items.push({ date: e.date, group, sets });
+      if (!sets) return;
+      const m = exerciseMuscles(ex);
+      items.push({ date: e.date, sets, primary: m.primary, secondary: m.secondary });
     });
-    return window.FitCalc.setsPerGroupWeek(items, weeks);
+    return window.FitCalc.setsPerMuscleWeek(items, weeks, MUSCLE_AREA, S.SECONDARY_SET_SHARE);
   }
 
   const MAP_GROUPS = ['chest', 'back', 'legs', 'shoulders', 'arms', 'core'];
@@ -2895,15 +3044,15 @@
   function muscleSetsCard() {
     if (!domainTracked('workout') || !state.settings.showMuscleSets) return null;
     const weeks = rangeWeeks();
-    const byGroup = muscleSetsByWeek(weeks);
-    const groups = EXERCISE_GROUPS.map(([g]) => g).filter((g) => byGroup[g]);
+    const { muscles, areas } = muscleSetsByWeek(weeks);
+    const groups = MAP_GROUPS.filter((g) => areas[g]);
     if (!groups.length) return null;
     const target = S.WEEKLY_SETS_TARGET;
     const now = weeks.length - 1;
-    const firstWeek = weeks.findIndex((_, i) => groups.some((g) => byGroup[g][i] > 0));
-    const done = (g) => byGroup[g].slice(firstWeek, now);
+    const firstWeek = weeks.findIndex((_, i) => groups.some((g) => areas[g][i] > 0));
+    const done = (g) => areas[g].slice(firstWeek, now);
     const rows = groups.map((g) => ({
-      group: g, label: EXERCISE_GROUP_LABELS[g], value: byGroup[g][now], prev: now > 0 ? byGroup[g][now - 1] : null,
+      group: g, label: EXERCISE_GROUP_LABELS[g], value: areas[g][now], prev: now > 0 ? areas[g][now - 1] : null,
       avg: done(g).length ? mean(done(g)) : null,
     }));
     const lastWeekHit = rows.filter((r) => (r.prev || 0) >= target).length;
@@ -2913,22 +3062,24 @@
     const swap = { label: `Show ${next}`, run: () => { state.settings.muscleView = next; if (save()) renderProgressCharts(); } };
     const asMap = view === 'map';
     const label = `Sets per muscle group this week so far: ${rows.map((r) => `${r.label} ${r.value}`).join(', ')}. ${target} sets a week is marked.`;
-    // The map shades the six areas a body has; each step is a share of the weekly target.
+    // The rows are body areas; the map shades each muscle by its own sets against the same target.
     const level = (v) => (v <= 0 ? 0 : v >= target ? 3 : v >= target / 2 ? 2 : 1);
-    const areas = MAP_GROUPS.map((g) => ({ g, label: EXERCISE_GROUP_LABELS[g], value: byGroup[g] ? byGroup[g][now] : 0 }));
+    const areaRows = MAP_GROUPS.map((g) => ({ g, label: EXERCISE_GROUP_LABELS[g], value: areas[g] ? areas[g][now] : 0 }));
+    const setsOf = (id) => (muscles[id] ? muscles[id][now] : 0);
     const half = target / 2;
     return {
       id: 'muscles', icon: itemIconHtml('biceps'), name: 'Sets per muscle', swap,
       sub: now > 0 ? `Last week ${lastWeekHit} of ${plural(rows.length, 'muscle group')} reached ${target} sets` : 'This week so far',
       plot: asMap
-        ? `<div class="mm-wrap">${Charts.bodyMap(Object.fromEntries(areas.map((a) => [a.g, level(a.value)])), Object.fromEntries(areas.map((a) => [a.g, `${a.label}: ${plural(a.value, 'set')} this week`])), label)}
-            <dl class="mm-list">${areas.map((a) => `<div><dt><i class="sw mm-l${level(a.value)}"></i>${a.label}</dt><dd>${a.value}</dd></div>`).join('')}</dl></div>`
+        ? `<div class="mm-wrap">${Charts.bodyMap(Object.fromEntries(MUSCLES.map(([id]) => [id, level(setsOf(id))])), Object.fromEntries(MUSCLES.map(([id, name]) => [id, `${name}: ${fmtSets(setsOf(id))} this week`])), label)}
+            <dl class="mm-list">${areaRows.map((a) => `<div><dt><i class="sw mm-l${level(a.value)}"></i>${a.label}</dt><dd>${a.value}</dd></div>`).join('')}</dl>
+            <p class="mm-pick muted-text" aria-live="polite">Tap a muscle to see its sets.</p></div>`
         : view === 'bars' ? Charts.hbars(rows, { mark: target, markText: `${target} sets`, label })
         : chartTableHtml({ head: ['Muscle', 'This week', 'Last week', `Avg, ${rangeInfo()[1]}`], rows: rows.map((r) => [r.label, `${r.value} so far`, r.prev != null ? String(r.prev) : '-', r.avg != null ? String(round(r.avg, 1)) : '-']) }),
       legend: view === 'table' ? '' : asMap
-        ? [keyItem('sw mm-l0', '0'), keyItem('sw mm-l1', `1 to ${Math.ceil(half) - 1}`), keyItem('sw mm-l2', `${Math.ceil(half)} to ${target - 1}`), keyItem('sw mm-l3', `${target} or more sets this week`)].join('')
+        ? [keyItem('sw mm-l0', '0'), keyItem('sw mm-l1', `Under ${half}`), keyItem('sw mm-l2', `${half} or more`), keyItem('sw mm-l3', `${target} or more sets this week`)].join('')
         : [keyItem('sw now', 'This week, so far'), now > 0 ? keyItem('tk', 'Last week') : '', keyItem('ln goal', `${target} sets a week`)].join(''),
-      note: `Working sets of lifts and bodyweight moves count toward the exercise's muscle group. Warm-up sets, under ${S.WARMUP_CUTOFF * 100}% of that day's heaviest set, are left out.`,
+      note: `A working set counts in full for an exercise's main muscles and as half a set for the muscles that help. Warm-up sets, under ${S.WARMUP_CUTOFF * 100}% of that day's heaviest set, are left out.`,
     };
   }
 
@@ -3182,6 +3333,11 @@
   }
   const waterShown = (ml) => round(Units.mlToDisplay(ml), state.settings.volumeUnit === 'mL' ? 0 : 1);
 
+  // The average over the full days with water logged in the range. Today is still filling up.
+  function waterRangeAverage(byDate) {
+    return mean(daysBetween(rangeFrom(), addDays(todayISO(), -1)).filter((d) => byDate[d]).map((d) => byDate[d]));
+  }
+
   function waterOverviewCard() {
     if (!domainTracked('water')) return null;
     const base = { id: 'water', icon: itemIconHtml('droplets'), name: 'Water', open: () => openFoodCharts('water') };
@@ -3190,30 +3346,22 @@
     const goal = state.water.goalMl;
     const weeks = rangeWeeks();
     const unit = Units.volumeUnitLabel();
+    // A week's bar is its average over the days with water logged, today included.
     const rows = weeks.map((w) => {
       const days = daysBetween(w, addDays(w, 6)).filter((d) => d <= todayISO() && byDate[d]);
-      return { week: w, met: goal ? days.filter((d) => byDate[d] >= goal).length : 0, logged: days.length, avg: mean(days.map((d) => byDate[d])) };
+      return { week: w, logged: days.length, avg: mean(days.map((d) => byDate[d])) };
     });
-    const firstWeek = weekOf(Object.keys(byDate).sort()[0]);
-    const done = rows.slice(0, -1).filter((r) => r.week >= firstWeek);
-    if (goal) {
-      const avg = mean(done.map((r) => r.met)) || 0;
-      return {
-        ...base,
-        sub: `Goal met ${round(avg, 1)} ${round(avg, 1) === 1 ? 'day' : 'days'} a week`,
-        plot: Charts.columns(rows.map((r, i) => {
-          const now = i === rows.length - 1;
-          return { value: r.met, tone: now ? 'now' : '', label: now && r.met ? String(r.met) : '', tip: { title: now ? 'This week, so far' : `Week of ${chartDay(r.week)}`, rows: [['days at goal', String(r.met)], ['days logged', String(r.logged)]] } };
-        }), { max: 7, height: 110, first: chartDay(weeks[0]), last: 'This week, so far', label: `Days the water goal was met each week over ${rangeInfo()[3]}, ${round(avg, 1)} on average` }),
-        table: { head: ['Week of', 'Days at goal', 'Days logged'], rows: rows.map((r, i) => [weekLabel(r.week), `${r.met}${i === rows.length - 1 ? ' so far' : ''}`, String(r.logged)]) },
-      };
-    }
-    const avg = mean(done.map((r) => r.avg).filter((v) => v != null));
+    const avg = waterRangeAverage(byDate);
+    const last = rows.length - 1;
     return {
       ...base,
-      sub: avg != null ? `Average ${fmtVolume(avg)} a day` : '',
-      plot: Charts.columns(rows.map((r, i) => ({ value: r.avg ? waterShown(r.avg) : 0, tone: i === rows.length - 1 ? 'now' : '', tip: { title: i === rows.length - 1 ? 'This week, so far' : `Week of ${chartDay(r.week)}`, rows: [['a day on average', r.avg ? fmtVolume(r.avg) : '—']] } })), { height: 110, first: chartDay(weeks[0]), last: 'This week, so far', label: `Average water a day, by week, over ${rangeInfo()[3]}` }),
-      table: { head: ['Week of', `Average, ${unit}`], rows: rows.map((r) => [weekLabel(r.week), r.avg ? String(waterShown(r.avg)) : '—']) },
+      sub: avg != null ? `Average ${fmtVolume(avg)} a day` : `${fmtVolume(byDate[todayISO()] || 0)} today so far`,
+      plot: Charts.columns(rows.map((r, i) => ({
+        value: r.avg ? waterShown(r.avg) : 0, tone: i === last ? 'now' : '',
+        tip: { title: i === last ? 'This week, so far' : `Week of ${chartDay(r.week)}`, rows: [['a day on average', r.avg ? fmtVolume(r.avg) : 'Nothing logged'], ['days logged', String(r.logged)]] },
+      })), { height: 110, goal: goal ? waterShown(goal) : null, goalText: goal ? String(Math.round(waterShown(goal))) : '', first: chartDay(weeks[0]), last: 'This week, so far', label: `Average water a day, by week, over ${rangeInfo()[3]}${goal ? `, against a goal of ${fmtVolume(goal)}` : ''}` }),
+      legend: goal ? keyItem('ln goal', `Goal ${fmtVolume(goal)} a day`) : '',
+      table: { head: ['Week of', `Average a day, ${unit}`, 'Days logged'], rows: rows.map((r, i) => [weekLabel(r.week), r.avg ? `${waterShown(r.avg)}${i === last ? ' so far' : ''}` : '-', String(r.logged)]) },
     };
   }
 
@@ -3244,9 +3392,9 @@
     }
     return {
       ...base,
-      sub: goal ? `Goal met ${met} of the last ${plural(full.length, 'full day')}` : `Average ${fmtVolume(mean(full.map((d) => byDate[d])) || 0)} on full days`,
+      sub: full.length ? `Average ${fmtVolume(mean(full.map((d) => byDate[d])))} a day` : `${fmtVolume(today)} today so far`,
       plot: Charts.columns(bars, { height: 116, goal: goal ? waterShown(goal) : null, goalText: goal ? String(Math.round(waterShown(goal))) : '', first, last: rangeIsDaily() ? 'Today' : 'This week', label: `Water ${rangeIsDaily() ? 'per day' : 'per day, weekly average'} over ${rangeInfo()[3]}${goal ? `, goal met ${met} of ${full.length} full days` : ''}` }),
-      legend: [goal ? keyItem('ln goal', `Goal ${fmtVolume(goal)}`) : '', rangeIsDaily() && today ? keyItem('sw open', `Today, ${fmtVolume(today)} so far`) : ''].join(''),
+      legend: [goal ? keyItem('ln goal', `Goal ${fmtVolume(goal)}${full.length ? `, met on ${met} of ${plural(full.length, 'full day')}` : ''}`) : '', rangeIsDaily() && today ? keyItem('sw open', `Today, ${fmtVolume(today)} so far`) : ''].join(''),
       table,
     };
   }
@@ -3412,10 +3560,12 @@
       const st = foodRangeStats();
       if (st.avg != null) tiles.push({ value: fmtInt(st.avg), label: 'Avg kcal, full days' });
     }
-    if (domainTracked('water') && !quiet.water && state.water.goalMl && state.waterEntries.length && tiles.length < 3) {
-      const byDate = waterByDate();
-      const met = daysBetween(from, addDays(todayISO(), -1)).filter((d) => byDate[d] >= state.water.goalMl).length;
-      tiles.push({ value: String(met), label: 'Days at water goal' });
+    if (domainTracked('water') && !quiet.water && state.waterEntries.length && tiles.length < 3) {
+      const avg = waterRangeAverage(waterByDate());
+      if (avg != null) {
+        const [value, ...unit] = fmtVolume(avg).split(' ');
+        tiles.push({ value, unit: unit.join(' '), label: 'Avg water, full days' });
+      }
     }
     return tiles.slice(0, 3);
   }
@@ -3851,12 +4001,15 @@
     });
     return 1;
   }
-  // Adds every catalog movement matching `filter` that the user does not have yet, on its usual
+  // The short list that setup and "Add every catalog exercise" bring in; the rest of the
+  // catalog is added one movement at a time.
+  const STARTER_MOVEMENTS = CATALOG.movements.filter((m) => m.tier === 'starter');
+  // Adds every starter movement matching `filter` that the user does not have yet, on its usual
   // equipment. Anything already there (archived too) is left exactly as it is. Returns how many
   // exercises were created.
   function importMissingMovements(filter) {
     let n = 0;
-    CATALOG.movements.filter(filter).forEach((m) => {
+    STARTER_MOVEMENTS.filter(filter).forEach((m) => {
       const eq = m.defaultEquipment || null;
       if (variantRecord(m.id, eq) || legacyVariantMatch(m, eq)) return;
       n += addCatalogMovement(m, eq ? [eq] : []);
@@ -3864,7 +4017,7 @@
     return n;
   }
   const isCardioMovement = (m) => m.kind === 'cardio';
-  const missingMovementCount = () => CATALOG.movements.filter((m) => !(variantRecord(m.id, m.defaultEquipment || null) || legacyVariantMatch(m, m.defaultEquipment || null))).length;
+  const missingMovementCount = () => STARTER_MOVEMENTS.filter((m) => !(variantRecord(m.id, m.defaultEquipment || null) || legacyVariantMatch(m, m.defaultEquipment || null))).length;
   // Switching Lifting or Cardio on while that part of the library is empty brings in the whole set,
   // like setup does, so it is never a blank screen. Returns a short message when it added any.
   function autoImportFor(key) {
@@ -3888,6 +4041,78 @@
     state.food.savedFoods.push(food);
     return 1;
   }
+
+  /* Muscles
+     Sets per muscle counts a working set in full for an exercise's primary muscles and as half
+     a set for its secondary ones. An exercise's muscles are, in order: the ones picked in Edit
+     exercise (`ex.muscles`), the catalog movement of the same name, the movement it was added
+     from, and last the usual muscles of its muscle group. Only the first is ever saved. */
+
+  // [id, label, the muscle group it rolls up into]
+  const MUSCLES = [
+    ['chest', 'Chest', 'chest'], ['lats', 'Lats', 'back'], ['upperBack', 'Upper back', 'back'], ['lowerBack', 'Lower back', 'back'],
+    ['shoulders', 'Shoulders', 'shoulders'], ['biceps', 'Biceps', 'arms'], ['triceps', 'Triceps', 'arms'], ['forearms', 'Forearms', 'arms'],
+    ['abs', 'Abs', 'core'], ['quads', 'Quads', 'legs'], ['hamstrings', 'Hamstrings', 'legs'], ['glutes', 'Glutes', 'legs'],
+    ['adductors', 'Adductors', 'legs'], ['calves', 'Calves', 'legs'],
+  ];
+  const MUSCLE_LABELS = Object.fromEntries(MUSCLES.map(([id, label]) => [id, label]));
+  const MUSCLE_AREA = Object.fromEntries(MUSCLES.map(([id, , area]) => [id, area]));
+  const USUAL_MUSCLES = {
+    chest: { primary: ['chest'], secondary: [] }, back: { primary: ['lats', 'upperBack'], secondary: [] },
+    legs: { primary: ['quads', 'glutes'], secondary: [] }, shoulders: { primary: ['shoulders'], secondary: [] },
+    arms: { primary: ['biceps', 'triceps'], secondary: [] }, core: { primary: ['abs'], secondary: [] },
+    full: { primary: [], secondary: ['quads', 'glutes', 'lats', 'shoulders', 'abs'] },
+  };
+
+  // Names compare without case, punctuation, plurals or filler words: "Push-ups" is "push up".
+  const FILLER_WORDS = ['the', 'a', 'an', 'to', 'and', 'with', 'of', 'on'];
+  function nameWords(name) {
+    return normName((name || '').replace(/'/g, '')).split(' ')
+      .map((w) => w.replace(/(ch|sh|x|ss)es$/, '$1'))
+      .map((w) => (w.length < 4 || w.endsWith('ss') ? w : w.replace(/s$/, '')))
+      .filter((w) => w && !FILLER_WORDS.includes(w));
+  }
+  const MOVEMENT_NAMES = CATALOG.movements.filter((m) => m.primary)
+    .flatMap((m) => [m.name, ...(m.aka || [])].map((n) => ({ words: nameWords(n), mv: m })));
+  const MOVEMENT_BY_NAME = Object.fromEntries(MOVEMENT_NAMES.map((n) => [n.words.join(' '), n.mv]));
+  Object.setPrototypeOf(MOVEMENT_BY_NAME, null);
+  const movementNameCache = new Map();
+
+  // The catalog movement an exercise name means: the same name, the same name once equipment
+  // words are dropped ("Dumbbell Bench Press"), or the longest movement name found inside it
+  // ("Seated Preacher Curl" is a Preacher Curl).
+  function movementByName(name) {
+    if (movementNameCache.has(name)) return movementNameCache.get(name);
+    let plain = normName(name);
+    EQUIPMENT_WORDS.forEach(([, re]) => { plain = plain.replace(re, ' '); });
+    const words = nameWords(plain);
+    let hit = MOVEMENT_BY_NAME[nameWords(name).join(' ')] || MOVEMENT_BY_NAME[words.join(' ')] || null;
+    if (!hit) {
+      let longest = 0;
+      MOVEMENT_NAMES.forEach((n) => {
+        if (n.words.length > longest && n.words.every((w) => words.includes(w))) { hit = n.mv; longest = n.words.length; }
+      });
+    }
+    movementNameCache.set(name, hit);
+    return hit;
+  }
+
+  // { primary, secondary, source }; source says where they came from: 'own', 'catalog' or 'group'.
+  function exerciseMuscles(ex) {
+    const known = (list) => (Array.isArray(list) ? list.filter((id) => Object.hasOwn(MUSCLE_LABELS, id)) : []);
+    if (ex.muscles && Array.isArray(ex.muscles.primary)) return { primary: known(ex.muscles.primary), secondary: known(ex.muscles.secondary), source: 'own' };
+    const mv = movementByName(ex.name) || (ex.catalogId && Object.hasOwn(MOVEMENTS, ex.catalogId) && MOVEMENTS[ex.catalogId]);
+    if (mv && mv.primary) return { primary: mv.primary, secondary: mv.secondary, source: 'catalog' };
+    return { ...(USUAL_MUSCLES[exerciseGroup(ex)] || { primary: [], secondary: [] }), source: 'group' };
+  }
+  function musclesText(m) {
+    const main = m.primary.map((id) => MUSCLE_LABELS[id]).join(', ');
+    const also = m.secondary.map((id) => MUSCLE_LABELS[id]).join(', ').toLowerCase();
+    if (!main) return also ? `Half sets for ${also}` : 'None';
+    return also ? `${main}; also ${also}` : main;
+  }
+  const countsForMuscles = (ex) => ex.kind === 'weight' || ex.kind === 'reps';
+  const fmtSets = (n) => plural(round(n, 1), 'set');
 
   /* Tidy up: group older exercises under catalog movements
      Offers to link exercises that predate the catalog (e.g. "Cable Bicep Curl") to a movement
@@ -3989,7 +4214,7 @@
     if (n < 5) { host.hidden = true; host.innerHTML = ''; return; }
     host.hidden = false;
     host.innerHTML = `
-      <div class="tidy-text"><b>Add every catalog exercise</b><span class="muted-text">${n} lifts, bodyweight moves and cardio activities are not in your list yet. Yours stay exactly as they are.</span></div>
+      <div class="tidy-text"><b>Add the usual exercises</b><span class="muted-text">${n} common lifts, bodyweight moves and cardio activities are not in your list yet. Yours stay exactly as they are.</span></div>
       <div class="tidy-actions"><button type="button" class="btn btn-primary btn-sm" id="importAllBtn">Import all ${n}</button><button type="button" class="link-btn" id="importDismissBtn">Not now</button></div>`;
     document.getElementById('importAllBtn').addEventListener('click', () => {
       const before = state.exercises.length;
@@ -4087,6 +4312,20 @@
 
   function catPickCount() { return cat.pick[cat.tab].size; }
 
+  // The Exercises tab shows the starter list until a search, muscle group or pack narrows it,
+  // then everything that matches: starter movements first, the rest by name. Search also looks
+  // at other names for a movement and at the muscles it mainly works.
+  const catNarrowed = () => !!cat.query.trim() || cat.group !== 'all' || cat.pack !== 'all';
+  const movementSearchText = (m) => [m.name, ...(m.aka || []), EXERCISE_GROUP_LABELS[m.group] || '', ...(m.primary || []).map((id) => MUSCLE_LABELS[id])].join(' ').toLowerCase();
+  function catMovements() {
+    const q = cat.query.trim().toLowerCase();
+    const narrowed = catNarrowed();
+    const later = (m) => (m.tier === 'starter' ? 0 : 1);
+    return CATALOG.movements
+      .filter((m) => (narrowed || m.tier === 'starter') && (cat.group === 'all' || m.group === cat.group) && (cat.pack === 'all' || m.packs.includes(cat.pack)) && (!q || movementSearchText(m).includes(q)))
+      .sort((x, y) => later(x) - later(y) || (later(x) ? x.name.localeCompare(y.name) : 0));
+  }
+
   function renderCatalogSheet() {
     document.querySelectorAll('#catTabs button').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.catTab === cat.tab)));
     const body = document.getElementById('catControls');
@@ -4123,9 +4362,7 @@
   function catUnaddedKeys() {
     const q = cat.query.trim().toLowerCase();
     if (cat.tab === 'exercises') {
-      return CATALOG.movements
-        .filter((m) => (cat.group === 'all' || m.group === cat.group) && (cat.pack === 'all' || m.packs.includes(cat.pack)))
-        .filter((m) => !q || m.name.toLowerCase().includes(q) || (EXERCISE_GROUP_LABELS[m.group] || '').toLowerCase().includes(q))
+      return catMovements()
         .filter((m) => !(variantRecord(m.id, m.defaultEquipment || null) || legacyVariantMatch(m, m.defaultEquipment || null)))
         .map((m) => `${m.id}|${m.defaultEquipment || ''}`);
     }
@@ -4140,15 +4377,19 @@
     const q = cat.query.trim().toLowerCase();
     let html = '';
     if (cat.tab === 'exercises') {
-      let items = CATALOG.movements.filter((m) => (cat.group === 'all' || m.group === cat.group) && (cat.pack === 'all' || m.packs.includes(cat.pack)));
-      if (q) items = items.filter((m) => m.name.toLowerCase().includes(q) || (EXERCISE_GROUP_LABELS[m.group] || '').toLowerCase().includes(q));
+      const items = catMovements();
+      const narrowed = catNarrowed();
+      const tiered = narrowed && !q && items.some((m) => m.tier === 'starter') && items.some((m) => m.tier !== 'starter');
+      let lastTier = null;
       html = items.map((m) => {
+        const head = tiered && m.tier !== lastTier ? `<div class="cat-tier">${m.tier === 'starter' ? 'Most used' : 'More exercises'}</div>` : '';
+        lastTier = m.tier;
         const eqs = m.equipment.length ? m.equipment : [null];
         const added = eqs.filter((eq) => variantRecord(m.id, eq) || legacyVariantMatch(m, eq)).length;
         const picked = eqs.filter((eq) => cat.pick.exercises.has(`${m.id}|${eq || ''}`)).length;
         const open = cat.open === m.id && m.equipment.length > 0;
         const sub = m.equipment.length ? (m.equipment.length === 1 ? equipmentLabel(m.equipment[0]) : `${equipmentLabel(m.equipment[0])} +${m.equipment.length - 1} more`) : 'No equipment';
-        return `
+        return `${head}
           <div class="entry-row cat-row" data-cat-mv="${m.id}" role="button" tabindex="0" aria-expanded="${open}">
             ${catCheck(picked > 0, false)}
             ${itemIconHtml(ITEM_ICONS[m.icon] ? m.icon : 'dumbbell', true)}
@@ -4164,8 +4405,11 @@
               return `<button type="button" class="chip-option${on || have ? ' is-active' : ''}${have ? ' is-added' : ''}" data-cat-eq="${m.id}|${eq}" role="checkbox" aria-checked="${on || have}" ${have ? 'disabled' : ''}>${escapeHtml(equipmentLabel(eq))}${have ? ' · added' : ''}</button>`;
             }).join('')}
             <p class="muted-text field-hint">${escapeHtml(EQUIPMENT[m.defaultEquipment] ? `Most people use ${equipmentLabel(m.defaultEquipment).toLowerCase()}. ` : '')}Each equipment keeps its own records and goals.</p>
+            ${m.primary ? `<p class="muted-text field-hint">Muscles: ${escapeHtml(musclesText(m))}</p>` : ''}
           </div>` : ''}`;
       }).join('');
+      const more = CATALOG.movements.length - STARTER_MOVEMENTS.length;
+      if (!narrowed && more > 0) html += `<p class="muted-text cat-more">${more} more in the catalog. Search, or pick a muscle group, to see them.</p>`;
     } else if (cat.tab === 'habits') {
       let items = CATALOG.habits;
       if (q) items = items.filter((h) => h.name.toLowerCase().includes(q));
@@ -4305,7 +4549,13 @@
     const seg = searching ? 'all' : logEx.seg;
     const mine = favs.concat(recent.filter((e) => !isFavoriteExercise(e)));
     let base = seg === 'mine' ? (mine.length ? mine : active.slice().sort(byName)) : seg === 'fav' ? favs : seg === 'recent' ? recent : active.slice().sort(byName);
-    if (searching) base = active.filter((e) => exerciseLabel(e).toLowerCase().includes(q) || exerciseGroupLabel(e).toLowerCase().includes(q)).sort(byName);
+    // Search looks through every exercise, Daily rep items included, and lists the ones with
+    // entries first, so a logged item is never hidden behind an unused one of a similar name.
+    if (searching) {
+      base = activeExercises().filter((e) => e.kind !== 'habit')
+        .filter((e) => exerciseLabel(e).toLowerCase().includes(q) || exerciseGroupLabel(e).toLowerCase().includes(q))
+        .sort((a, b) => (lastMap[b.id] ? 1 : 0) - (lastMap[a.id] ? 1 : 0) || byName(a, b));
+    }
 
     const counts = {};
     base.forEach((e) => { const g = exerciseGroup(e); counts[g] = (counts[g] || 0) + 1; });
@@ -4333,7 +4583,7 @@
           ${exerciseIconHtml(ex, true)}
           <div class="entry-row-main">
             <div class="entry-row-title">${exerciseLabelHtml(ex)}</div>
-            <div class="entry-row-sub">${escapeHtml(exercisePickSub(ex, lastMap))}</div>
+            <div class="entry-row-sub">${isDailyEx(ex) ? 'Daily · ' : ''}${escapeHtml(exercisePickSub(ex, lastMap))}</div>
           </div>
           ${starButtonHtml('data-fav', ex.id, isFavoriteExercise(ex))}
         </div>`).join('');
@@ -6307,7 +6557,8 @@
     const best = ex.kind === 'weight' && ex.goalMode !== 'standard' ? (movementRecords(ex)[0] || {}).value : null;
     const last = sessionSeries(ex, 'top').pop();
     return `${badge()}${progressBlockHtml(ex, undefined, { current: best })}
-      ${last ? `<p class="item-facts muted-text">Latest ${movementFormat(ex, 'top')(last.value)}${last.detail ? ` ${last.detail}` : ''}, ${chartDay(last.date)}</p>` : ''}`;
+      ${last ? `<p class="item-facts muted-text">Latest ${movementFormat(ex, 'top')(last.value)}${last.detail ? ` ${last.detail}` : ''}, ${chartDay(last.date)}</p>` : ''}
+      ${state.settings.showMuscleSets ? `<p class="item-facts muted-text">Muscles: ${escapeHtml(musclesText(exerciseMuscles(ex)))}</p>` : ''}`;
   }
 
   function renderExerciseDetail(exId) {
@@ -6415,6 +6666,19 @@
           </div>
         </div>
 
+        <div class="field" id="exMusclesField" hidden>
+          <span class="field-label">Muscles worked</span>
+          <div class="muscle-line"><span id="exMusclesText"></span><button type="button" class="link-btn" id="exMusclesEdit" aria-expanded="false">Change</button></div>
+          <span class="muted-text field-hint" id="exMusclesHint"></span>
+          <div class="muscle-editor" id="exMusclesEditor" hidden>
+            <span class="field-label">Main muscles, a full set each</span>
+            <div class="f-chips wrap" id="exMusclesMain" role="group" aria-label="Main muscles"></div>
+            <span class="field-label">Helping muscles, half a set each</span>
+            <div class="f-chips wrap" id="exMusclesAlso" role="group" aria-label="Helping muscles"></div>
+            <button type="button" class="link-btn" id="exMusclesReset" hidden>Use the usual ones</button>
+          </div>
+        </div>
+
         <div class="card card-list"><div class="setting-row">
           <span>Favorite<span class="muted-text">Shows under Favorites and at the top of the exercise list</span></span>
           ${switchHtml('id="exFavorite"', 'Favorite', false)}
@@ -6482,8 +6746,43 @@
       selectedGroup = inferExerciseGroup({ name: document.getElementById('exName').value, kind: selectedKind });
       paintGroup();
     };
-    document.querySelectorAll('#exGroupChips .f-chip').forEach((b) => b.addEventListener('click', () => { groupTouched = true; selectedGroup = b.dataset.chip; paintGroup(); }));
-    document.getElementById('exName').addEventListener('input', followGroup);
+    // Muscles follow the name and the group until the user picks their own.
+    const savedMuscles = ex ? exerciseMuscles(ex) : null;
+    let ownMuscles = savedMuscles && savedMuscles.source === 'own' ? { primary: savedMuscles.primary, secondary: savedMuscles.secondary } : null;
+    const formMuscles = () => ownMuscles || exerciseMuscles({ name: document.getElementById('exName').value, kind: selectedKind, group: selectedGroup, catalogId: ex && ex.catalogId });
+    const MUSCLE_SOURCES = { catalog: 'From the catalog.', group: 'A guess from the muscle group.' };
+    function paintMuscles() {
+      document.getElementById('exMusclesField').hidden = !state.settings.showMuscleSets || !countsForMuscles({ kind: selectedKind });
+      const m = formMuscles();
+      document.getElementById('exMusclesText').textContent = musclesText(m);
+      document.getElementById('exMusclesHint').textContent = `${ownMuscles ? 'Your own pick.' : MUSCLE_SOURCES[m.source]} Sets per muscle counts a full set for the main muscles and half a set for the helping ones.`;
+      const chips = (on) => MUSCLES.map(([id, label]) => `<button type="button" class="f-chip" role="checkbox" aria-checked="${on.includes(id)}" data-chip="${id}">${label}</button>`).join('');
+      document.getElementById('exMusclesMain').innerHTML = chips(m.primary);
+      document.getElementById('exMusclesAlso').innerHTML = chips(m.secondary);
+      document.getElementById('exMusclesReset').hidden = !ownMuscles;
+    }
+    // A muscle is main or helping, never both, so ticking it in one list clears it from the other.
+    const pickMuscle = (list, other) => (ev) => {
+      const chip = ev.target.closest('[data-chip]');
+      if (!chip) return;
+      const m = formMuscles();
+      const id = chip.dataset.chip;
+      ownMuscles = { primary: m.primary.slice(), secondary: m.secondary.slice() };
+      ownMuscles[other] = ownMuscles[other].filter((x) => x !== id);
+      ownMuscles[list] = ownMuscles[list].includes(id) ? ownMuscles[list].filter((x) => x !== id) : ownMuscles[list].concat(id);
+      paintMuscles();
+    };
+    document.getElementById('exMusclesMain').addEventListener('click', pickMuscle('primary', 'secondary'));
+    document.getElementById('exMusclesAlso').addEventListener('click', pickMuscle('secondary', 'primary'));
+    document.getElementById('exMusclesReset').addEventListener('click', () => { ownMuscles = null; paintMuscles(); });
+    document.getElementById('exMusclesEdit').addEventListener('click', (ev) => {
+      const editor = document.getElementById('exMusclesEditor');
+      editor.hidden = !editor.hidden;
+      ev.currentTarget.setAttribute('aria-expanded', String(!editor.hidden));
+      ev.currentTarget.textContent = editor.hidden ? 'Change' : 'Done';
+    });
+    document.querySelectorAll('#exGroupChips .f-chip').forEach((b) => b.addEventListener('click', () => { groupTouched = true; selectedGroup = b.dataset.chip; paintGroup(); paintMuscles(); }));
+    document.getElementById('exName').addEventListener('input', () => { followGroup(); paintMuscles(); });
     const favSwitch = document.getElementById('exFavorite');
     favSwitch.setAttribute('aria-checked', String(selectedFavorite));
     favSwitch.addEventListener('click', () => { selectedFavorite = !selectedFavorite; favSwitch.setAttribute('aria-checked', String(selectedFavorite)); });
@@ -6688,6 +6987,7 @@
       iconField.refresh();
       renderGoalField();
       followGroup();
+      paintMuscles();
     }
 
     document.querySelectorAll('#exKindList .option-row').forEach((b) => {
@@ -6735,6 +7035,7 @@
         ex.kind = selectedKind;
         ex.section = selectedSection;
         ex.group = selectedGroup;
+        if (ownMuscles && countsForMuscles({ kind: selectedKind })) ex.muscles = ownMuscles; else delete ex.muscles;
         ex.favorite = selectedFavorite;
         if (selectedKind === 'weight') ex.plateCalc = selectedPlates; else delete ex.plateCalc;
         if (selectedKind === 'weight') {
@@ -6755,6 +7056,7 @@
         if (iconField.value()) ex.icon = iconField.value(); else delete ex.icon;
       } else {
         const newEx = { id: genId('ex'), name, kind: selectedKind, section: selectedSection, group: selectedGroup, favorite: selectedFavorite, goal, goalMode: 'fixed', goalTier: null, archived: false, createdAt: new Date().toISOString() };
+        if (ownMuscles && countsForMuscles(newEx)) newEx.muscles = ownMuscles;
         if (selectedKind === 'weight') {
           newEx.plateCalc = selectedPlates;
           newEx.bodyRegion = selectedRegion;
@@ -8412,8 +8714,8 @@
     }
     // The exercise library: every movement for a ticked interest, on its usual equipment. Goals
     // chosen above are already in the list and are linked, not duplicated.
-    if (i.lifting) CATALOG.movements.filter((m) => m.kind !== 'cardio').forEach((m) => addCatalogMovement(m, m.defaultEquipment ? [m.defaultEquipment] : []));
-    if (i.running) CATALOG.movements.filter((m) => m.kind === 'cardio').forEach((m) => addCatalogMovement(m, []));
+    if (i.lifting) STARTER_MOVEMENTS.filter((m) => m.kind !== 'cardio').forEach((m) => addCatalogMovement(m, m.defaultEquipment ? [m.defaultEquipment] : []));
+    if (i.running) STARTER_MOVEMENTS.filter((m) => m.kind === 'cardio').forEach((m) => addCatalogMovement(m, []));
     state.settings.catalogPacksSeen = CATALOG.packs.filter((pk) => (pk.id === 'running' ? i.running : i.lifting)).map((pk) => pk.id);
     state.trackers = trackers;
     state.measurements = measurements;
@@ -8457,7 +8759,11 @@
   function switchTab(tab) {
     navOnSwitchTab(tab);
     const shown = document.querySelector('.view:not([hidden])');
-    document.querySelectorAll('.view').forEach((v) => { v.hidden = v.dataset.view !== tab; });
+    document.querySelectorAll('.view').forEach((v) => {
+      v.hidden = v.dataset.view !== tab;
+      if (slideFrom && !v.hidden) v.dataset.from = slideFrom; else delete v.dataset.from;
+    });
+    slideFrom = null;
     if (!shown || shown.dataset.view !== tab) markEntering(document.querySelector(`.view[data-view="${tab}"]`));
     document.querySelectorAll('.tab').forEach((t) => {
       if (t.dataset.tab === tab) t.setAttribute('aria-current', 'page');
@@ -8579,6 +8885,16 @@
     document.getElementById('historyFilter').addEventListener('change', renderHistory);
     document.getElementById('manageAreasBtn').addEventListener('click', openSettings);
     document.addEventListener('change', (ev) => { if (ev.target.matches && ev.target.matches('[data-range-menu]')) onRangeChange(ev.target.value); });
+    wireGestures();
+    // Tapping a muscle on the body map names it and its sets under the figure.
+    document.addEventListener('click', (ev) => {
+      const shape = ev.target.closest && ev.target.closest('.mm [data-muscle]');
+      if (!shape) return;
+      const wrap = shape.closest('.mm-wrap');
+      wrap.querySelectorAll('.is-picked').forEach((p) => p.classList.remove('is-picked'));
+      wrap.querySelectorAll(`[data-muscle="${shape.dataset.muscle}"]`).forEach((p) => p.classList.add('is-picked'));
+      wrap.querySelector('.mm-pick').textContent = shape.querySelector('title').textContent;
+    });
     document.getElementById('logLightSwitch').addEventListener('click', (ev) => ev.currentTarget.setAttribute('aria-checked', String(!isOn(ev.currentTarget))));
     document.getElementById('view-manage').addEventListener('click', (ev) => {
       if (ev.target.closest('button, a, input, select')) return;

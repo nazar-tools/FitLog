@@ -144,7 +144,11 @@
    .field, .empty-state, etc. all set display: flex/grid). Force it globally
    so `el.hidden = true` always actually hides the element. */
 [hidden] { display: none !important; }
-html, body { height: 100%; }
+/* Sideways swipes belong to the app (pages and sheets). The page pans up and down only, so
+   the browser never takes a sideways drag for its own swipe-to-go-back; rows that scroll
+   sideways still do, being their own scrollers, and the system's edge gesture still works. */
+html, body { height: 100%; overscroll-behavior-x: none; }
+html { touch-action: pan-y pinch-zoom; }
 body {
   margin: 0;
   background: var(--page);
@@ -912,6 +916,8 @@ input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; marg
   margin: 0 auto;
   max-height: 88vh;
   overflow-y: auto;
+  overscroll-behavior: contain;
+  touch-action: pan-y pinch-zoom;
   background: var(--surface-1);
   border-radius: 20px 20px 0 0;
   padding: calc(var(--sp-24) + var(--sp-8)) var(--gutter) calc(var(--sp-24) + env(safe-area-inset-bottom));
@@ -1133,10 +1139,16 @@ button.row-switch { width: 100%; border: 0; background: none; font: inherit; col
 .head-actions .icon-btn-sm { width: 32px; height: 32px; }
 .home-card-foot { display: flex; flex-direction: column; gap: var(--sp-12); padding: var(--sp-12) var(--sp-16) var(--sp-16); border-top: 1px solid var(--gridline); }
 .glance-row + .home-card-foot, .home-card-body + .home-card-foot { border-top: 1px solid var(--gridline); }
+/* A chip row between two rows of a card (Daily) is spaced and ruled like the rows around it. */
+.home-card-foot:not(:last-child) { padding-bottom: var(--sp-12); }
+.home-card-foot + .glance-row { border-top: 1px solid var(--gridline); }
 .home-card-body { padding: var(--sp-16); display: flex; flex-direction: column; gap: var(--sp-12); cursor: pointer; }
-.quick-chips { display: flex; flex-wrap: wrap; gap: var(--sp-8); }
+/* Quick chips keep to one line. When there are more than fit, the row scrolls sideways and
+   runs off the card's edge, which is the cue that there is more. */
+.quick-chips { display: flex; gap: var(--sp-6); margin: 0 calc(var(--card-pad) * -1); padding: 0 var(--card-pad); overflow-x: auto; scrollbar-width: none; }
+.quick-chips::-webkit-scrollbar { display: none; }
 .quick-chip {
-  display: inline-flex; align-items: center; gap: var(--sp-6); max-width: 100%;
+  display: inline-flex; flex: none; align-items: center; gap: var(--sp-4); max-width: 100%;
   padding: var(--sp-8) var(--sp-12); min-height: 36px; border-radius: 999px; border: 1px solid var(--border);
   background: var(--surface-2); color: var(--text-primary); font: inherit; font-size: var(--fs-sm); font-weight: 600; cursor: pointer;
 }
@@ -1201,7 +1213,7 @@ button.row-switch { width: 100%; border: 0; background: none; font: inherit; col
 .split-controls { display: flex; flex-direction: column; gap: var(--sp-8); }
 .split-controls .search { margin: 0; }
 .split-controls .f-scroll { margin: 0 calc(var(--gutter) * -1); }
-.split-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; margin: 0 calc(var(--gutter) * -1); padding: var(--sp-2) var(--gutter) var(--sp-12); -webkit-overflow-scrolling: touch; }
+.split-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; touch-action: pan-y pinch-zoom; margin: 0 calc(var(--gutter) * -1); padding: var(--sp-2) var(--gutter) var(--sp-12); -webkit-overflow-scrolling: touch; }
 .split-foot { flex: none; margin: 0 calc(var(--gutter) * -1); padding: var(--sp-12) var(--gutter) calc(var(--sp-12) + env(safe-area-inset-bottom)); background: var(--surface-1); border-top: 1px solid var(--gridline); }
 .cat-list { display: flex; flex-direction: column; }
 .cat-list > * + * { margin-top: var(--sp-8); }
@@ -1513,8 +1525,10 @@ button.row-switch { width: 100%; border: 0; background: none; font: inherit; col
 .plate-dialog {
   width: 100%; max-width: 560px; max-height: 92vh; margin: auto auto 0; padding: 0; border: 0;
   border-radius: var(--radius-lg) var(--radius-lg) 0 0; background: var(--surface-1); color: var(--text-primary);
-  box-shadow: var(--shadow-sheet); overflow-y: auto;
+  box-shadow: var(--shadow-sheet); overflow-y: auto; overscroll-behavior: contain; touch-action: pan-y pinch-zoom;
+  transition: transform 0.2s ease;
 }
+.plate-dialog.is-dragging { transition: none; }
 .plate-dialog::backdrop { background: var(--overlay); }
 .plate-sheet { display: flex; flex-direction: column; gap: var(--sp-16); padding: var(--sp-24) var(--gutter) calc(var(--sp-24) + env(safe-area-inset-bottom)); }
 .plate-total { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: var(--sp-6); }
@@ -1627,7 +1641,13 @@ button.row-switch { width: 100%; border: 0; background: none; font: inherit; col
 .mm-list dd { margin: 0; font-weight: 800; font-variant-numeric: tabular-nums; }
 .mm-list .sw { flex: none; width: 10px; height: 10px; border-radius: 3px; }
 .mm .mm-sil { fill: color-mix(in srgb, var(--text-primary) 9%, var(--surface-1)); }
-.mm .mm-m { stroke: var(--surface-1); stroke-width: 1.4; stroke-linejoin: round; }
+.mm .mm-m { stroke: var(--surface-1); stroke-width: 1.4; stroke-linejoin: round; cursor: pointer; }
+.mm .mm-m.is-picked { stroke: var(--text-primary); }
+.mm-pick { flex: 1 0 100%; margin: 0; font-size: var(--fs-sm); text-align: center; }
+.muscle-line { display: flex; align-items: baseline; justify-content: space-between; gap: var(--sp-12); font-size: var(--fs-md); }
+.muscle-editor { display: flex; flex-direction: column; gap: var(--sp-8); margin-top: var(--sp-12); }
+.muscle-editor .link-btn { align-self: flex-start; }
+.cat-more { margin: 0; padding: var(--sp-12) var(--sp-16); font-size: var(--fs-sm); }
 .mm .mm-m.l0, .sw.mm-l0 { fill: color-mix(in srgb, var(--text-primary) 19%, var(--surface-1)); background: color-mix(in srgb, var(--text-primary) 19%, var(--surface-1)); }
 .mm .mm-m.l1, .sw.mm-l1 { fill: color-mix(in srgb, var(--accent) 34%, var(--surface-2)); background: color-mix(in srgb, var(--accent) 34%, var(--surface-2)); }
 .mm .mm-m.l2, .sw.mm-l2 { fill: color-mix(in srgb, var(--accent) 66%, var(--surface-2)); background: color-mix(in srgb, var(--accent) 66%, var(--surface-2)); }
@@ -1644,6 +1664,11 @@ button.row-switch { width: 100%; border: 0; background: none; font: inherit; col
 @keyframes pop-in { 0% { transform: scale(.5); } 60% { transform: scale(1.2); } 100% { transform: none; } }
 @keyframes toast-in { from { opacity: 0; transform: translate(-50%, 8px); } to { opacity: 1; transform: translate(-50%, 0); } }
 .view.is-entering { animation: rise-in .2s ease-out; }
+/* A page or category reached by a swipe comes in from the side the finger pulled it from. */
+@keyframes slide-from-right { from { opacity: 0; transform: translateX(28px); } to { opacity: 1; transform: none; } }
+@keyframes slide-from-left { from { opacity: 0; transform: translateX(-28px); } to { opacity: 1; transform: none; } }
+.view.is-entering[data-from="right"] { animation-name: slide-from-right; }
+.view.is-entering[data-from="left"] { animation-name: slide-from-left; }
 .modal-sheet.is-entering { animation: sheet-in .24s cubic-bezier(.2, .8, .2, 1); }
 .modal-root:not([hidden]) > .modal-backdrop { animation: fade-in .2s ease-out; }
 .is-entering .meter-fill { transform-origin: left center; animation: grow-x .5s cubic-bezier(.2, .7, .2, 1) both; }

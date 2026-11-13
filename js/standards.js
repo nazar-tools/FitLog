@@ -256,6 +256,8 @@
   const WEEKLY_SETS_TARGET = 10;
   // A weighted set under this share of the day's heaviest set of the same exercise counts as a warm-up.
   const WARMUP_CUTOFF = 0.6;
+  // A set counts this much for a muscle that helps the lift without being its main mover.
+  const SECONDARY_SET_SHARE = 0.5;
 
   const REFERENCES = [
     { id: 'streak', title: 'Day streak', kind: 'assumption',
@@ -267,9 +269,10 @@
       alt: { label: 'Watson et al. 2015 (AASM/SRS), SLEEP', url: 'https://doi.org/10.5665/sleep.4716' },
       caveat: 'Needs vary by person. This is not a medical assessment.' },
     { id: 'weeklySets', title: 'Sets per muscle a week', kind: 'reference',
-      summary: 'Progress counts the working sets of each lift or bodyweight exercise in the Workout area toward that exercise\'s muscle group, Monday to Sunday. A weighted set under ' + (WARMUP_CUTOFF * 100) + '% of that day\'s heaviest set of the same exercise is treated as a warm-up and left out; that cut-off is the app\'s own. Cardio and Daily targets are left out. Doing ' + WEEKLY_SETS_TARGET + ' or more sets per muscle a week is linked with more muscle growth than doing fewer, so the chart marks ' + WEEKLY_SETS_TARGET + '. Each exercise counts toward the one group set in its form.',
+      summary: 'Progress counts the working sets of every lift and bodyweight exercise, Daily items included, Monday to Sunday. A set counts in full for the exercise\'s main muscles and as half a set for the muscles that help, so a bench press set is one set for the chest and half a set each for the shoulders and triceps. The chart rows add this up by body area; the body map shades each muscle on its own. A weighted set under ' + (WARMUP_CUTOFF * 100) + '% of that day\'s heaviest set of the same exercise is treated as a warm-up and left out; that cut-off is the app\'s own. Doing ' + WEEKLY_SETS_TARGET + ' or more sets per muscle a week is linked with more muscle growth than doing fewer, so the chart marks ' + WEEKLY_SETS_TARGET + '. Which muscles an exercise works comes from the built-in catalog, the app\'s own list checked against the public-domain free-exercise-db; you can change them in Edit exercise.',
       source: { label: 'Schoenfeld, Ogborn & Krieger 2017, J Sports Sci', url: 'https://doi.org/10.1080/02640414.2016.1210197' },
-      caveat: 'A guide for building muscle, not a rule. Effort and recovery matter as much as the count.' },
+      alt: { label: 'Pelland et al. 2024, SportRxiv preprint (counting helping muscles as half a set fits muscle growth best)', url: 'https://sportrxiv.org/index.php/server/preprint/view/460' },
+      caveat: 'A guide for building muscle, not a rule. Effort and recovery matter as much as the count. Cardio is left out.' },
     { id: 'oneRM', title: 'Estimated 1RM', kind: 'reference',
       summary: 'Epley formula: weight x (1 + reps / 30). Only sets of ' + ONE_RM_MAX_REPS + ' reps or fewer are used, because the estimate drifts high on longer sets. A set of one rep is a real lift and is labelled as such; everything else is calculated.',
       source: { label: 'Epley, B. (1985) Poundage Chart, Boyd Epley Workout', url: null },
@@ -323,7 +326,7 @@
     reviewed: '2026-10-20',
     LB_PER_KG,
     TIER_LABELS, STRENGTH, STRENGTH_KEYS, strengthThresholds, tierIndex, CATALOG_STANDARDS, standardKeyFor,
-    ONE_RM_MAX_REPS, estimateOneRM, BAR_WEIGHT, PLATES, WEEKLY_SETS_TARGET, WARMUP_CUTOFF,
+    ONE_RM_MAX_REPS, estimateOneRM, BAR_WEIGHT, PLATES, WEEKLY_SETS_TARGET, WARMUP_CUTOFF, SECONDARY_SET_SHARE,
     RUN_TIER_LABELS, RUN_5K, RUN_MIN_MI, RUN_MAX_MI, DEFAULT_RUN_AGE, fiveKEquivalentSec, runThresholds, runLevel,
     BMI_CATEGORIES, bmiFromKgCm, bmiCategory,
     SLEEP, sleepCategory,
