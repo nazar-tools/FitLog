@@ -63,10 +63,14 @@
     showRpe: true,
     // Next session tips on item pages, and the Sets per muscle card on Progress.
     showSuggestions: true, showMuscleSets: true,
-    // Daily tracks one Workout goal (a gym session or any daily reps) instead of each rep item.
+    // Daily tracks one Workout goal instead of each rep item: a lift or a run meets it, and so
+    // does one Daily rep item at its full target.
     dailyWorkoutGoal: true,
-    // Sets per muscle shows as the body map, bars or a table; the card's one link steps through them.
+    // Sets per muscle shows as the body map or bars, and as a table when chart tables are on;
+    // the card's one link steps through them.
     muscleView: 'map',
+    // A "Show table" link under every chart.
+    showChartTables: false,
     // Master "Track this" switches. trackWorkout is the Lifting switch; the Workout
     // area stays on while Lifting or Running & cardio is on, and Daily follows trackHabits (js/features.js).
     // An off area is hidden from Log, History and Home. Manage always shows it so it
@@ -584,14 +588,17 @@
     return tracker.direction === 'down' ? b > g : b < g;
   }
 
-  // Where progress is measured from: the saved start when it sits on the right side of the
-  // goal, else the first reading that does (the goal was changed after the start was saved).
+  // Where progress is measured from: the reading farthest from the goal on the side it is
+  // approached from, the saved start included. A bar measured from the day the goal was set
+  // sat empty on that day and stayed empty while the readings moved away. Null when nothing
+  // has been logged on that side.
   function trackerStart(tracker) {
-    if (trackerBaselineUsable(tracker)) return tracker.baseline;
     if (tracker.goal == null) return null;
-    const before = (v) => (tracker.direction === 'down' ? v > tracker.goal : v < tracker.goal);
-    const first = measurementsFor(tracker.id).slice().sort((a, b) => (a.date + a.id).localeCompare(b.date + b.id)).find((m) => before(m.value));
-    return first ? first.value : null;
+    const down = tracker.direction === 'down';
+    const side = measurementsFor(tracker.id).map((m) => m.value).filter((v) => v != null && (down ? v > tracker.goal : v < tracker.goal));
+    if (trackerBaselineUsable(tracker)) side.push(tracker.baseline);
+    if (!side.length) return null;
+    return down ? Math.max(...side) : Math.min(...side);
   }
 
   function trackerProgressPct(tracker, value) {
@@ -610,11 +617,12 @@
   }
 
   // Plain-language progress, e.g. "12 lb down, 8 lb remaining". Null without a
-  // usable baseline or once the goal is reached.
+  // starting point or once the goal is reached.
   function trackerProgressDeltaText(tracker, value) {
-    if (value == null || tracker.goal == null || !trackerBaselineUsable(tracker)) return null;
+    const start = trackerStart(tracker);
+    if (value == null || start == null) return null;
     const down = tracker.direction === 'down';
-    const moved = down ? tracker.baseline - value : value - tracker.baseline;
+    const moved = down ? start - value : value - start;
     const remaining = Math.abs(tracker.goal - value);
     if (remaining <= 0) return null;
     if (moved <= 0) return `${fmtTrackerValue(tracker, remaining)} to go`;
@@ -2098,8 +2106,9 @@
 
   // Today's progress toward one daily target, as display text plus a 0-100+
   // percentage (null when the exercise has no goal to measure against).
-  function todayProgressOf(ex) {
-    const today = entriesFor(ex.id).filter((e) => e.date === todayISO());
+  const todayProgressOf = (ex) => progressOn(ex, todayISO());
+  function progressOn(ex, date) {
+    const today = entriesFor(ex.id).filter((e) => e.date === date);
     if (ex.kind === 'habit') {
       const goal = ex.goal || 1;
       return { curText: String(today.length), goalText: `/ ${goal} today`, pct: (today.length / goal) * 100 };
@@ -2635,6 +2644,8 @@
   }
   // Charts showing their table instead, by card id. Kept while the app is open.
   const chartTables = new Set();
+  // Cards whose description (the i beside the title) is open.
+  const chartInfoOpen = new Set();
   const ALERT_ICON_SVG = '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>';
 
   // "All" starts at the week of the first thing ever logged.
@@ -2704,13 +2715,16 @@
   }
 
   // One chart card: { id, icon, name, sub, range, open, extra, plot, table, legend, note, goals, empty: { text, have, need } }.
-  // `range` puts the range menu in the card's title line; `swap: { label, run }` adds a link to a second view.
+  // `info` is a description kept behind the i beside the title. `range` puts the range menu in the card's title line; `swap: { label, run }` adds a link to a second view.
   function chartCardHtml(c) {
-    const asTable = !!c.table && chartTables.has(c.id);
+    const table = state.settings.showChartTables ? c.table : null;
+    const asTable = !!table && chartTables.has(c.id);
+    const info = c.empty ? '' : c.info;
+    const infoOpen = !!info && chartInfoOpen.has(c.id);
     const head = `
       <div class="cc-head">
         ${c.icon || ''}
-        <div class="cc-titles"><div class="cc-name${c.range ? ' has-range' : ''}"><span>${c.name}</span>${c.range ? rangeMenuHtml() : ''}</div>${c.sub ? `<div class="cc-sub">${c.sub}</div>` : ''}</div>
+        <div class="cc-titles"><div class="cc-name${c.range ? ' has-range' : ''}"><span class="cc-name-text">${c.name}${info ? `<button type="button" class="info-btn" data-cc-info aria-expanded="${infoOpen}" aria-label="How ${c.name} works">${uiIconInfo()}</button>` : ''}</span>${c.range ? rangeMenuHtml() : ''}</div>${c.sub ? `<div class="cc-sub">${c.sub}</div>` : ''}</div>
         ${c.open ? `<button type="button" class="link-btn cc-more" data-cc-open>Details${CHEVRON_RIGHT_SVG}</button>` : ''}
       </div>`;
     if (c.empty) {
@@ -2722,8 +2736,9 @@
     }
     return `<div class="card chart-card" data-chart-card="${c.id}">${head}${c.extra || ''}
       <div class="cc-plot"${asTable ? ' hidden' : ''}>${c.plot}</div>
-      ${c.table ? `<div class="cc-table"${asTable ? '' : ' hidden'}>${chartTableHtml(c.table)}</div>` : ''}
-      ${c.legend || c.table || c.swap ? `<div class="cc-foot"><div class="cc-key">${c.legend || ''}</div><div class="cc-links">${c.swap ? `<button type="button" class="link-btn" data-cc-swap>${c.swap.label}</button>` : ''}${c.table ? `<button type="button" class="link-btn" data-cc-table aria-pressed="${asTable}">${asTable ? 'Show chart' : 'Show table'}</button>` : ''}</div></div>` : ''}
+      ${table ? `<div class="cc-table"${asTable ? '' : ' hidden'}>${chartTableHtml(table)}</div>` : ''}
+      ${c.legend || table || c.swap ? `<div class="cc-foot"><div class="cc-key">${c.legend || ''}</div><div class="cc-links">${c.swap ? `<button type="button" class="link-btn" data-cc-swap>${c.swap.label}</button>` : ''}${table ? `<button type="button" class="link-btn" data-cc-table aria-pressed="${asTable}">${asTable ? 'Show chart' : 'Show table'}</button>` : ''}</div></div>` : ''}
+      ${info ? `<div class="note-box cc-info"${infoOpen ? '' : ' hidden'}>${uiIconInfo()}<span>${info}</span></div>` : ''}
       ${c.note ? `<p class="cc-note">${c.note}</p>` : ''}
       ${cardGoalsHtml(c.goals)}
     </div>`;
@@ -2735,6 +2750,13 @@
       if (!el) return;
       const more = el.querySelector('[data-cc-open]');
       if (more && c.open) more.addEventListener('click', c.open);
+      const info = el.querySelector('[data-cc-info]');
+      if (info) info.addEventListener('click', () => {
+        const open = !chartInfoOpen.has(c.id);
+        if (open) chartInfoOpen.add(c.id); else chartInfoOpen.delete(c.id);
+        info.setAttribute('aria-expanded', String(open));
+        el.querySelector('.cc-info').hidden = !open;
+      });
       el.querySelectorAll('[data-goal-i]').forEach((b) => b.addEventListener('click', () => c.goals[Number(b.dataset.goalI)].open()));
       const swapBtn = el.querySelector('[data-cc-swap]');
       if (swapBtn && c.swap) swapBtn.addEventListener('click', c.swap.run);
@@ -3057,8 +3079,9 @@
     }));
     const lastWeekHit = rows.filter((r) => (r.prev || 0) >= target).length;
     // One button steps through the three views, so there is never a second switch to disagree with it.
-    const view = ['map', 'bars', 'table'].includes(state.settings.muscleView) ? state.settings.muscleView : 'map';
-    const next = { map: 'bars', bars: 'table', table: 'map' }[view];
+    const views = state.settings.showChartTables ? ['map', 'bars', 'table'] : ['map', 'bars'];
+    const view = views.includes(state.settings.muscleView) ? state.settings.muscleView : 'map';
+    const next = views[(views.indexOf(view) + 1) % views.length];
     const swap = { label: `Show ${next}`, run: () => { state.settings.muscleView = next; if (save()) renderProgressCharts(); } };
     const asMap = view === 'map';
     const label = `Sets per muscle group this week so far: ${rows.map((r) => `${r.label} ${r.value}`).join(', ')}. ${target} sets a week is marked.`;
@@ -3079,7 +3102,7 @@
       legend: view === 'table' ? '' : asMap
         ? [keyItem('sw mm-l0', '0'), keyItem('sw mm-l1', `Under ${half}`), keyItem('sw mm-l2', `${half} or more`), keyItem('sw mm-l3', `${target} or more sets this week`)].join('')
         : [keyItem('sw now', 'This week, so far'), now > 0 ? keyItem('tk', 'Last week') : '', keyItem('ln goal', `${target} sets a week`)].join(''),
-      note: `A working set counts in full for an exercise's main muscles and as half a set for the muscles that help. Warm-up sets, under ${S.WARMUP_CUTOFF * 100}% of that day's heaviest set, are left out.`,
+      info: `Each working set counts once for its main muscles and half for the ones that help: a bench set is 1 for chest, ½ each for shoulders and triceps. Daily items count. Warm-ups under ${S.WARMUP_CUTOFF * 100}% of the day's top set don't. Aim for ${target}+ sets per muscle a week.`,
     };
   }
 
@@ -3122,11 +3145,11 @@
       return { name: exerciseLabel(ex), cells, done: past.filter((c) => c === 'done').length, part: past.filter((c) => c === 'part').length, miss: past.filter((c) => c === 'miss').length };
     });
     if (goal) {
-      const worked = workoutDates();
-      const first = [...worked].sort()[0];
-      const cells = dates.map((d) => (worked.has(d) ? 'done' : d === todayISO() ? 'open' : !first || d < first ? 'off' : 'miss'));
+      const shares = workoutShares();
+      const first = Object.keys(shares).sort()[0];
+      const cells = dates.map((d) => (shares[d] >= 1 ? 'done' : shares[d] > 0 ? 'part' : d === todayISO() ? 'open' : !first || d < first ? 'off' : 'miss'));
       const past = cells.slice(0, -1);
-      rows.unshift({ name: 'Workout', cells, done: past.filter((c) => c === 'done').length, part: 0, miss: past.filter((c) => c === 'miss').length });
+      rows.unshift({ name: 'Workout', cells, done: past.filter((c) => c === 'done').length, part: past.filter((c) => c === 'part').length, miss: past.filter((c) => c === 'miss').length });
     }
     const ranked = rows.slice().sort((a, b) => b.done - a.done);
     let sub;
@@ -3141,7 +3164,7 @@
       sub,
       plot: Charts.heatmap(rows, dates, tips, `Daily items over the last 14 days: ${rows.map((r) => `${r.name} done ${r.done} of 13`).join(', ')}`),
       legend: ['done', 'part', 'miss', 'off'].map((k) => keyItem(`sw hm-${k}`, DAILY_STATE_LABELS[k])).join(''),
-      note: `${goal ? 'A lift, a run or any daily reps counts as that day\'s workout. ' : ''}Weekly items only get a square on the days they are due. Today stays open until midnight.`,
+      info: `${goal ? 'Workout fills with a lift, a run, or one Daily item at its full target. Less than that shows as partly done. ' : ''}A weekly habit only gets a square on the days it is due.`,
       table: { head: ['Item', 'Done', 'Partly', 'Missed'], rows: rows.map((r) => [escapeHtml(r.name), String(r.done), String(r.part), String(r.miss)]) },
     };
   }
@@ -3340,7 +3363,7 @@
 
   function waterOverviewCard() {
     if (!domainTracked('water')) return null;
-    const base = { id: 'water', icon: itemIconHtml('droplets'), name: 'Water', open: () => openFoodCharts('water') };
+    const base = { id: 'water', icon: itemIconHtml('droplets'), name: 'Water' };
     const byDate = waterByDate();
     if (!Object.keys(byDate).length) return { ...base, empty: { text: 'Log water and your weeks show up here.' } };
     const goal = state.water.goalMl;
@@ -3362,40 +3385,6 @@
       })), { height: 110, goal: goal ? waterShown(goal) : null, goalText: goal ? String(Math.round(waterShown(goal))) : '', first: chartDay(weeks[0]), last: 'This week, so far', label: `Average water a day, by week, over ${rangeInfo()[3]}${goal ? `, against a goal of ${fmtVolume(goal)}` : ''}` }),
       legend: goal ? keyItem('ln goal', `Goal ${fmtVolume(goal)} a day`) : '',
       table: { head: ['Week of', `Average a day, ${unit}`, 'Days logged'], rows: rows.map((r, i) => [weekLabel(r.week), r.avg ? `${waterShown(r.avg)}${i === last ? ' so far' : ''}` : '-', String(r.logged)]) },
-    };
-  }
-
-  function waterDetailCard() {
-    const byDate = waterByDate();
-    const base = { id: 'water-days', name: 'Water' };
-    if (!Object.keys(byDate).length) return { ...base, empty: { text: 'Log water and your days show up here.' } };
-    const goal = state.water.goalMl;
-    const from = rangeFrom();
-    const unit = Units.volumeUnitLabel();
-    const full = daysBetween(from, addDays(todayISO(), -1)).filter((d) => byDate[d]);
-    const met = goal ? full.filter((d) => byDate[d] >= goal).length : 0;
-    const today = byDate[todayISO()] || 0;
-    let bars;
-    let first;
-    let table;
-    if (rangeIsDaily()) {
-      const dates = daysBetween(from, todayISO());
-      bars = dates.map((d) => ({ value: byDate[d] ? waterShown(byDate[d]) : 0, tone: d === todayISO() ? 'open' : '', tip: { title: dayTitle(d), rows: [[d === todayISO() ? 'so far' : '', byDate[d] ? fmtVolume(byDate[d]) : 'Nothing logged']] } }));
-      first = chartDay(dates[0]);
-      table = { head: ['Date', unit], rows: dates.filter((d) => byDate[d]).map((d) => [dayTitle(d), `${waterShown(byDate[d])}${d === todayISO() ? ' so far' : ''}`]) };
-    } else {
-      const weeks = rangeWeeks();
-      const avgs = weeks.map((w) => mean(full.filter((d) => weekOf(d) === w).map((d) => byDate[d])));
-      bars = weeks.map((w, i) => ({ value: avgs[i] ? waterShown(avgs[i]) : 0, tone: i === weeks.length - 1 ? 'now' : '', tip: { title: i === weeks.length - 1 ? 'This week, so far' : `Week of ${chartDay(w)}`, rows: [['a day on average', avgs[i] ? fmtVolume(avgs[i]) : '—']] } }));
-      first = chartDay(weeks[0]);
-      table = { head: ['Week of', `Average, ${unit}`], rows: weeks.map((w, i) => [weekLabel(w), avgs[i] ? String(waterShown(avgs[i])) : '—']) };
-    }
-    return {
-      ...base,
-      sub: full.length ? `Average ${fmtVolume(mean(full.map((d) => byDate[d])))} a day` : `${fmtVolume(today)} today so far`,
-      plot: Charts.columns(bars, { height: 116, goal: goal ? waterShown(goal) : null, goalText: goal ? String(Math.round(waterShown(goal))) : '', first, last: rangeIsDaily() ? 'Today' : 'This week', label: `Water ${rangeIsDaily() ? 'per day' : 'per day, weekly average'} over ${rangeInfo()[3]}${goal ? `, goal met ${met} of ${full.length} full days` : ''}` }),
-      legend: [goal ? keyItem('ln goal', `Goal ${fmtVolume(goal)}${full.length ? `, met on ${met} of ${plural(full.length, 'full day')}` : ''}`) : '', rangeIsDaily() && today ? keyItem('sw open', `Today, ${fmtVolume(today)} so far`) : ''].join(''),
-      table,
     };
   }
 
@@ -3511,35 +3500,25 @@
     };
   }
 
-  function openFoodCharts(focus) {
-    const food = domainTracked('food');
-    const water = domainTracked('water');
-    const title = food && water ? 'Food and water' : food ? 'Food' : 'Water';
-    openChartSheet(title, itemIconHtml(food ? 'apple' : 'droplets'), (body) => {
+  function openFoodCharts() {
+    openChartSheet('Food', itemIconHtml('apple'), (body) => {
       const cards = [];
       let html = '';
-      if (food) {
-        const cal = caloriesCard();
-        cal.range = true;
-        cards.push(cal);
-        html += chartCardHtml(cal);
-        const st = foodRangeStats();
-        if (!cal.empty && st.full.length) {
-          html += kpiRowHtml([
-            st.target ? { value: `${st.onTarget} of ${st.full.length}`, label: 'Days on target (within 10%)' } : null,
-            { value: fmtInt(st.avg), label: 'Average kcal, full days' },
-          ].filter(Boolean));
-        }
-        [proteinCard(), macroSplitCard()].filter(Boolean).forEach((c) => { cards.push(c); html += chartCardHtml(c); });
+      const cal = caloriesCard();
+      cal.range = true;
+      cards.push(cal);
+      html += chartCardHtml(cal);
+      const st = foodRangeStats();
+      if (!cal.empty && st.full.length) {
+        html += kpiRowHtml([
+          st.target ? { value: `${st.onTarget} of ${st.full.length}`, label: 'Days on target (within 10%)' } : null,
+          { value: fmtInt(st.avg), label: 'Average kcal, full days' },
+        ].filter(Boolean));
       }
-      if (water) { const w = waterDetailCard(); w.range = !food; cards.push(w); html += chartCardHtml(w); }
+      [proteinCard(), macroSplitCard()].filter(Boolean).forEach((c) => { cards.push(c); html += chartCardHtml(c); });
       body.innerHTML = `${html}<p class="cc-note">A day counts once it is over. Days with nothing logged are left out of averages rather than counted as zero.</p>`;
       wireChartCards(body, cards);
     });
-    if (focus === 'water' && food) {
-      const el = modalSheet().querySelector('[data-chart-card="water-days"]');
-      if (el) el.scrollIntoView({ block: 'start' });
-    }
   }
 
   /* Overview and sheets */
@@ -5282,27 +5261,39 @@
   /* The daily Workout goal
      Daily rep items (push-ups, crunches) are there for days without the gym, so with
      settings.dailyWorkoutGoal on they are not judged one by one: the day has one Workout
-     goal, met by any lift, run or daily reps logged that day. Habits stay daily checks. */
+     goal. A lift or a run meets it outright. A Daily rep item meets it only at its own full
+     target for the day; short of that the day is partly done. Habits stay daily checks. */
   const dailyRepItems = () => activeExercises().filter((e) => isDailyEx(e) && e.kind !== 'habit');
   function workoutGoalOn() {
     return state.settings.dailyWorkoutGoal && domainTracked('daily') && (state.settings.trackWorkout || cardioTracked() || dailyRepItems().length > 0);
   }
-  // Dates with any lift, run or daily reps logged.
-  function workoutDates() {
-    const out = new Set();
-    state.entries.forEach((e) => { const ex = exerciseById(e.exerciseId); if (ex && ex.kind !== 'habit') out.add(e.date); });
-    return out;
+  // How far each day got toward the Workout goal, 0 to 1, by date: 1 for a lift or a run, else
+  // the share of its target reached by the Daily rep item that got closest. An item with no
+  // target has nothing to fall short of, so logging it counts in full.
+  function workoutShares() {
+    const shares = {};
+    const seen = new Set();
+    state.entries.forEach((e) => {
+      const ex = exerciseById(e.exerciseId);
+      if (!ex || ex.kind === 'habit' || seen.has(e.date + ex.id)) return;
+      seen.add(e.date + ex.id);
+      const pct = isDailyEx(ex) ? progressOn(ex, e.date).pct : 100;
+      shares[e.date] = Math.max(shares[e.date] || 0, pct == null ? 1 : Math.min(1, pct / 100));
+    });
+    return shares;
   }
-  const workedOutToday = () => workoutDates().has(todayISO());
+  const workoutShareToday = () => workoutShares()[todayISO()] || 0;
   // Today's Daily list as { done, total }: habits due, plus the Workout goal or each rep item.
   function dailyTally() {
     const { habits, reps } = dailyItemsToday();
     const goal = workoutGoalOn();
-    const done = habits.filter(dailyComplete).length + (goal ? (workedOutToday() ? 1 : 0) : reps.filter(dailyComplete).length);
+    const done = habits.filter(dailyComplete).length + (goal ? (workoutShareToday() >= 1 ? 1 : 0) : reps.filter(dailyComplete).length);
     return { done, total: habits.length + (goal ? 1 : reps.length) };
   }
   function workoutGoalRowHtml() {
-    const done = workedOutToday();
+    const share = workoutShareToday();
+    const done = share >= 1;
+    const value = done ? `${CHECK_ICON_SVG}<span>Done</span>` : `<span class="muted-text">${share > 0 ? `${Math.floor(share * 100)}%` : 'Not yet today'}</span>`;
     return `
       <div class="glance-row${done ? ' is-complete' : ''}" data-workout-goal>
         <div class="glance-open">
@@ -5310,9 +5301,9 @@
           <div class="glance-main">
             <div class="glance-line">
               <span class="glance-name">Workout</span>
-              <span class="glance-value">${done ? `${CHECK_ICON_SVG}<span>Done</span>` : '<span class="muted-text">Not yet today</span>'}</span>
+              <span class="glance-value">${value}</span>
             </div>
-            <div class="meter meter-sm"><div class="meter-fill${done ? ' is-complete' : ''}" style="--fill:${done ? 100 : 0}%"></div></div>
+            <div class="meter meter-sm"><div class="meter-fill${done ? ' is-complete' : ''}" style="--fill:${round(share * 100, 1)}%"></div></div>
           </div>
         </div>
         <button type="button" class="btn btn-secondary btn-sm glance-btn" data-action="log-workout">Log</button>
@@ -5358,7 +5349,7 @@
     panel.innerHTML = `
       ${all.length ? '' : '<p class="muted-text">Nothing is due today. Add a habit or a daily rep target to get started.</p>'}
       ${section('Habits', habits, dailyHabitRowHtml)}
-      ${section('Daily reps', reps, (ex) => dailyTargetRowHtml(ex, 'Log'), goal ? (workedOutToday() ? 'Workout done today' : 'Any of these counts as today\'s workout') : '')}
+      ${section('Daily reps', reps, (ex) => dailyTargetRowHtml(ex, 'Log'), goal ? (workoutShareToday() >= 1 ? 'Workout done today' : 'One full target finishes today\'s workout') : '')}
       <button type="button" class="card daily-add" data-action="add-daily">${uiIcon('plus')}<span>Add to Daily</span></button>`;
     panel.querySelectorAll('.glance-row').forEach((row) => {
       const exId = row.getAttribute('data-exercise-id');
@@ -7709,6 +7700,7 @@
     showPaceLevelSwitch: 'showPaceLevel', showSleepInsightsSwitch: 'showSleepInsights',
     showMacroGuidanceSwitch: 'showMacroGuidance', showRpeSwitch: 'showRpe',
     showSuggestionsSwitch: 'showSuggestions', showMuscleSetsSwitch: 'showMuscleSets', dailyWorkoutGoalSwitch: 'dailyWorkoutGoal',
+    showChartTablesSwitch: 'showChartTables',
   };
   // Home-block switches write into settings.homeSections rather than a flat key.
   const homeSwitches = {
