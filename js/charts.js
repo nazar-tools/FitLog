@@ -386,6 +386,43 @@ const Charts = (() => {
   }
 
 
+  /* Horizontal bars, one row per category: the value as the bar, a tick for the previous
+     period, and an optional dashed reference line with a label at the top. Each row's value sits
+     in a right-hand column so it never reads as the tick's.
+     rows: [{ label, value, prev, text, tone }]; `text` replaces the printed value and `tone` the
+     bar's color class. opts: { max, mark, markText, valueW, label } */
+  function hbars(rows, opts = {}) {
+    const labelW = 84, rowH = 28, top = opts.mark ? 20 : 6;
+    const padR = opts.valueW || 34;
+    const H = top + rows.length * rowH;
+    const peak = Math.max(opts.mark || 0, ...rows.map((r) => Math.max(r.value, r.prev || 0)));
+    const max = opts.max || niceMax(peak * 1.1);
+    const iw = VBW - labelW - padR;
+    const x = (v) => labelW + (Math.min(v, max) / max) * iw;
+    let out = '';
+    rows.forEach((r, i) => {
+      const cy = top + i * rowH + rowH / 2;
+      const name = r.label.length > 12 ? `${r.label.slice(0, 11)}…` : r.label;
+      out += `<text class="ct name" x="0" y="${r1(cy + 4)}">${esc(name)}</text>`;
+      const end = x(r.value);
+      out += `<rect class="ctrack" x="${labelW}" y="${r1(cy - 6)}" width="${iw}" height="12" rx="4"></rect>`;
+      if (r.value > 0) {
+        const w = end - labelW;
+        const rr = Math.min(4, w / 2);
+        out += `<path class="cbar ${r.tone || 'now'}" d="M${labelW},${r1(cy - 6)} H${r1(end - rr)} A${rr},${rr} 0 0 1 ${r1(end)},${r1(cy - 6 + rr)} V${r1(cy + 6 - rr)} A${rr},${rr} 0 0 1 ${r1(end - rr)},${r1(cy + 6)} H${labelW} Z"></path>`;
+      }
+      if (r.prev != null) out += `<line class="ctick" x1="${r1(x(r.prev))}" x2="${r1(x(r.prev))}" y1="${r1(cy - 9)}" y2="${r1(cy + 9)}"></line>`;
+      out += `<text class="ct strong" x="${VBW}" y="${r1(cy + 4)}" text-anchor="end">${esc(r.text != null ? r.text : r.value)}</text>`;
+    });
+    if (opts.mark) {
+      const mx = r1(x(opts.mark));
+      out += `<line class="cgoal" x1="${mx}" x2="${mx}" y1="${top - 4}" y2="${H}"></line>`;
+      out += `<text class="ct strong" x="${mx}" y="${top - 8}" text-anchor="middle">${esc(opts.markText || opts.mark)}</text>`;
+    }
+    const svg = `<svg viewBox="0 0 ${VBW} ${H}" class="chart-svg" aria-hidden="true">${out}${hairline(top, H)}</svg>`;
+    return boxHtml(svg, [], opts.label || '');
+  }
+
   // Readouts for every .chart-box under `root`: press and hold (or hover) and slide, or
   // focus and use the arrow keys. A hairline snaps to the nearest point.
   function wire(root) {
@@ -434,5 +471,5 @@ const Charts = (() => {
     tipsById.forEach((_, id) => { if (!document.querySelector(`[data-chart="${id}"]`)) tipsById.delete(id); });
   }
 
-  return { lineChart, columns, line, heatmap, bodyMap, wire, setWidth, compact, niceMax };
+  return { lineChart, columns, line, heatmap, hbars, bodyMap, wire, setWidth, compact, niceMax };
 })();

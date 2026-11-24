@@ -3106,11 +3106,9 @@
     const striped = MUSCLES.map(([id]) => id).filter((id) => total(id) > 0 && !direct(id));
     const map = Charts.bodyMap(Object.fromEntries(MUSCLES.map(([id]) => [id, setsLevel(total(id))])),
       Object.fromEntries(MUSCLES.map(([id]) => [id, `${muscleSetsText(id, total(id), direct(id))}${suffix}`])), label, { striped });
-    const rows = MAP_GROUPS.map((g) => ({ label: EXERCISE_GROUP_LABELS[g], value: sets.areas[g] ? sets.areas[g][i] : 0 }));
     return {
       striped,
       html: `${mapWithPick(map)}${setsKey(striped)}`,
-      numbers: `<dl class="mm-nums">${rows.map((r) => `<div><dt><i class="sw mm-${setsLevel(r.value)}"></i>${r.label}</dt><dd>${fmtNum(r.value)}</dd></div>`).join('')}</dl>`,
     };
   }
   // The map with an empty line under it that names a muscle once it is tapped.
@@ -3155,15 +3153,16 @@
     if (!groups.length) return null;
     const target = S.WEEKLY_SETS_TARGET;
     const now = weeks.length - 1;
-    const rows = groups.map((g) => ({ label: EXERCISE_GROUP_LABELS[g], value: areas[g][now] }));
-    const view = state.settings.muscleView === 'numbers' ? 'numbers' : 'map';
-    const swap = { label: view === 'map' ? 'Show numbers' : 'Show map', run: () => { state.settings.muscleView = view === 'map' ? 'numbers' : 'map'; if (save()) renderProgressCharts(); } };
+    const rows = groups.map((g) => ({ label: EXERCISE_GROUP_LABELS[g], value: areas[g][now], prev: now > 0 ? areas[g][now - 1] : null }));
+    const view = state.settings.muscleView === 'map' ? 'map' : 'bars';
+    const swap = { label: view === 'map' ? 'Show bars' : 'Show map', run: () => { state.settings.muscleView = view === 'map' ? 'bars' : 'map'; if (save()) renderProgressCharts(); } };
     const label = `Sets per muscle group this week so far: ${rows.map((r) => `${r.label} ${fmtNum(r.value)}`).join(', ')}. ${target} sets a week is the aim.`;
     const map = muscleWeekMap({ muscles, direct, areas }, now, label, ' this week');
     return {
       id: 'muscles', icon: itemIconHtml('biceps'), name: 'Sets per muscle', swap, about: () => openMuscleSheet(weeks[now]),
       sub: 'This week so far',
-      plot: view === 'map' ? map.html : map.numbers,
+      plot: view === 'map' ? map.html : Charts.hbars(rows, { mark: target, markText: `${target} sets`, label }),
+      legend: view === 'map' ? '' : [keyItem('sw now', 'This week, so far'), now > 0 ? keyItem('tk', 'Last week') : '', keyItem('ln goal', `${target} sets a week`)].join(''),
     };
   }
 
@@ -3249,17 +3248,31 @@
       const g = groups.find((x) => x.when === when);
       if (g) g.names.push(name); else groups.push({ when, names: [name], level: recoveryLevel(rec[id].left) });
     });
-    const rows = groups.map((g) => ({ level: g.level, when: `${g.when[0].toUpperCase()}${g.when.slice(1)}`, names: g.names.join(', ') }));
-    if (busy.length < MUSCLES.length) rows.push({ level: 'l0', when: 'Ready', names: busy.length ? 'Everything else' : 'All muscles' });
-    const view = state.settings.recoveryView === 'list' ? 'list' : 'map';
-    const swap = { label: view === 'map' ? 'Show list' : 'Show map', run: () => { state.settings.recoveryView = view === 'map' ? 'list' : 'map'; if (save()) renderProgressCharts(); } };
+    const view = state.settings.recoveryView === 'map' ? 'map' : 'bars';
+    const swap = { label: view === 'map' ? 'Show bars' : 'Show map', run: () => { state.settings.recoveryView = view === 'map' ? 'bars' : 'map'; if (save()) renderProgressCharts(); } };
     return {
       id: 'recovery', icon: itemIconHtml('timer'), name: 'Recovery', swap, about: openRecoverySheet,
       sub: busy.length ? `${plural(busy.length, 'muscle')} still recovering` : 'Everything is ready',
       plot: view === 'map'
         ? `${mapWithPick(recoveryMap(rec, now, `Recovery now: ${busy.length ? busy.map(([, n]) => n).join(', ') + ' still recovering' : 'everything is ready'}`))}${recoveryKey()}`
-        : `<dl class="mm-rows">${rows.map((r) => `<div><dt><i class="sw mm-${r.level}"></i>${r.when}</dt><dd>${r.names}</dd></div>`).join('')}</dl>`,
+        : recoveryBars(rec, now),
+      legend: view === 'map' ? '' : `<span>Just trained${keyScale(['r3', 'r2', 'r1', 'l0'])}Ready</span>`,
     };
+  }
+
+  // One bar per area: the hours until its last muscle is ready, on a scale of the longest
+  // recovery (S.RECOVERY.maxDays). An area is ready when all of its muscles are.
+  function recoveryBars(rec, now) {
+    const span = S.RECOVERY.maxDays * 24;
+    const rows = MAP_GROUPS.map((g) => {
+      const slowest = MUSCLES.filter(([id, , area]) => area === g && rec[id] && rec[id].left > 0)
+        .reduce((a, [id]) => (!a || rec[id].end > a.end ? rec[id] : a), null);
+      if (!slowest) return { label: EXERCISE_GROUP_LABELS[g], value: 0, text: 'Ready' };
+      const when = readyWhen(slowest.end, now).replace(/ (morning|afternoon|evening)$/, '').replace(/^this$/, 'today');
+      return { label: EXERCISE_GROUP_LABELS[g], value: Math.min(span, (slowest.end - now.getTime()) / 3600000), text: `${when[0].toUpperCase()}${when.slice(1)}`, tone: recoveryLevel(slowest.left) };
+    });
+    const label = `Recovery by area: ${rows.map((r) => `${r.label} ${r.text.toLowerCase()}`).join(', ')}.`;
+    return Charts.hbars(rows, { max: span, valueW: 70, label });
   }
 
   function openRecoverySheet() {
