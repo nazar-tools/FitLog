@@ -379,47 +379,12 @@ const Charts = (() => {
         const stripe = striped.has(muscle);
         return `<path class="mm-m ${cls[muscle] || 'l0'}${stripe ? ' is-striped' : ''}" data-muscle="${muscle}"${stripe ? ` style="fill:url(#${stripeId})"` : ''} d="${d}"><title>${esc(titles[muscle] || '')}</title></path>`;
       }).join('')).join('');
-      return `<g transform="translate(${dx} 0)">${sil}${parts}<text class="ct" x="100" y="410" text-anchor="middle">${name}</text></g>`;
+      return `<g transform="translate(${dx} 0)" aria-label="${name}">${sil}${parts}</g>`;
     };
     const defs = striped.size ? `<defs><pattern id="${stripeId}" patternUnits="userSpaceOnUse" width="5" height="5" patternTransform="rotate(45)"><rect class="mm-stripe-bg" width="5" height="5"></rect><rect class="mm-stripe" width="2" height="5"></rect></pattern></defs>` : '';
-    return `<svg viewBox="0 0 410 416" class="chart-svg mm" role="img" aria-label="${esc(label)}">${defs}${figure(BODY_FRONT, 0, 'Front')}${figure(BODY_BACK, 210, 'Back')}</svg>`;
+    return `<svg viewBox="0 0 410 398" class="chart-svg mm" role="img" aria-label="${esc(label)}">${defs}${figure(BODY_FRONT, 0, 'Front')}${figure(BODY_BACK, 210, 'Back')}</svg>`;
   }
 
-
-  /* Horizontal bars, one row per category: this period's value as the bar, a tick for the
-     previous period, and an optional dashed reference line with a label at the top. Each
-     row's value sits in a right-hand column so it never reads as the tick's.
-     rows: [{ label, value, prev }]; opts: { mark, markText, label } */
-  function hbars(rows, opts = {}) {
-    const labelW = 84, padR = 34, rowH = 28, top = 20;
-    const H = top + rows.length * rowH;
-    const peak = Math.max(opts.mark || 0, ...rows.map((r) => Math.max(r.value, r.prev || 0)));
-    const max = niceMax(peak * 1.1);
-    const iw = VBW - labelW - padR;
-    const x = (v) => labelW + (Math.min(v, max) / max) * iw;
-    let out = '';
-    rows.forEach((r, i) => {
-      const cy = top + i * rowH + rowH / 2;
-      const name = r.label.length > 12 ? `${r.label.slice(0, 11)}…` : r.label;
-      out += `<text class="ct name" x="0" y="${r1(cy + 4)}">${esc(name)}</text>`;
-      const end = x(r.value);
-      out += `<rect class="ctrack" x="${labelW}" y="${r1(cy - 6)}" width="${iw}" height="12" rx="4"></rect>`;
-      if (r.value > 0) {
-        const w = end - labelW;
-        const rr = Math.min(4, w / 2);
-        out += `<path class="cbar now" d="M${labelW},${r1(cy - 6)} H${r1(end - rr)} A${rr},${rr} 0 0 1 ${r1(end)},${r1(cy - 6 + rr)} V${r1(cy + 6 - rr)} A${rr},${rr} 0 0 1 ${r1(end - rr)},${r1(cy + 6)} H${labelW} Z"></path>`;
-      }
-      if (r.prev != null) out += `<line class="ctick" x1="${r1(x(r.prev))}" x2="${r1(x(r.prev))}" y1="${r1(cy - 9)}" y2="${r1(cy + 9)}"></line>`;
-      out += `<text class="ct strong" x="${VBW}" y="${r1(cy + 4)}" text-anchor="end">${esc(r.value)}</text>`;
-    });
-    if (opts.mark) {
-      const mx = r1(x(opts.mark));
-      out += `<line class="cgoal" x1="${mx}" x2="${mx}" y1="${top - 4}" y2="${H}"></line>`;
-      out += `<text class="ct strong" x="${mx}" y="${top - 8}" text-anchor="middle">${esc(opts.markText || opts.mark)}</text>`;
-    }
-    const svg = `<svg viewBox="0 0 ${VBW} ${H}" class="chart-svg" aria-hidden="true">${out}${hairline(top, H)}</svg>`;
-    return boxHtml(svg, [], opts.label || '');
-  }
 
   // Readouts for every .chart-box under `root`: press and hold (or hover) and slide, or
   // focus and use the arrow keys. A hairline snaps to the nearest point.
@@ -469,5 +434,5 @@ const Charts = (() => {
     tipsById.forEach((_, id) => { if (!document.querySelector(`[data-chart="${id}"]`)) tipsById.delete(id); });
   }
 
-  return { lineChart, columns, line, heatmap, hbars, bodyMap, wire, setWidth, compact, niceMax };
+  return { lineChart, columns, line, heatmap, bodyMap, wire, setWidth, compact, niceMax };
 })();

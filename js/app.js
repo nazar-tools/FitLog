@@ -69,6 +69,12 @@
     // Sets per muscle shows as the body map or bars, and as a table when chart tables are on;
     // the card's one link steps through them.
     muscleView: 'map',
+    recoveryView: 'map',
+    // Home reminders: the day of the last exported backup, the day to ask again after
+    // "Not now", and whether the Add to Home Screen hint has been answered.
+    lastBackupAt: null,
+    backupNudgeAfter: null,
+    installHintDone: false,
     // A "Show table" link under every chart.
     showChartTables: false,
     // The Recovery card on Progress (see S.REFERENCES 'recovery').
@@ -1467,6 +1473,9 @@
   // With RPE switched off in Settings the field stays in the form, hidden, so editing an
   // entry never drops a rating logged earlier.
   const rpeHidden = () => (state.settings.showRpe ? '' : ' hidden');
+  // Explains RPE under the sets until the first rating is logged anywhere.
+  const rpeHintShown = (ex) => state.settings.showRpe && (ex.kind === 'weight' || ex.kind === 'reps') && !isTimed(ex)
+    && !state.entries.some((e) => (e.sets || []).some((st) => st.rpe != null));
   function setRowHtml(kind, idx, set, plates) {
     set = set || {};
     const timed = kind === 'timed';
@@ -1716,6 +1725,7 @@
       <div class="sets-wrap" data-kind="${exercise.kind}">
         <div class="sets-label"><span class="field-label">Sets</span><button type="button" class="btn-ghost" data-action="add-set">+ Add set</button></div>
         <div class="sets-container">${sets.map((s, i) => setRowHtml(setRowKind(exercise), i, s, plates)).join('')}</div>
+        ${rpeHintShown(exercise) ? '<p class="field-hint muted-text rpe-hint">RPE is how hard the set felt, from 1 to 10: 10 means no reps left. Optional.</p>' : ''}
         ${exercise.kind === 'weight' ? '<div class="best-note" aria-live="polite"></div>' : ''}
       </div>`;
     if (plates) container.querySelector('.sets-wrap').addEventListener('click', (ev) => {
@@ -1891,6 +1901,7 @@
     }
     const streak = computeStreak();
     const card = document.getElementById('streakCard');
+    card.hidden = streak === 0 && !week.some((d) => d.on);
     card.classList.toggle('is-hot', streak > 0);
     card.innerHTML = `
       <span class="streak-top">
@@ -2195,6 +2206,54 @@
     document.getElementById('setupReviewBanner').hidden = !shouldOfferSetupReview();
   }
 
+  /* Home reminders
+     All data lives in this browser, so Home asks, one thing at a time, for the two habits that
+     keep it safe: installing the app (Safari clears a website's storage after 7 days without a
+     visit, but not an app on the Home Screen) and exporting a backup every two weeks. */
+  const BACKUP_EVERY_DAYS = 14;
+  let installPrompt = null;
+  let homeNotice = null;
+  const isInstalled = () => window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+  const isAppleMobile = () => /iPhone|iPad|iPod/.test(navigator.userAgent);
+  function nextHomeNotice() {
+    const st = state.settings;
+    const today = todayISO();
+    if (!st.installHintDone && !isInstalled() && (installPrompt || isAppleMobile())) {
+      const done = () => { st.installHintDone = true; if (save()) renderHome(); };
+      return installPrompt
+        ? { title: 'Install Fit Log', text: "It opens like an app from your Home Screen, and the browser keeps its data the way it keeps an app's.", action: 'Install',
+          run: () => { installPrompt.prompt(); installPrompt = null; done(); }, later: done }
+        : { title: 'Add Fit Log to your Home Screen', text: "Tap Share, then Add to Home Screen. Safari clears a website's data after a week without a visit, but not an app's.", action: 'Got it',
+          run: done, later: done };
+    }
+    const logged = state.entries.length + state.measurements.length + state.waterEntries.length + state.food.entries.length;
+    const due = !st.lastBackupAt || dayGap(st.lastBackupAt, today) >= BACKUP_EVERY_DAYS;
+    if (logged >= 10 && due && (!st.backupNudgeAfter || today >= st.backupNudgeAfter)) {
+      return {
+        title: 'Back up your data',
+        text: `${st.lastBackupAt ? `Your last backup was ${dayGap(st.lastBackupAt, today)} days ago.` : 'There is no backup yet.'} Everything lives only on this phone, so a backup file is the one copy you can restore from.`,
+        action: 'Export backup',
+        run: exportBackup,
+        later: () => { st.backupNudgeAfter = addDays(today, 7); if (save()) renderHome(); },
+      };
+    }
+    return null;
+  }
+  function renderHomeNotice() {
+    homeNotice = document.getElementById('setupReviewBanner').hidden ? nextHomeNotice() : null;
+    document.getElementById('homeNotice').hidden = !homeNotice;
+    if (!homeNotice) return;
+    document.getElementById('homeNoticeTitle').textContent = homeNotice.title;
+    document.getElementById('homeNoticeText').textContent = homeNotice.text;
+    document.getElementById('homeNoticeAction').textContent = homeNotice.action;
+  }
+  // Asks the browser not to clear this site's storage when space runs low. Chrome decides on its
+  // own and shows nothing; where it is not supported this does nothing.
+  function keepStorage() {
+    if (!navigator.storage || !navigator.storage.persist) return;
+    navigator.storage.persisted().then((kept) => { if (!kept) navigator.storage.persist(); }).catch(() => {});
+  }
+
   // "Not now": marks the prompt seen without changing any setting.
   function dismissSetupReviewPrompt() {
     state.settings.setupReviewPromptSeen = true;
@@ -2311,12 +2370,15 @@
   }
 
   function renderTraining() {
-    const show = homeSectionOn('training') && (state.settings.trackWorkout || cardioTracked());
+    const lifts = trainingExercises();
+    // Until the first lift or run, Daily's Workout row already offers Log, and an empty card here
+    // would only say the same thing again.
+    const firstTime = workoutGoalOn() && homeSectionOn('checklist') && !lifts.some((e) => entriesFor(e.id).length);
+    const show = homeSectionOn('training') && (state.settings.trackWorkout || cardioTracked()) && !firstTime;
     document.getElementById('trainingHead').hidden = !show;
     const wrap = document.getElementById('trainingWrap');
     wrap.hidden = !show;
     if (!show) return;
-    const lifts = trainingExercises();
     const today = todayISO();
     const doneToday = lifts
       .filter((e) => entriesFor(e.id).some((en) => en.date === today))
@@ -2592,6 +2654,7 @@
 
   function renderHome() {
     renderSetupReviewBanner();
+    renderHomeNotice();
     renderSummary();
     renderChecklist(activeExercises());
     renderTraining();
@@ -3046,15 +3109,15 @@
     const rows = MAP_GROUPS.map((g) => ({ label: EXERCISE_GROUP_LABELS[g], value: sets.areas[g] ? sets.areas[g][i] : 0 }));
     return {
       striped,
-      html: `<div class="mm-wrap">${map}
-        <dl class="mm-list">${rows.map((r) => `<div><dt><i class="sw mm-${setsLevel(r.value)}"></i>${r.label}</dt><dd>${fmtNum(r.value)}</dd></div>`).join('')}</dl>
-        <p class="mm-pick muted-text" aria-live="polite">Tap a muscle to see its sets.</p></div>`,
+      html: `${mapWithPick(map)}${setsKey(striped)}`,
+      numbers: `<dl class="mm-nums">${rows.map((r) => `<div><dt><i class="sw mm-${setsLevel(r.value)}"></i>${r.label}</dt><dd>${fmtNum(r.value)}</dd></div>`).join('')}</dl>`,
     };
   }
-  function setsLegend(striped) {
-    const t = S.WEEKLY_SETS_TARGET;
-    return [keyItem('sw mm-l0', '0'), keyItem('sw mm-l1', `Under ${t / 2}`), keyItem('sw mm-l2', `${t / 2} or more`), keyItem('sw mm-l3', `${t} or more`),
-      striped.length ? keyItem('sw mm-striped', 'Helped only') : ''].join('');
+  // The map with an empty line under it that names a muscle once it is tapped.
+  const mapWithPick = (map) => `<div class="mm-wrap">${map}<p class="mm-pick" aria-live="polite" hidden></p></div>`;
+  const keyScale = (levels) => `<span class="mm-scale">${levels.map((l) => `<i class="sw mm-${l}"></i>`).join('')}</span>`;
+  function setsKey(striped) {
+    return `<div class="mm-key"><span>0${keyScale(['l0', 'l1', 'l2', 'l3'])}${S.WEEKLY_SETS_TARGET}+ sets</span>${striped.length ? '<span><i class="sw mm-striped"></i>Helper only</span>' : ''}</div>`;
   }
   // One row per muscle in area order, as in the other Details sheets.
   function muscleListHtml(rowFor) {
@@ -3075,7 +3138,7 @@
       const t = S.WEEKLY_SETS_TARGET;
       body.innerHTML = `${aboutNoteHtml(`Each working set counts once for its main muscles and half for the ones that help: a bench set is 1 for chest, ½ each for front delts and triceps. Daily items count; warm-ups under ${S.WARMUP_CUTOFF * 100}% of the day's top set do not. Striped means helper sets only. Aim for ${t} or more sets a week.`)}
         <div class="card chart-card"><div class="cc-head"><div class="cc-titles"><div class="cc-name">${thisWeek ? 'This week so far' : `Week of ${chartDay(week)}`}</div></div></div>
-          <div class="cc-plot">${map.html}</div><div class="cc-foot"><div class="cc-key">${setsLegend(map.striped)}</div></div></div>
+          <div class="cc-plot">${map.html}</div></div>
         ${muscleListHtml((id) => {
           const total = sets.muscles[id] ? sets.muscles[id][0] : 0;
           const direct = sets.direct[id] ? sets.direct[id][0] : 0;
@@ -3092,28 +3155,15 @@
     if (!groups.length) return null;
     const target = S.WEEKLY_SETS_TARGET;
     const now = weeks.length - 1;
-    const firstWeek = weeks.findIndex((_, i) => groups.some((g) => areas[g][i] > 0));
-    const done = (g) => areas[g].slice(firstWeek, now);
-    const rows = groups.map((g) => ({
-      group: g, label: EXERCISE_GROUP_LABELS[g], value: areas[g][now], prev: now > 0 ? areas[g][now - 1] : null,
-      avg: done(g).length ? mean(done(g)) : null,
-    }));
-    const lastWeekHit = rows.filter((r) => (r.prev || 0) >= target).length;
-    // One button steps through the views, so there is never a second switch to disagree with it.
-    const views = state.settings.showChartTables ? ['map', 'bars', 'table'] : ['map', 'bars'];
-    const view = views.includes(state.settings.muscleView) ? state.settings.muscleView : 'map';
-    const next = views[(views.indexOf(view) + 1) % views.length];
-    const swap = { label: `Show ${next}`, run: () => { state.settings.muscleView = next; if (save()) renderProgressCharts(); } };
-    const label = `Sets per muscle group this week so far: ${rows.map((r) => `${r.label} ${fmtNum(r.value)}`).join(', ')}. ${target} sets a week is marked.`;
+    const rows = groups.map((g) => ({ label: EXERCISE_GROUP_LABELS[g], value: areas[g][now] }));
+    const view = state.settings.muscleView === 'numbers' ? 'numbers' : 'map';
+    const swap = { label: view === 'map' ? 'Show numbers' : 'Show map', run: () => { state.settings.muscleView = view === 'map' ? 'numbers' : 'map'; if (save()) renderProgressCharts(); } };
+    const label = `Sets per muscle group this week so far: ${rows.map((r) => `${r.label} ${fmtNum(r.value)}`).join(', ')}. ${target} sets a week is the aim.`;
     const map = muscleWeekMap({ muscles, direct, areas }, now, label, ' this week');
     return {
       id: 'muscles', icon: itemIconHtml('biceps'), name: 'Sets per muscle', swap, about: () => openMuscleSheet(weeks[now]),
-      sub: now > 0 ? `Last week ${lastWeekHit} of ${plural(rows.length, 'muscle group')} reached ${target} sets` : 'This week so far',
-      plot: view === 'map' ? map.html
-        : view === 'bars' ? Charts.hbars(rows, { mark: target, markText: `${target} sets`, label })
-        : chartTableHtml({ head: ['Muscle', 'This week', 'Last week', `Avg, ${rangeInfo()[1]}`], rows: rows.map((r) => [r.label, `${fmtNum(r.value)} so far`, r.prev != null ? fmtNum(r.prev) : '-', r.avg != null ? String(round(r.avg, 1)) : '-']) }),
-      legend: view === 'table' ? '' : view === 'map' ? setsLegend(map.striped)
-        : [keyItem('sw now', 'This week, so far'), now > 0 ? keyItem('tk', 'Last week') : '', keyItem('ln goal', `${target} sets a week`)].join(''),
+      sub: 'This week so far',
+      plot: view === 'map' ? map.html : map.numbers,
     };
   }
 
@@ -3184,7 +3234,7 @@
     }));
     return Charts.bodyMap(Object.fromEntries(MUSCLES.map(([id]) => [id, recoveryLevel(rec[id] ? rec[id].left : 0)])), titles, label);
   }
-  const recoveryLegend = () => [keyItem('sw mm-r3', 'Just trained'), keyItem('sw mm-r2', 'Recovering'), keyItem('sw mm-r1', 'Almost ready'), keyItem('sw mm-l0', 'Ready')].join('');
+  const recoveryKey = () => `<div class="mm-key"><span>Just trained${keyScale(['r3', 'r2', 'r1', 'l0'])}Ready</span></div>`;
 
   function recoveryCard() {
     if (!domainTracked('workout') || !state.settings.showRecovery) return null;
@@ -3199,18 +3249,16 @@
       const g = groups.find((x) => x.when === when);
       if (g) g.names.push(name); else groups.push({ when, names: [name], level: recoveryLevel(rec[id].left) });
     });
-    const shown = groups.slice(-3);
-    const rows = shown.map((g) => `<div><dt><i class="sw mm-${g.level}"></i><span>${g.names.join(', ')}</span></dt><dd>${g.when[0].toUpperCase()}${g.when.slice(1)}</dd></div>`);
-    const readyCount = MUSCLES.length - busy.length;
-    if (groups.length > 3) rows.unshift(`<div><dt><i class="sw mm-r1"></i><span>${plural(groups.slice(0, -3).reduce((t, g) => t + g.names.length, 0), 'more muscle')}</span></dt><dd>Sooner</dd></div>`);
-    if (readyCount) rows.push(`<div><dt><i class="sw mm-l0"></i><span>${busy.length ? 'Everything else' : 'All muscles'}</span></dt><dd>Ready</dd></div>`);
+    const rows = groups.map((g) => ({ level: g.level, when: `${g.when[0].toUpperCase()}${g.when.slice(1)}`, names: g.names.join(', ') }));
+    if (busy.length < MUSCLES.length) rows.push({ level: 'l0', when: 'Ready', names: busy.length ? 'Everything else' : 'All muscles' });
+    const view = state.settings.recoveryView === 'list' ? 'list' : 'map';
+    const swap = { label: view === 'map' ? 'Show list' : 'Show map', run: () => { state.settings.recoveryView = view === 'map' ? 'list' : 'map'; if (save()) renderProgressCharts(); } };
     return {
-      id: 'recovery', icon: itemIconHtml('timer'), name: 'Recovery', about: openRecoverySheet,
+      id: 'recovery', icon: itemIconHtml('timer'), name: 'Recovery', swap, about: openRecoverySheet,
       sub: busy.length ? `${plural(busy.length, 'muscle')} still recovering` : 'Everything is ready',
-      plot: `<div class="mm-wrap mm-wrap-stack">${recoveryMap(rec, now, `Recovery now: ${busy.length ? busy.map(([, n]) => n).join(', ') + ' still recovering' : 'everything is ready'}`)}
-        <dl class="mm-list mm-list-wide">${rows.join('')}</dl>
-        <p class="mm-pick muted-text" aria-live="polite">Tap a muscle to see when it is ready.</p></div>`,
-      legend: recoveryLegend(),
+      plot: view === 'map'
+        ? `${mapWithPick(recoveryMap(rec, now, `Recovery now: ${busy.length ? busy.map(([, n]) => n).join(', ') + ' still recovering' : 'everything is ready'}`))}${recoveryKey()}`
+        : `<dl class="mm-rows">${rows.map((r) => `<div><dt><i class="sw mm-${r.level}"></i>${r.when}</dt><dd>${r.names}</dd></div>`).join('')}</dl>`,
     };
   }
 
@@ -3228,8 +3276,7 @@
       });
       body.innerHTML = `${aboutNoteHtml(`A muscle needs 1 day after 1 to ${R.fewSets} sets or a Light session, 2 days after ${R.fewSets + 1} to ${R.manySets - 1}, and 3 after ${R.manySets} or more. Helper sets count half; a set at RPE ${R.failureRpe} or 10 adds a day. The same rule for every muscle. An estimate, not a measurement.`)}
         <div class="card chart-card"><div class="cc-head"><div class="cc-titles"><div class="cc-name">Right now</div></div></div>
-          <div class="cc-plot"><div class="mm-wrap mm-wrap-stack">${recoveryMap(rec, now, 'Recovery now')}<p class="mm-pick muted-text" aria-live="polite">Tap a muscle to see when it is ready.</p></div></div>
-          <div class="cc-foot"><div class="cc-key">${recoveryLegend()}</div></div></div>
+          <div class="cc-plot">${mapWithPick(recoveryMap(rec, now, 'Recovery now'))}${recoveryKey()}</div></div>
         ${muscleListHtml((id) => {
           const r = rec[id];
           if (r && r.left > 0) return { value: `Ready ${readyWhen(r.end, now)}`, sub: `${fmtSets(round(r.sets, 1))} ${chartDay(r.date) === chartDay(todayISO()) ? 'today' : `on ${new Date(`${r.date}T00:00:00`).toLocaleDateString(undefined, { weekday: 'short' })}`}` };
@@ -4645,6 +4692,8 @@
   // seg: 'mine' (starred, then recent) | 'fav' | 'recent' | 'all'.
   const logEx = { seg: 'mine', group: 'all', query: '', showAll: false, pickerOpen: false };
   const LOG_LIST_LIMIT = 6;
+  // Until something is starred or logged, these lead the list, after any exercise with a goal.
+  const STARTER_LIFTS = ['cat_mv_bench_press', 'cat_mv_squat', 'cat_mv_deadlift', 'cat_mv_ohp', 'cat_mv_lat_pulldown', 'cat_mv_pullups', 'cat_mv_running'];
   const PICKER_SHOWS = [['mine', 'Starred and recent'], ['fav', 'Favorites'], ['recent', 'Recent'], ['all', 'All']];
 
   function toggleExerciseFavorite(id) {
@@ -4666,7 +4715,12 @@
     const searching = !!q;
     const seg = searching ? 'all' : logEx.seg;
     const mine = favs.concat(recent.filter((e) => !isFavoriteExercise(e)));
-    let base = seg === 'mine' ? (mine.length ? mine : active.slice().sort(byName)) : seg === 'fav' ? favs : seg === 'recent' ? recent : active.slice().sort(byName);
+    const starterRank = (e) => (e.goal != null || e.distanceGoal != null || e.paceGoal != null ? -1
+      : STARTER_LIFTS.includes(e.catalogId) ? STARTER_LIFTS.indexOf(e.catalogId) : STARTER_LIFTS.length);
+    const starter = () => active.slice().sort((a, b) => starterRank(a) - starterRank(b) || byName(a, b));
+    // Before anything is logged, a short list (a goal or two from setup) is topped up from the starters.
+    const mineOrStarter = recent.length ? mine : mine.concat(starter().filter((e) => !mine.includes(e)));
+    let base = seg === 'mine' ? mineOrStarter : seg === 'fav' ? favs : seg === 'recent' ? recent : active.slice().sort(byName);
     // Search looks through every exercise, Daily rep items included, and lists the ones with
     // entries first, so a logged item is never hidden behind an unused one of a similar name.
     if (searching) {
@@ -6458,7 +6512,7 @@
     let muscles = '';
     if (state.settings.showMuscleSets) {
       const map = muscleWeekMap(muscleSetsByWeek([week]), 0, `Sets per muscle, week of ${chartDay(week)}`);
-      muscles = `<div class="week-muscles">${map.html}<div class="cc-foot"><div class="cc-key">${setsLegend(map.striped)}</div>
+      muscles = `<div class="week-muscles">${map.html}<div class="cc-foot">
         <div class="cc-links"><button type="button" class="link-btn" data-week-muscles>Each muscle${CHEVRON_RIGHT_SVG}</button></div></div></div>`;
     }
     return `${kpiRowHtml(tiles)}${best ? `<p class="week-fact muted-text">Best set: ${escapeHtml(best.text)}</p>` : ''}${muscles}`;
@@ -8071,6 +8125,9 @@
 
   function exportBackup() {
     downloadJson(`fit-log-backup-${todayISO()}.json`, JSON.stringify(state, null, 2));
+    state.settings.lastBackupAt = todayISO();
+    state.settings.backupNudgeAfter = null;
+    if (save()) renderHome();
     toast('Backup downloaded');
   }
 
@@ -8151,7 +8208,7 @@
     habits: {}, habitsAll: false, customHabits: [], habitForm: null,
     // Lifting goals ticked on the Lifting step: id -> { on, mode: 'fixed'|'standard', tier, text }.
     // `text` is what the goal box holds once edited; null means the typical goal, untouched.
-    liftGoals: {}, customGoals: [], goalForm: null,
+    liftGoals: {}, customGoals: [], goalForm: null, experience: 'new',
     // Cardio goals ticked on the Cardio step: id -> { on, type: 'distance'|'pace'|'both', dist, min, sec }
     // (each null until edited).
     cardioGoals: {},
@@ -8172,7 +8229,7 @@
     return seq;
   }
   const SETUP_STEP_LEADS = {
-    interests: 'Pick only what you will use. Anything left off stays out of sight, and you can turn it on later in Settings.',
+    interests: 'Free, with no account, and everything stays on this phone. Pick only what you will use; anything left off stays out of sight until you turn it on in Settings.',
     about: 'All optional. Each answer powers one thing, and every one can be skipped.',
     lifting: 'Every lift is added to your library for you. Tick the ones you want a goal for; each goal can be changed later.',
     cardio: 'Every cardio activity is added to your library for you. Tick the ones you want a distance or pace goal for.',
@@ -8462,17 +8519,24 @@
   /* Goal pickers: Lifting, Cardio
      Typical goals offered at setup. Names, icons and kinds come from the catalog movement (`mv`).
      Weights are pounds, rep goals are a count for the day, and the plank is seconds held. */
+  // Each goal has a typical value for someone new, with some experience, and experienced; the
+  // step's Experience switch picks which one shows.
+  const LIFT_LEVELS = [['new', 'New'], ['some', 'Some'], ['experienced', 'Experienced']];
+  const liftLevel = () => Math.max(0, LIFT_LEVELS.findIndex(([k]) => k === setupAnswers.experience));
   const SETUP_LIFTS = [
-    { id: 'bench', mv: 'cat_mv_bench_press', lift: 'bench', typical: 225, note: 'two plates a side' },
-    { id: 'squat', mv: 'cat_mv_squat', lift: 'squat', typical: 315, note: 'three plates a side' },
-    { id: 'deadlift', mv: 'cat_mv_deadlift', lift: 'deadlift', typical: 405, note: 'four plates a side' },
-    { id: 'ohp', mv: 'cat_mv_ohp', lift: 'shoulder-press', typical: 135, note: 'one plate a side' },
-    { id: 'pushups', mv: 'cat_mv_pushups', typical: 50, note: 'in a day' },
-    { id: 'pullups', mv: 'cat_mv_pullups', typical: 15, note: 'in a day' },
-    { id: 'bwsquats', mv: 'cat_mv_bw_squats', typical: 50, note: 'in a day' },
-    { id: 'dips', mv: 'cat_mv_dips', typical: 20, note: 'in a day' },
-    { id: 'plank', mv: 'cat_mv_plank', typical: 120, note: 'held at once' },
-  ];
+    { id: 'bench', mv: 'cat_mv_bench_press', lift: 'bench', levels: [[95, 'the bar and a 25 a side'], [135, 'one plate a side'], [225, 'two plates a side']] },
+    { id: 'squat', mv: 'cat_mv_squat', lift: 'squat', levels: [[135, 'one plate a side'], [185, 'a plate and a 25 a side'], [315, 'three plates a side']] },
+    { id: 'deadlift', mv: 'cat_mv_deadlift', lift: 'deadlift', levels: [[135, 'one plate a side'], [225, 'two plates a side'], [405, 'four plates a side']] },
+    { id: 'ohp', mv: 'cat_mv_ohp', lift: 'shoulder-press', levels: [[65, 'the bar and a 10 a side'], [95, 'the bar and a 25 a side'], [135, 'one plate a side']] },
+    { id: 'pushups', mv: 'cat_mv_pushups', levels: [[20, 'in a day'], [30, 'in a day'], [50, 'in a day']] },
+    { id: 'pullups', mv: 'cat_mv_pullups', levels: [[3, 'in a day'], [8, 'in a day'], [15, 'in a day']] },
+    { id: 'bwsquats', mv: 'cat_mv_bw_squats', levels: [[30, 'in a day'], [40, 'in a day'], [50, 'in a day']] },
+    { id: 'dips', mv: 'cat_mv_dips', levels: [[5, 'in a day'], [10, 'in a day'], [20, 'in a day']] },
+    { id: 'plank', mv: 'cat_mv_plank', levels: [[45, 'held at once'], [60, 'held at once'], [120, 'held at once']] },
+  ].map((def) => Object.defineProperties(def, {
+    typical: { get: () => def.levels[liftLevel()][0], enumerable: true },
+    note: { get: () => def.levels[liftLevel()][1], enumerable: true },
+  }));
   // Distance in miles, pace in seconds per mile.
   const SETUP_CARDIO = [
     { id: 'running', mv: 'cat_mv_running', dist: 5, pace: 600 },
@@ -8573,6 +8637,8 @@
       </div>`).join('');
     const form = a.goalForm;
     document.getElementById('setupContent').innerHTML = `
+      <span class="lbl">Your experience</span>
+      ${setupSegHtml('data-lift-level', 'Lifting experience', LIFT_LEVELS, LIFT_LEVELS[liftLevel()][0])}
       <span class="lbl">Barbell lifts</span>
       <div class="card pick-wrap">${SETUP_LIFTS.filter(isWeightGoal).map(rowFor).join('')}</div>
       <span class="lbl">Bodyweight, per day</span>
@@ -8593,6 +8659,9 @@
       const id = b.dataset.liftPick;
       if (a.liftGoals[id] && a.liftGoals[id].on) a.liftGoals[id].on = false; else a.liftGoals[id] = Object.assign(newLiftGoal(), a.liftGoals[id] || {}, { on: true });
       renderSetupStepLifting();
+    }));
+    document.querySelectorAll('#setupContent [data-lift-level] button').forEach((b) => b.addEventListener('click', () => {
+      captureSetupStep(); a.experience = b.dataset.choice; renderSetupStepLifting();
     }));
     document.querySelectorAll('#setupContent [data-lift-mode] button').forEach((b) => b.addEventListener('click', () => {
       captureSetupStep(); a.liftGoals[b.parentElement.dataset.liftMode].mode = b.dataset.choice; renderSetupStepLifting();
@@ -9013,6 +9082,7 @@
     // On failure stay on the wizard: save() has said why and the answers are still
     // in setupAnswers/state.
     if (!save()) return;
+    keepStorage();
     showAppChrome();
     switchTab('dashboard');
     renderAll();
@@ -9126,6 +9196,8 @@
     });
     wireLogExercisePicker();
     document.getElementById('streakCard').addEventListener('click', () => switchTab('history'));
+    document.getElementById('homeNoticeAction').addEventListener('click', () => homeNotice && homeNotice.run());
+    document.getElementById('homeNoticeLater').addEventListener('click', () => homeNotice && homeNotice.later());
     document.getElementById('recentHistoryBtn').addEventListener('click', () => switchTab('history'));
     wireManageExercises();
     wireManageDaily();
@@ -9159,7 +9231,10 @@
       const wrap = shape.closest('.mm-wrap');
       wrap.querySelectorAll('.is-picked').forEach((p) => p.classList.remove('is-picked'));
       wrap.querySelectorAll(`[data-muscle="${shape.dataset.muscle}"]`).forEach((p) => p.classList.add('is-picked'));
-      wrap.querySelector('.mm-pick').textContent = shape.querySelector('title').textContent;
+      const pick = wrap.querySelector('.mm-pick');
+      const [name, ...rest] = shape.querySelector('title').textContent.split(': ');
+      pick.innerHTML = `<b>${escapeHtml(name)}</b> · ${escapeHtml(rest.join(': ').replace(/^recovering, /, ''))}`;
+      pick.hidden = false;
     });
     document.getElementById('logLightSwitch').addEventListener('click', (ev) => ev.currentTarget.setAttribute('aria-checked', String(!isOn(ev.currentTarget))));
     document.getElementById('view-manage').addEventListener('click', (ev) => {
@@ -9429,8 +9504,9 @@
     applyTheme();
     document.getElementById('logDate').value = todayISO();
     document.getElementById('logMeasurementDate').value = todayISO();
+    window.addEventListener('beforeinstallprompt', (ev) => { ev.preventDefault(); installPrompt = ev; if (!needsSetup) renderHome(); });
     if (needsSetup) startSetupWizard();
-    else { renderAll(); markEntering(document.querySelector('.view:not([hidden])')); }
+    else { renderAll(); markEntering(document.querySelector('.view:not([hidden])')); keepStorage(); }
     wireLiveSync();
     registerServiceWorker();
   }

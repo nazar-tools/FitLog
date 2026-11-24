@@ -1451,8 +1451,6 @@ button.row-switch { width: 100%; border: 0; background: none; font: inherit; col
 .chart-svg .cline { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .chart-svg .cest { fill: none; stroke: var(--accent); stroke-width: 2; stroke-dasharray: 4 4; opacity: .5; }
 .chart-svg .cend { fill: var(--accent); stroke: var(--surface-1); stroke-width: 2; }
-.chart-svg .ctick { stroke: var(--text-secondary); stroke-width: 2; stroke-linecap: round; }
-.chart-svg .ctrack { fill: var(--surface-2); }
 .chart-svg .cpt { fill: var(--accent); }
 .chart-svg .halo { paint-order: stroke; stroke: var(--surface-1); stroke-width: 4px; stroke-linejoin: round; }
 .is-food .chart-svg .cline { stroke: var(--dot-food); }
@@ -1630,13 +1628,30 @@ button.row-switch { width: 100%; border: 0; background: none; font: inherit; col
 .f-chips.is-wrap { flex-wrap: wrap; overflow: visible; }
 
 /* Body map */
-.mm-wrap { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-12) var(--sp-16); }
-.mm-wrap > .mm { flex: 1 1 170px; width: auto; min-width: 150px; max-width: 250px; margin: 0 auto; }
-.mm-list { flex: 1 0 auto; display: flex; flex-direction: column; gap: var(--sp-8); margin: 0; }
-.mm-list > div { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-8); font-size: var(--fs-sm); }
-.mm-list dt { display: flex; align-items: center; gap: var(--sp-6); color: var(--text-secondary); white-space: nowrap; }
-.mm-list dd { margin: 0; font-weight: 800; font-variant-numeric: tabular-nums; }
-.mm-list .sw { flex: none; width: 10px; height: 10px; border-radius: 3px; }
+.mm-wrap { display: flex; flex-direction: column; align-items: center; gap: var(--sp-8); }
+.mm-wrap > .mm { width: 100%; max-width: 170px; }
+.mm-pick { margin: 0; font-size: var(--fs-sm); color: var(--text-secondary); text-align: center; }
+.mm-pick b { color: var(--text-primary); font-weight: 700; }
+/* One line under the map: a four-step scale between its two ends, then the helper swatch. */
+.mm-key { display: flex; flex-wrap: wrap; justify-content: center; gap: var(--sp-6) var(--sp-16); font-size: var(--fs-xs); color: var(--text-secondary); }
+.mm-key > span { display: inline-flex; align-items: center; gap: var(--sp-6); white-space: nowrap; }
+.mm-key .sw { flex: none; width: 10px; height: 10px; border-radius: 3px; }
+.mm-scale { display: inline-flex; gap: 2px; }
+.mm-scale .sw { width: 16px; height: 8px; border-radius: 2px; }
+/* The numbers view: two columns of areas, or one row per ready time. */
+.mm-nums { display: flex; flex-direction: column; margin: 0; }
+.mm-nums > div { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-8); padding: var(--sp-8) 0; font-size: var(--fs-md); }
+.mm-nums > div + div { border-top: 1px solid var(--gridline); }
+.mm-nums dt, .mm-nums dd { white-space: nowrap; }
+.mm-nums dt, .mm-rows dt { display: flex; align-items: center; gap: var(--sp-8); min-width: 0; }
+.mm-nums dt { color: var(--text-secondary); }
+.mm-nums dd { margin: 0; font-weight: 700; font-variant-numeric: tabular-nums; }
+.mm-rows { display: flex; flex-direction: column; margin: 0; }
+.mm-rows > div { display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-8) 0; border-bottom: 1px solid var(--gridline); }
+.mm-rows > div:last-child { border-bottom: 0; }
+.mm-rows dt { font-size: var(--fs-md); font-weight: 700; }
+.mm-rows dd { margin: 0; padding-left: calc(10px + var(--sp-8)); font-size: var(--fs-sm); color: var(--text-secondary); }
+.mm-nums .sw, .mm-rows .sw { flex: none; width: 10px; height: 10px; border-radius: 3px; }
 .mm .mm-sil { fill: color-mix(in srgb, var(--text-primary) 9%, var(--surface-1)); }
 .mm .mm-m { stroke: var(--surface-1); stroke-width: 1.4; stroke-linejoin: round; cursor: pointer; }
 .mm .mm-m.is-picked { stroke: var(--text-primary); }
@@ -1648,13 +1663,6 @@ button.row-switch { width: 100%; border: 0; background: none; font: inherit; col
 .mm .mm-m.r1, .sw.mm-r1 { fill: color-mix(in srgb, var(--warning) 32%, var(--surface-2)); background: color-mix(in srgb, var(--warning) 32%, var(--surface-2)); }
 .mm .mm-m.r2, .sw.mm-r2 { fill: color-mix(in srgb, var(--warning) 65%, var(--surface-2)); background: color-mix(in srgb, var(--warning) 65%, var(--surface-2)); }
 .mm .mm-m.r3, .sw.mm-r3 { fill: var(--streak); background: var(--streak); }
-.mm-wrap-stack { flex-direction: column; align-items: stretch; }
-.mm-wrap-stack > .mm { flex: none; width: 100%; max-width: 250px; }
-.mm-list-wide { flex: none; }
-.mm-list-wide dt { white-space: normal; align-items: flex-start; }
-.mm-list-wide dt .sw { margin-top: var(--sp-4); }
-.mm-list dd { white-space: nowrap; }
-.mm-pick { flex: 1 0 100%; margin: 0; font-size: var(--fs-sm); text-align: center; }
 .muscle-line { display: flex; align-items: baseline; justify-content: space-between; gap: var(--sp-12); font-size: var(--fs-md); }
 .muscle-editor { display: flex; flex-direction: column; gap: var(--sp-8); margin-top: var(--sp-12); }
 .muscle-editor .link-btn { align-self: flex-start; }
