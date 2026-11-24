@@ -86,7 +86,7 @@
   function validate(parsed, ctx) {
     const { schemaVersion, macroKeys, todayIso, strengthKeys, activityKeys, goalKeys } = ctx;
     const inList = (list, v) => !list || list.includes(v);
-    if (!isObj(parsed)) return 'This file isn’t a Fit Log backup.';
+    if (!isObj(parsed)) return "This file isn't a Fit Log backup.";
     if (parsed.version != null && !(Number.isInteger(parsed.version) && parsed.version >= 1)) return 'Unrecognized backup version.';
     if (typeof parsed.version === 'number' && parsed.version > schemaVersion) {
       return `This backup is from a newer version of Fit Log (v${parsed.version}) than this app supports (v${schemaVersion}) - update the app before importing it.`;
@@ -96,7 +96,7 @@
     const exById = new Map();
     for (const ex of parsed.exercises) {
       if (!isObj(ex) || badId(ex.id) || badName(ex.name)) return 'One of the exercises is malformed.';
-      if (ex.kind != null && !EX_KINDS.has(ex.kind)) return `Unknown exercise type “${ex.kind}”.`;
+      if (ex.kind != null && !EX_KINDS.has(ex.kind)) return `Unknown exercise type "${ex.kind}".`;
       if (ex.section != null && !SECTIONS.has(ex.section)) return `"${ex.name}" has an unknown section.`;
       if (ex.group != null && !/^[a-z]{1,20}$/.test(ex.group)) return `"${ex.name}" has an invalid muscle group.`;
       if (ex.liftType != null && !inList(strengthKeys, ex.liftType)) return `"${ex.name}" has an unknown strength standard.`;
@@ -111,7 +111,7 @@
     for (const en of parsed.entries) {
       if (!isObj(en) || badId(en.id) || badId(en.exerciseId) || badText(en.note)) return 'One of the logged entries is malformed.';
       const ex = exById.get(en.exerciseId);
-      if (!ex) return 'A logged entry belongs to an exercise that isn’t in this backup.';
+      if (!ex) return "A logged entry belongs to an exercise that isn't in this backup.";
       const where = `${ex.name} on ${en.date}`;
       if (!validDate(en.date, todayIso)) return 'One of the logged entries has an invalid date.';
       if (en.sets != null && !Array.isArray(en.sets)) return `${where} has an invalid sets list.`;
@@ -135,7 +135,7 @@
       if (!Array.isArray(parsed.trackers)) return 'Invalid tracker list.';
       for (const t of parsed.trackers) {
         if (!isObj(t) || badId(t.id) || badName(t.name)) return 'One of the trackers is malformed.';
-        if (t.kind != null && !TRACKER_KINDS.has(t.kind)) return `Unknown tracker type “${t.kind}”.`;
+        if (t.kind != null && !TRACKER_KINDS.has(t.kind)) return `Unknown tracker type "${t.kind}".`;
         if (t.direction != null && !DIRECTIONS.has(t.direction)) return `Tracker "${t.name}" has an invalid direction.`;
         if (!numOrNull(t.goal) || !numOrNull(t.baseline)) return `Tracker "${t.name}" has an invalid goal value.`;
         if (t.unitKind != null && !UNIT_KINDS.has(t.unitKind)) return `Tracker "${t.name}" has an unknown unit type.`;
@@ -150,7 +150,7 @@
         if (!isObj(m) || badId(m.id) || badId(m.trackerId) || badText(m.note)) return 'One of the tracker entries is malformed.';
         const t = trackerById.get(m.trackerId);
         // Pre-v5 backups still carry the old height/sleep trackers; migrations handle those.
-        if (!t && parsed.trackers != null && (parsed.version || 0) >= 6) return 'A tracker entry belongs to a tracker that isn’t in this backup.';
+        if (!t && parsed.trackers != null && (parsed.version || 0) >= 6) return "A tracker entry belongs to a tracker that isn't in this backup.";
         if (!validDate(m.date, todayIso)) return 'One of the tracker entries has an invalid date.';
         if (!numOrNull(m.value)) return 'One of the tracker entries has an invalid value.';
         if (t && t.kind === 'sleep') {

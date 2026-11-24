@@ -54,9 +54,9 @@
     <!-- DATA RECOVERY SCREEN (shown instead of the app when saved data exists
          but couldn't be read - see showRecoveryScreen() in app.js) -->
     <section id="view-recover" class="view" data-view="recover" hidden>
-      <div class="section-head"><h2>Fit Log couldn’t read your saved data</h2></div>
+      <div class="section-head"><h2>Fit Log couldn't read your saved data</h2></div>
       <div class="card form-card">
-        <p>Something went wrong loading your data, so nothing has been changed or deleted — it's still sitting in this browser's storage exactly as it was.</p>
+        <p>Something went wrong loading your data, so nothing has been changed or deleted. It's still in this browser's storage exactly as it was.</p>
         <p>Export a recovery file first. It's the raw file the app couldn't read, but it keeps every byte intact in case it can be fixed or recovered later.</p>
         <button type="button" class="btn btn-primary btn-block" id="recoverExportBtn">Export recovery file</button>
         <button type="button" class="btn-text-danger" id="recoverResetBtn">Erase this data and start fresh</button>
@@ -292,7 +292,7 @@
       <button type="button" class="link-btn manage-areas-link" id="manageAreasBtn">Turn areas on or off</button>
 
       <div id="manageExercisesPanel">
-        <p class="muted-text" id="trackWorkoutOffHint" hidden>Workout is off — hidden from Home, Log, and History. Nothing already logged is lost; turn it back on to see it again.</p>
+        <p class="muted-text" id="trackWorkoutOffHint" hidden>Workout is off, so it's hidden from Home, Log and History. Nothing you logged is lost; turn it back on to see it again.</p>
 
         <div id="workoutTrackedFields">
           <div id="importCard" class="card tidy-card" hidden></div>
@@ -308,7 +308,7 @@
       </div>
 
       <div id="manageDailyPanel" hidden>
-        <p class="muted-text" id="trackDailyOffHint" hidden>Daily is off — hidden from Home, Log, and History. Nothing already logged is lost; turn it back on to see it again.</p>
+        <p class="muted-text" id="trackDailyOffHint" hidden>Daily is off, so it's hidden from Home, Log and History. Nothing you logged is lost; turn it back on to see it again.</p>
 
         <div id="dailyTrackedFields">
           <div class="section-head">
@@ -321,20 +321,20 @@
       </div>
 
       <div id="manageMeasurementsPanel" hidden>
-        <p class="muted-text" id="trackMeasurementsOffHint" hidden>Body is off — hidden from Home, Log, and History. Nothing already logged is lost; turn it back on to see it again.</p>
+        <p class="muted-text" id="trackMeasurementsOffHint" hidden>Body is off, so it's hidden from Home, Log and History. Nothing you logged is lost; turn it back on to see it again.</p>
 
         <div id="measurementsTrackedFields">
           <div class="section-head">
             <h2>Body &amp; wellness trackers</h2>
             <button class="btn btn-secondary btn-sm btn-icon-label" data-action="add-tracker"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg><span>Add tracker</span></button>
           </div>
-          <p class="muted-text">Anything you want a number and a trend line for — weight, body fat %, a circumference, sleep hours, calories, or anything else you think to add later.</p>
+          <p class="muted-text">Anything you want a number and a trend line for: weight, body fat %, a waist measurement, sleep hours, or whatever else you think of later.</p>
           <div id="trackerManageList" class="entry-list"></div>
         </div>
       </div>
 
       <div id="manageWaterPanel" hidden>
-        <p class="muted-text" id="trackWaterOffHint" hidden>Water is off — hidden from Home, Log, and History. Nothing already logged is lost; turn it back on to see it again.</p>
+        <p class="muted-text" id="trackWaterOffHint" hidden>Water is off, so it's hidden from Home, Log and History. Nothing you logged is lost; turn it back on to see it again.</p>
 
         <div id="waterTrackedFields">
           <div class="section-head"><h2>Daily water goal</h2></div>
@@ -354,7 +354,7 @@
       </div>
 
       <div id="manageFoodPanel" hidden>
-        <p class="muted-text" id="trackFoodOffHint" hidden>Food is off — hidden from Home, Log, and History. Nothing already logged is lost; turn it back on to see it again.</p>
+        <p class="muted-text" id="trackFoodOffHint" hidden>Food is off, so it's hidden from Home, Log and History. Nothing you logged is lost; turn it back on to see it again.</p>
 
         <div id="foodTrackedFields">
           <!-- Saved foods first - it's the feature actually used every day
@@ -370,7 +370,7 @@
           <div id="savedFoodManageList" class="org-list"></div>
 
           <div class="section-head"><h2>Tracked macros</h2></div>
-          <p class="muted-text">Calories is always tracked and required to log an entry. Tap a macro below to also track it — tap again to stop; nothing already logged is lost either way.</p>
+          <p class="muted-text">Calories is always tracked and required to log an entry. Tap a macro below to track it too, and tap again to stop. Nothing you logged is lost either way.</p>
           <!-- Populated by renderMacroTrackChips() - a compact chip per
                non-calorie MACRO_KEYS entry, replacing what used to be a full
                toggle+label row per field; untracked chips get the shared
@@ -440,7 +440,7 @@
         <div class="profile-edit" id="profilePanelHeight" hidden>
           <div class="field" id="profileHeightFieldCm">
             <span class="field-label">Height (cm)</span>
-            <input type="number" step="any" min="50" max="272" id="profileHeightCm" aria-label="Height in centimetres" placeholder="Not set" />
+            <input type="number" step="any" min="50" max="272" id="profileHeightCm" aria-label="Height in centimeters" placeholder="Not set" />
           </div>
           <div class="field" id="profileHeightFieldFtIn">
             <span class="field-label">Height (ft/in)</span>
@@ -453,7 +453,7 @@
         <button type="button" class="profile-row" data-profile-row="age" aria-expanded="false"><span class="setting-icon" data-icon="calendar"></span><span class="grow">Age</span><span class="profile-val" id="profileAgeVal">Not set</span><span class="profile-chev" aria-hidden="true">›</span></button>
         <div class="profile-edit" id="profilePanelAge" hidden>
           <div class="field" id="profileAgeField">
-            <span class="field-label">Age <span class="muted-text">(optional — for nutrition advice)</span></span>
+            <span class="field-label">Age <span class="muted-text">(optional, for nutrition advice)</span></span>
             <input type="number" step="1" min="1" max="120" inputmode="numeric" id="profileAge" aria-label="Age in years" placeholder="Not set" />
           </div>
         </div>

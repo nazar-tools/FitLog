@@ -4,7 +4,7 @@
 
    One IIFE. Logic that doesn't touch the DOM is in the other files in js/ (migrations, units,
    calc, features, standards, catalog, backup). A handler updates `state`, calls save(), then
-   calls the render*() functions for whatever changed. README.md has the walkthrough. */
+   calls the render*() functions for whatever changed. */
 (() => {
   'use strict';
 
@@ -163,7 +163,7 @@
         return;
       }
       const parsed = JSON.parse(raw);
-      // Recognisable as Fit Log data (missing sections are filled in by upgradeData()); anything
+      // Recognizable as Fit Log data (missing sections are filled in by upgradeData()); anything
       // else goes to the recovery screen instead of being silently replaced.
       const looksLikeData = parsed && typeof parsed === 'object' && !Array.isArray(parsed)
         && (Array.isArray(parsed.exercises) || Array.isArray(parsed.entries) || typeof parsed.version === 'number');
@@ -180,7 +180,7 @@
       // Saved data exists but could not be parsed or migrated. Do not overwrite it
       // (there is no other copy); leave localStorage alone and let the recovery
       // screen offer a choice.
-      console.warn('Could not read saved data — leaving it untouched.', e);
+      console.warn('Could not read saved data; leaving it untouched.', e);
       rawCorrupt = raw || null;
       needsRecovery = true;
     }
@@ -200,7 +200,7 @@
     } catch (e) {
       // Most likely the storage quota is full. Say so rather than lose the entry silently.
       console.error('Could not save to localStorage', e);
-      toast('Could not save — your browser storage may be full. Try exporting a backup and freeing up space.');
+      toast('Could not save. Your browser storage may be full: export a backup and free up some space.');
       return false;
     }
   }
@@ -460,13 +460,13 @@
       }
       if (band === 'moderate') {
         const w = lastTop.weight + weightIncrementLb(region, 0.5);
-        return { headline: `Try ${fmtWeight(w)} next session`, detail: `RPE ${lastTop.rpe} — a small bump is reasonable.`, method: 'rpe' };
+        return { headline: `Try ${fmtWeight(w)} next session`, detail: `RPE ${lastTop.rpe}: a small bump is reasonable.`, method: 'rpe' };
       }
       if (band === 'ontarget') {
-        return { headline: `Repeat ${fmtWeight(lastTop.weight)}, aim for +1 rep`, detail: `RPE ${lastTop.rpe} is a solid working effort — build reps here before adding load.`, method: 'rpe' };
+        return { headline: `Repeat ${fmtWeight(lastTop.weight)}, aim for +1 rep`, detail: `RPE ${lastTop.rpe} is a solid working effort. Build reps here before adding load.`, method: 'rpe' };
       }
       if (band === 'max') {
-        return { headline: `Hold at ${fmtWeight(lastTop.weight)} next session`, detail: `RPE ${lastTop.rpe} was near your limit — repeat, or ease off slightly, before progressing.`, method: 'rpe' };
+        return { headline: `Hold at ${fmtWeight(lastTop.weight)} next session`, detail: `RPE ${lastTop.rpe} was near your limit. Repeat it, or ease off a little, before moving up.`, method: 'rpe' };
       }
       if (prevTop && prevTop.weight === lastTop.weight) {
         if (lastTop.reps >= prevTop.reps && lastTop.reps >= 5) {
@@ -474,11 +474,11 @@
           return { headline: `Try ${fmtWeight(w)} next session`, detail: `You matched or beat your reps (${prevTop.reps} → ${lastTop.reps}) at this weight for two sessions in a row.`, method: 'sametrend' };
         }
         const detail = lastTop.reps < prevTop.reps
-          ? `Reps dipped (${prevTop.reps} → ${lastTop.reps}). Consolidate before adding load.`
+          ? `Reps dipped (${prevTop.reps} → ${lastTop.reps}). Hold this weight before adding load.`
           : `Fewer than 5 reps (${lastTop.reps}) at this weight. Build to 5 before adding load.`;
         return { headline: `Repeat ${fmtWeight(lastTop.weight)} next session`, detail, method: 'sametrend' };
       }
-      return { headline: `Repeat ${fmtWeight(lastTop.weight)}, or log RPE for a sharper suggestion`, detail: 'Logging an RPE (how hard that top set felt, 1–10) unlocks a tailored recommendation.', method: null, needsRpe: true };
+      return { headline: `Repeat ${fmtWeight(lastTop.weight)}, or log RPE for a sharper suggestion`, detail: 'Logging an RPE (how hard that top set felt, 1–10) makes the suggestion more specific.', method: null, needsRpe: true };
     }
 
     if (exercise.kind === 'reps') {
@@ -489,15 +489,15 @@
         if (band === 'max') return { headline: `Hold ${fmtHold(r)} next time`, detail: `RPE ${lastTop.rpe} was close to failure. Repeat before adding time.`, method: 'rpe' };
         return { headline: `Try ${fmtHold(r + 5)} next time`, detail: 'Add a few seconds each session while your form holds.', method: band ? 'rpe' : null };
       }
-      if (band === 'easy') return { headline: `Try ${r + 3} reps next time`, detail: `RPE ${lastTop.rpe} had reps to spare — or add a little weight if you're already at a high rep count.`, method: 'rpe' };
-      if (band === 'moderate') return { headline: `Try ${r + 1}–${r + 2} reps next time`, detail: `RPE ${lastTop.rpe} — a small push is reasonable.`, method: 'rpe' };
+      if (band === 'easy') return { headline: `Try ${r + 3} reps next time`, detail: `RPE ${lastTop.rpe} had reps to spare. If your reps are already high, add a little weight instead.`, method: 'rpe' };
+      if (band === 'moderate') return { headline: `Try ${r + 1}–${r + 2} reps next time`, detail: `RPE ${lastTop.rpe}: a small push is reasonable.`, method: 'rpe' };
       if (band === 'ontarget') return { headline: `Repeat ${r} reps, focus on form`, detail: `RPE ${lastTop.rpe} is a solid working effort.`, method: 'rpe' };
-      if (band === 'max') return { headline: `Hold at ${r} reps next time`, detail: `RPE ${lastTop.rpe} was close to failure — repeat and recover before pushing further.`, method: 'rpe' };
+      if (band === 'max') return { headline: `Hold at ${r} reps next time`, detail: `RPE ${lastTop.rpe} was close to failure. Repeat and recover before pushing further.`, method: 'rpe' };
       if (prevTop && prevTop.reps != null) {
         if (lastTop.reps >= prevTop.reps) return { headline: `Try ${r + 2} reps next time`, detail: `Reps trending up (${Math.round(prevTop.reps)} → ${r}).`, method: 'trend' };
-        return { headline: `Repeat ${r} reps`, detail: `Reps dipped (${Math.round(prevTop.reps)} → ${r}) — consolidate first.`, method: 'trend' };
+        return { headline: `Repeat ${r} reps`, detail: `Reps dipped (${Math.round(prevTop.reps)} → ${r}). Hold here first.`, method: 'trend' };
       }
-      return { headline: `Repeat ${r} reps, or log RPE for a sharper suggestion`, detail: 'Logging an RPE unlocks a tailored recommendation.', method: null, needsRpe: true };
+      return { headline: `Repeat ${r} reps, or log RPE for a sharper suggestion`, detail: 'Logging an RPE makes the suggestion more specific.', method: null, needsRpe: true };
     }
     return { headline: 'Log a session to get a suggestion.', method: null };
   }
@@ -509,25 +509,25 @@
     const band = rpeBand(lastTop ? lastTop.rpe : null);
     if (metric === 'distance') {
       if (!lastTop || lastTop.distance == null) return { headline: 'Log a run with distance to get a suggestion.', method: null };
-      if (band === 'easy') return { headline: `Try ~${fmtDistance(lastTop.distance * 1.1)} next run`, detail: `RPE ${lastTop.rpe} felt comfortable — a common guideline is to grow distance by no more than ~10% at a time.`, method: 'rpe' };
-      if (band === 'moderate') return { headline: `Try ~${fmtDistance(lastTop.distance * 1.05)} next run`, detail: `RPE ${lastTop.rpe} — a small increase is reasonable.`, method: 'rpe' };
-      if (band === 'ontarget' || band === 'max') return { headline: `Repeat ~${fmtDistance(lastTop.distance)} next run`, detail: `RPE ${lastTop.rpe} was a real effort — consolidate before extending further.`, method: 'rpe' };
+      if (band === 'easy') return { headline: `Try ~${fmtDistance(lastTop.distance * 1.1)} next run`, detail: `RPE ${lastTop.rpe} felt comfortable. A common rule of thumb is to add no more than about 10% at a time.`, method: 'rpe' };
+      if (band === 'moderate') return { headline: `Try ~${fmtDistance(lastTop.distance * 1.05)} next run`, detail: `RPE ${lastTop.rpe}: a small increase is reasonable.`, method: 'rpe' };
+      if (band === 'ontarget' || band === 'max') return { headline: `Repeat ~${fmtDistance(lastTop.distance)} next run`, detail: `RPE ${lastTop.rpe} was a real effort. Repeat it before going further.`, method: 'rpe' };
       if (prevTop && prevTop.distance != null) {
         if (lastTop.distance >= prevTop.distance) return { headline: `Try ~${fmtDistance(lastTop.distance * 1.05)} next run`, detail: `Distance trending up (${fmtDistance(prevTop.distance)} → ${fmtDistance(lastTop.distance)}).`, method: 'trend' };
-        return { headline: `Repeat ~${fmtDistance(lastTop.distance)} next run`, detail: 'Distance dipped from last time — rebuild before extending.', method: 'trend' };
+        return { headline: `Repeat ~${fmtDistance(lastTop.distance)} next run`, detail: 'Distance dipped from last time. Build back up before going further.', method: 'trend' };
       }
-      return { headline: `Repeat ~${fmtDistance(lastTop.distance)}, or log an effort rating for a sharper suggestion`, detail: 'Logging RPE (how hard that run felt) unlocks a tailored recommendation.', method: null, needsRpe: true };
+      return { headline: `Repeat ~${fmtDistance(lastTop.distance)}, or log an effort rating for a sharper suggestion`, detail: 'Logging RPE (how hard that run felt) makes the suggestion more specific.', method: null, needsRpe: true };
     }
     // pace
     if (!lastTop || lastTop.pace == null) return { headline: 'Log a run with both distance and time to get a pace suggestion.', method: null };
-    if (band === 'easy') return { headline: `Try ~${fmtPace(lastTop.pace * 0.98)} next run`, detail: `RPE ${lastTop.rpe} felt comfortable — a modest pace push is reasonable.`, method: 'rpe' };
-    if (band === 'moderate') return { headline: `Try ~${fmtPace(lastTop.pace * 0.99)} next run`, detail: `RPE ${lastTop.rpe} — a small improvement is reasonable.`, method: 'rpe' };
-    if (band === 'ontarget' || band === 'max') return { headline: `Repeat ~${fmtPace(lastTop.pace)} next run`, detail: `RPE ${lastTop.rpe} was a real effort — hold this pace before pushing faster.`, method: 'rpe' };
+    if (band === 'easy') return { headline: `Try ~${fmtPace(lastTop.pace * 0.98)} next run`, detail: `RPE ${lastTop.rpe} felt comfortable, so a slightly faster pace is reasonable.`, method: 'rpe' };
+    if (band === 'moderate') return { headline: `Try ~${fmtPace(lastTop.pace * 0.99)} next run`, detail: `RPE ${lastTop.rpe}: a small improvement is reasonable.`, method: 'rpe' };
+    if (band === 'ontarget' || band === 'max') return { headline: `Repeat ~${fmtPace(lastTop.pace)} next run`, detail: `RPE ${lastTop.rpe} was a real effort. Hold this pace before pushing faster.`, method: 'rpe' };
     if (prevTop && prevTop.pace != null) {
       if (lastTop.pace <= prevTop.pace) return { headline: `Try ~${fmtPace(lastTop.pace * 0.99)} next run`, detail: `Pace trending faster (${fmtPace(prevTop.pace)} → ${fmtPace(lastTop.pace)}).`, method: 'trend' };
-      return { headline: `Repeat ~${fmtPace(lastTop.pace)} next run`, detail: 'Pace slipped from last time — rebuild before pushing faster.', method: 'trend' };
+      return { headline: `Repeat ~${fmtPace(lastTop.pace)} next run`, detail: 'Pace slipped from last time. Build back up before pushing faster.', method: 'trend' };
     }
-    return { headline: `Repeat ~${fmtPace(lastTop.pace)}, or log an effort rating for a sharper suggestion`, detail: 'Logging RPE unlocks a tailored recommendation.', method: null, needsRpe: true };
+    return { headline: `Repeat ~${fmtPace(lastTop.pace)}, or log an effort rating for a sharper suggestion`, detail: 'Logging RPE makes the suggestion more specific.', method: null, needsRpe: true };
   }
 
   function kindBadge(exercise) {
@@ -618,18 +618,6 @@
     return { pct: Math.max(0, pct), achieved };
   }
 
-  // Plain-language progress, e.g. "12 lb down, 8 lb remaining". Null without a
-  // starting point or once the goal is reached.
-  function trackerProgressDeltaText(tracker, value) {
-    const start = trackerStart(tracker);
-    if (value == null || start == null) return null;
-    const down = tracker.direction === 'down';
-    const moved = down ? start - value : value - start;
-    const remaining = Math.abs(tracker.goal - value);
-    if (remaining <= 0) return null;
-    if (moved <= 0) return `${fmtTrackerValue(tracker, remaining)} to go`;
-    return `${fmtTrackerValue(tracker, moved)} ${down ? 'down' : 'up'} · ${fmtTrackerValue(tracker, remaining)} remaining`;
-  }
 
   // Convert a stored value (lb, cm, ...) to and from the number shown in an
   // input. Other unit kinds are stored as shown.
@@ -745,13 +733,6 @@
   // label wording can differ from the class name.
   const BMI_CATEGORY_CLASS = { 'Underweight': 'is-underweight', 'Healthy weight': 'is-normal', 'Overweight': 'is-overweight', 'Obese': 'is-obese' };
 
-  // Short elapsed-time text for the weight trend: days, weeks, months, then years.
-  function humanizeDays(days) {
-    if (days < 14) return `${days} day${days === 1 ? '' : 's'}`;
-    if (days < 60) { const w = Math.round(days / 7); return `${w} week${w === 1 ? '' : 's'}`; }
-    if (days < 400) { const m = Math.round(days / 30); return `${m} month${m === 1 ? '' : 's'}`; }
-    return `${round(days / 365, 1)} years`;
-  }
 
   // The seeded Weight tracker is the body-weight source for BMI and strength
   // ratio. If it is deleted, those calculators report missing data.
@@ -787,11 +768,11 @@
     return { current: latest.value, trend, bmi };
   }
 
-  // Sleep is a per-night reading, so it is summarised over recent nights
+  // Sleep is a per-night reading, so it is summarized over recent nights
   // (sleepInsights()) rather than trended like weight.
   const SLEEP_TRACKER_ID = 'trk_sleep';
 
-  // `window`: last 7 calendar nights, labelled once 3+ are logged. `recent`:
+  // `window`: last 7 calendar nights, labeled once 3+ are logged. `recent`:
   // last 7 logged nights. The maths is in js/calc.js.
   function sleepInsights() {
     return window.FitCalc.sleepInsights(measurementsFor(SLEEP_TRACKER_ID), todayISO(), S);
@@ -887,10 +868,9 @@
   // Every tracked macro in MACRO_KEYS order: what the log form and totals render.
   function trackedMacroKeys() { return MACRO_KEYS.filter(macroTracked); }
 
-  // ---- Nutrition calculator (Manage -> Food) ----
-  // Estimates daily calories and protein from Profile, body weight, activity
-  // level and goal. Applying it writes into macroGoals, so it sits with Food
-  // rather than Settings -> Insights.
+  // Nutrition calculator (Manage > Food): daily calories and protein from Profile, body
+  // weight, activity level and goal. Applying it writes into macroGoals, so it sits with Food
+  // rather than Settings > Insights.
   const ACTIVITY_LEVELS = S.ACTIVITY_LEVELS;
   // Labels for #nutritionGoalSegmented (index.html), so the Food detail modal can
   // name the goal in a sentence.
@@ -1461,7 +1441,7 @@
     }
     if (tracker.unitKind === 'percent' && (canon < 0 || canon > 100)) return 'A percentage must be between 0 and 100.';
     if (tracker.unitKind === 'hours' && (canon < 0 || canon > 24)) return 'Hours must be between 0 and 24.';
-    if (tracker.unitKind === 'count' && canon < 0) return 'A count can’t be negative.';
+    if (tracker.unitKind === 'count' && canon < 0) return "A count can't be negative.";
     return null;
   }
   const WATER_TOO_BIG = 'That amount is too large to be right. Check the number and unit.';
@@ -1832,10 +1812,10 @@
       const minV = parseFloat(container.querySelector('#cardioMin').value);
       const secV = parseFloat(container.querySelector('#cardioSec').value);
       const rpeV = parseFloat(container.querySelector('#cardioRpe').value);
-      if (!Number.isNaN(distV) && distV < 0) return { error: 'Distance can’t be negative.' };
+      if (!Number.isNaN(distV) && distV < 0) return { error: "Distance can't be negative." };
       if (!Number.isNaN(distV) && Units.displayToMi(distV) > LIMITS.distanceMi) return { error: 'That distance is too large to be right. Check the number and unit.' };
       if (!Number.isNaN(minV) && minV * 60 > LIMITS.durationSec) return { error: 'That time is too long to be right.' };
-      if ((!Number.isNaN(minV) && minV < 0) || (!Number.isNaN(secV) && secV < 0)) return { error: 'Time can’t be negative.' };
+      if ((!Number.isNaN(minV) && minV < 0) || (!Number.isNaN(secV) && secV < 0)) return { error: "Time can't be negative." };
       if (!Number.isNaN(secV) && secV >= 60) return { error: 'Seconds must be less than 60. Carry the rest over into minutes.' };
       if (invalidRpe(rpeV)) return { error: `RPE must be between ${RPE_MIN} and ${RPE_MAX}.` };
       const hasDist = !Number.isNaN(distV) && distV > 0;
@@ -1861,7 +1841,7 @@
         if (!hasW && !hasR) continue; // fully blank row: not a set, ignore it
         // A set needs weight and reps together. Filling the missing side with 0 would
         // write a fake set, so a half-filled row is rejected.
-        if (!hasW || !hasR) return { error: 'Each set needs both a weight and reps — fill in the missing value, or clear the row.' };
+        if (!hasW || !hasR) return { error: 'Each set needs both a weight and reps. Fill in the missing one, or clear the row.' };
         // Also reject values that make no sense: zero or negative weight, a fractional
         // or non-positive rep count, or an RPE outside 1-10.
         if (w <= 0) return { error: 'Weight must be greater than zero.' };
@@ -1879,7 +1859,7 @@
           return { error: 'Add the reps for this set, or clear the row.' };
         }
         if (r <= 0 || !Number.isInteger(r)) return { error: 'Reps must be a whole number greater than zero.' };
-        if (!Number.isNaN(aw) && aw < 0) return { error: 'Added weight can’t be negative.' };
+        if (!Number.isNaN(aw) && aw < 0) return { error: "Added weight can't be negative." };
         if (r > (exercise.unit === 'time' ? LIMITS.holdSeconds : LIMITS.reps)) return { error: 'That value is too large to be right.' };
         if (!Number.isNaN(aw) && Units.displayToLb(aw) > LIMITS.weightLb) return { error: 'That added weight is too large to be right.' };
         if (invalidRpe(rpe)) return { error: `RPE must be between ${RPE_MIN} and ${RPE_MAX}.` };
@@ -1947,14 +1927,6 @@
       </div>`;
   }
 
-  // Trim date-sorted `items` to the shared chart range and map them
-  // to {date, value} points, dropping empty ones. Shared by dashboard cards and
-  // the detail modals.
-  function chartPointsFor(items, valueFn) {
-    const from = rangeFrom();
-    const scaled = items.filter((item) => item.date >= from);
-    return scaled.map((item) => ({ date: item.date, value: valueFn(item) })).filter((p) => p.value != null);
-  }
 
   // A compact tier bar (used by sleep insights). `abbrevLabels` are the short
   // segment labels; full names and thresholds go in the caption.
@@ -1973,7 +1945,7 @@
     if (!info) return '';
     const head = '<div class="section-head"><div class="setting-row-label"><span class="setting-icon">'+STATIC_ICONS.trophy+'</span><h2>Strength level</h2></div></div>';
     if (info.missing === 'bodyweight') return `<div class="card">${head}<p class="muted-text">Log your body weight to see your strength level.</p></div>`;
-    if (info.missing === 'sex') return `<div class="card">${head}<p class="muted-text">Set your sex in Settings → Profile to see your strength level.</p></div>`;
+    if (info.missing === 'sex') return `<div class="card">${head}<p class="muted-text">Set your sex in Settings > Profile to see your strength level.</p></div>`;
     const logged = entriesFor(ex.id).length > 0;
     if (info.best < 0) {
       if (!logged) return '';
@@ -2029,7 +2001,7 @@
     const info = runLevelInfo(ex);
     if (!info) return '';
     const head = '<div class="section-head"><div class="setting-row-label"><span class="setting-icon">'+STATIC_ICONS.trophy+'</span><h2>Running level</h2></div></div>';
-    if (info.needsSex) return `<div class="card">${head}<p class="muted-text">Set your sex in Settings → Profile to see your running level.</p></div>`;
+    if (info.needsSex) return `<div class="card">${head}<p class="muted-text">Set your sex in Settings > Profile to see your running level.</p></div>`;
     if (!info.hasRuns) return '';
     if (!info.best) return `<div class="card">${head}<p class="muted-text">Log a run of 1 mile to a marathon with a time to see your running level.</p></div>`;
     const { entry, level } = info.best;
@@ -2046,7 +2018,7 @@
         <div class="standards-preview">
           ${rows.map((r) => `<div class="standards-preview-row${r.isCurrent ? ' is-selected' : ''}"><span>${r.label}</span><span>${r.rightText}</span></div>`).join('')}
         </div>
-        <p class="muted-text field-hint">5K finish times for your sex, ${info.ageAssumed ? `with an adult age of ${info.age} assumed (add your age in Settings → Profile)` : `age ${info.age}`}. Runs from 1 mile to a marathon are converted to a 5K time with Riegel's formula, so the level is the best effort you have logged. Running Level's tiers: faster than about 5%, 20%, 50%, 80% and 95% of runners.</p>
+        <p class="muted-text field-hint">5K finish times for your sex, ${info.ageAssumed ? `with an adult age of ${info.age} assumed (add your age in Settings > Profile)` : `age ${info.age}`}. Runs from 1 mile to a marathon are converted to a 5K time with Riegel's formula, so the level is the best effort you have logged. Running Level's tiers: faster than about 5%, 20%, 50%, 80% and 95% of runners.</p>
       </div>`;
   }
 
@@ -2054,7 +2026,7 @@
   // with a colored dot and range per category. The current one gets `.is-selected`.
   function bmiDetailHtml() {
     if (!state.profile.heightCm) {
-      return `<div class="card"><div class="section-head"><h2>BMI</h2></div><p class="muted-text">Set your height in Settings → Profile to see your BMI.</p></div>`;
+      return `<div class="card"><div class="section-head"><h2>BMI</h2></div><p class="muted-text">Set your height in Settings > Profile to see your BMI.</p></div>`;
     }
     const insights = weightInsights();
     if (!insights || !insights.bmi) {
@@ -2238,7 +2210,7 @@
     const macroRowHtml = (k) => setupBoolRowHtml(`review_macro_${k}`, MACRO_LABELS[k], macroGoalInfo(k).enabled);
     openModal(`
       <div class="modal-title-row"><h2>Review your tracking</h2><button class="modal-close" data-action="close-modal" aria-label="Close">${CLOSE_ICON_SVG}</button></div>
-      <p class="muted-text">Fit Log has added tracking options and insight cards since you started — here's a chance to double check what's on. Nothing you've already logged changes either way.</p>
+      <p class="muted-text">Fit Log has added tracking options and insight cards since you started. Here's a chance to check what's on. Nothing you've logged changes either way.</p>
       <div class="card form-card">
         <div class="section-head"><h2>What do you track?</h2></div>
         ${setupBoolRowHtml('review_trackWorkout', 'Lifting', s.trackWorkout)}
@@ -2496,7 +2468,7 @@
       const blank = input.value.trim() === '';
       const raw = parseFloat(input.value);
       if (!blank && !(raw > 0)) { toast('Enter a goal above zero, or clear the field to remove it.'); return; }
-      // An untouched field keeps the stored millilitres instead of a rounded round trip.
+      // An untouched field keeps the stored milliliters instead of a rounded round trip.
       const goalMl = blank ? null : input.value === shown ? state.water.goalMl : Units.displayToMl(raw);
       if (goalMl != null && tooBigWater(goalMl)) { toast(WATER_TOO_BIG); return; }
       state.water.goalMl = goalMl;
@@ -3612,7 +3584,7 @@
     };
   }
 
-  // Protein per full day against its goal, in the Food colour.
+  // Protein per full day against its goal, in the Food color.
   function proteinCard() {
     if (!macroTracked('protein')) return null;
     const byDate = {};
@@ -3923,7 +3895,7 @@
     switchTab('log');
   }
 
-  // Open Manage -> Food (macro tracking and goals, nutrition calculator).
+  // Open Manage > Food (macro tracking and goals, nutrition calculator).
   function openFoodGoalsFromDetail() {
     closeModal();
     manageCategory = 'food';
@@ -4027,7 +3999,6 @@
     return `${group} · last ${lastResultText(ex, last.entry)} · ${agoText(last.entry.date)}`;
   }
 
-  // ---- shared bits ----
   function starButtonHtml(attr, id, on) {
     return `<button type="button" class="org-star" ${attr}="${id}" aria-pressed="${!!on}" aria-label="${on ? 'Remove from favorites' : 'Add to favorites'}">${uiIcon('star')}</button>`;
   }
@@ -4066,7 +4037,7 @@
     if (more) more.addEventListener('click', () => chipsEl.scrollBy({ left: Math.max(120, chipsEl.clientWidth * 0.7), behavior: 'smooth' }));
   }
   /* Keyboard activation for role="button" rows. Only fires when the row itself has focus, so
-     nested real buttons (favourite star, etc.) keep their native Enter/Space behaviour. */
+     nested real buttons (the favorite star) keep their own Enter/Space handling. */
   function onEnterOrSpace(handler) {
     return (ev) => { if ((ev.key === 'Enter' || ev.key === ' ') && ev.target.hasAttribute('data-pick')) { ev.preventDefault(); handler(ev); } };
   }
@@ -4718,7 +4689,7 @@
     if (!shown.length) {
       let msg;
       if (!active.length) msg = 'No exercises yet.';
-      else if (searching) msg = `No exercises match “${escapeHtml(logEx.query.trim())}”.`;
+      else if (searching) msg = `No exercises match "${escapeHtml(logEx.query.trim())}".`;
       else if (seg === 'fav') msg = 'No favorites yet. Tap the ☆ on an exercise to keep it here.';
       else if (seg === 'recent') msg = 'Nothing logged yet. Exercises you log show up here.';
       else msg = 'No exercises in this group.';
@@ -4780,7 +4751,7 @@
     }).join('')}</div>`;
   }
 
-  // Decides what shows on Log -> Workout: the picker (nothing chosen, or "Switch
+  // Decides what shows on Log > Workout: the picker (nothing chosen, or "Switch
   // exercise" open) or the form, plus the "Switch exercise" row.
   function syncLogWorkoutUI() {
     const on = logCategory === 'workout' && availableDomainCategories().length > 0;
@@ -5173,7 +5144,7 @@
     const current = () => chosen || getDefault();
     function paintRow() {
       row.innerHTML = `<span class="itile-ico">${itemIconSvg(current())}</span><span class="itile-badge">${PENCIL_ICON_SVG}</span>`;
-      row.title = `${ITEM_ICONS[current()][0]}${chosen ? '' : ' (default)'} — tap to change`;
+      row.title = `${ITEM_ICONS[current()][0]}${chosen ? '' : ' (default)'}. Tap to change.`;
     }
     function paintGrid() {
       const q = search.value.trim().toLowerCase();
@@ -5205,7 +5176,7 @@
   }
 
   // Display label per domain. The id stays `measurements` (matching
-  // settings.trackMeasurements) though it is labelled "Body".
+  // settings.trackMeasurements) though it is labeled "Body".
   const DOMAIN_LABELS = { workout: 'Workout', daily: 'Daily', measurements: 'Body', water: 'Water', food: 'Food' };
   const DOMAIN_ORDER = ['workout', 'daily', 'measurements', 'water', 'food'];
 
@@ -5421,7 +5392,7 @@
     renderHistory();
   }
 
-  /* Log -> Daily
+  /* Log > Daily
      Habits and daily-rep targets, one screen (today's count is in the glance card above
      it): a tap-to-check list of the habits due today, then the daily rep targets with a meter and a Log
      button (which opens the same rep form as Workout). Nothing here is new data: it is
@@ -5688,7 +5659,7 @@
       renderRecentEntries(); renderDashboard(); renderHistory();
     });
     document.getElementById('deleteWaterEntryBtn').addEventListener('click', () => {
-      confirmDialog('Delete entry?', 'This can’t be undone.', 'Delete', () => {
+      confirmDialog('Delete entry?', "This can't be undone.", 'Delete', () => {
         state.waterEntries = state.waterEntries.filter((x) => x.id !== entryId);
         if (!save()) return;
         toast('Entry deleted');
@@ -5775,7 +5746,7 @@
       });
     }
     document.getElementById('deleteFoodEntryBtn').addEventListener('click', () => {
-      confirmDialog('Delete entry?', 'This can’t be undone.', 'Delete', () => {
+      confirmDialog('Delete entry?', "This can't be undone.", 'Delete', () => {
         state.food.entries = state.food.entries.filter((x) => x.id !== entryId);
         if (!save()) return;
         toast('Entry deleted');
@@ -5790,7 +5761,7 @@
 
   function savedFoodById(id) { return state.food.savedFoods.find((f) => f.id === id); }
 
-  // Category per saved food (default 'other'), used by the Log -> Food filter
+  // Category per saved food (default 'other'), used by the Log > Food filter
   // chips (see renderSavedFoodLogList()).
   const SAVED_FOOD_CATEGORIES = [
     { value: 'meal', label: 'Meal' },
@@ -5876,7 +5847,7 @@
     });
     if (editing) {
       document.getElementById('deleteSavedFoodBtn').addEventListener('click', () => {
-        confirmDialog('Delete this saved food?', 'This can’t be undone. Food entries already logged from it aren’t affected.', 'Delete', () => {
+        confirmDialog('Delete this saved food?', "This can't be undone. Food entries already logged from it aren't affected.", 'Delete', () => {
           state.food.savedFoods = state.food.savedFoods.filter((f) => f.id !== foodId);
           if (!save()) return;
           toast('Saved food deleted');
@@ -5887,7 +5858,7 @@
     }
   }
 
-  // Transient UI state (not saved) for the Log -> Food quantity picker: the
+  // Transient UI state (not saved) for the Log > Food quantity picker: the
   // expanded saved food and its quantity, reset to 1x when another row opens.
   let expandedSavedFoodId = null;
   let savedFoodQty = 1;
@@ -6062,7 +6033,7 @@
     if (seg === 'mine' && !searching && foodLog.cat === 'all') { more.hidden = foods.length <= shown.length; more.innerHTML = `Show all ${foods.length} foods ${uiIcon('chevron-right')}`; }
 
     if (!shown.length) {
-      list.innerHTML = `<p class="muted-text org-empty">${searching ? `No saved foods match “${escapeHtml(foodLog.query.trim())}”.`
+      list.innerHTML = `<p class="muted-text org-empty">${searching ? `No saved foods match "${escapeHtml(foodLog.query.trim())}".`
         : seg === 'fav' ? 'No favorites yet. Tap the ☆ on a saved food to keep it here.'
         : seg === 'recent' ? 'Nothing logged from a saved food yet.' : 'No saved foods in this category.'}</p>`;
       return;
@@ -6202,7 +6173,7 @@
     const tools = ['foodManageSearch', 'foodManageChips', 'foodSortLabel'].map((id) => document.getElementById(id).closest('.search, .f-scroll, .sortrow'));
     tools.forEach((el) => { el.hidden = foods.length === 0; });
     if (!foods.length) {
-      wrap.innerHTML = '<p class="muted-text">No saved foods yet — research a food once, save it here, then log it in one tap from Log &rarr; Food.</p>';
+      wrap.innerHTML = '<p class="muted-text">No saved foods yet. Look a food up once, save it here, then log it in one tap from Log > Food.</p>';
       return;
     }
     const q = foodManage.query.trim().toLowerCase();
@@ -6285,7 +6256,7 @@
       const hasPrimary = sameDay.sets.some((st) => st.primary);
       sameDay.sets = sameDay.sets.concat(fields.sets.map((st) => (hasPrimary && st.primary ? Object.assign({}, st, { primary: undefined }) : st)));
       if (note) sameDay.note = sameDay.note && !sameDay.note.includes(note) ? `${sameDay.note} · ${note}` : (sameDay.note || note);
-      message = `Added ${fields.sets.length === 1 ? 'a set' : `${fields.sets.length} sets`} to ${date === todayISO() ? 'today’s' : 'that day’s'} ${ex.name}`;
+      message = `Added ${fields.sets.length === 1 ? 'a set' : `${fields.sets.length} sets`} to ${date === todayISO() ? "today's" : "that day's"} ${ex.name}`;
     } else {
       const light = canBeLight(ex) && isOn(document.getElementById('logLightSwitch'));
       state.entries.push(Object.assign({ id: genId('en'), exerciseId: ex.id, date, note: note || null }, fields, light ? { light: true } : {}));
@@ -6677,7 +6648,7 @@
       renderRecentEntries(); renderDashboard(); renderHistory();
     });
     document.getElementById('deleteEntryBtn').addEventListener('click', () => {
-      confirmDialog('Delete entry?', 'This can’t be undone.', 'Delete', () => {
+      confirmDialog('Delete entry?', "This can't be undone.", 'Delete', () => {
         state.entries = state.entries.filter((e) => e.id !== entryId);
         if (!save()) return;
         toast('Entry deleted');
@@ -6927,20 +6898,20 @@
 
       <div class="section-head"><h2>How progression decisions work</h2></div>
       <div class="info-block">
-        <p>Each suggestion comes from two signals in what you've logged: how hard your last top set or run felt (RPE, if you log it — 1 easy, 10 all-out) and how you trended at the same weight, reps, or pace from one session to the next.</p>
+        <p>Each suggestion comes from two things you've logged: how hard your last top set or run felt (RPE, if you log it: 1 is easy, 10 is all-out) and how you did at the same weight, reps or pace from one session to the next.</p>
         <h3>When to increase weight (or reps, or pace)</h3>
-        <p>An RPE of 6–6.5 or lower on your last top set means you likely had 3 or more reps left in the tank — the current load isn't challenging anymore, so a bigger jump is suggested. Around RPE 7, a smaller bump is reasonable instead. With no RPE logged, matching or beating your rep count at the same weight for two sessions in a row is also a reliable "ready to add load" signal — a simple form of double progression: build reps at a weight, then add load and let reps reset lower for the next cycle.</p>
+        <p>An RPE of 6–6.5 or lower on your last top set means you probably had 3 or more reps left, so the load is too light and a bigger jump is suggested. Around RPE 7 a smaller bump makes sense. With no RPE logged, matching or beating your reps at the same weight two sessions in a row also means you're ready for more. That is double progression: build reps at one weight, then add weight and let the reps drop back for the next round.</p>
         <h3>When to repeat</h3>
-        <p>RPE 7.5–9 is a genuine, on-target working effort — the current load is doing its job. The suggestion is to hold there and squeeze out another rep or two before adding weight, rather than piling on load before you've actually consolidated at it.</p>
+        <p>RPE 7.5–9 is a solid working effort, and the load is doing its job. The suggestion is to stay there and add a rep or two before adding weight.</p>
         <h3>When to back off (and aim for more reps instead)</h3>
-        <p>An RPE of 9–10 — at or near failure — or reps/pace dropping two sessions in a row at the same load both point to fatigue outpacing recovery. The suggestion holds or trims the load slightly while nudging reps up: enough of a deload to protect the stimulus without digging a deeper hole.</p>
-        <p class="muted-text">These are general heuristics — RPE/RIR-based autoregulation plus simple session-to-session trends — not personalized coaching. They don't know about a rough night's sleep, an old injury, or how the bar actually felt today. Treat them as a sensible default and adjust for how you're actually feeling. Logging an RPE after your top set or run is what unlocks the sharper version of this.</p>
+        <p>RPE 9–10, at or near failure, or reps or pace dropping two sessions in a row at the same load, means fatigue is building faster than you recover. The suggestion holds or trims the load a little and nudges reps up instead.</p>
+        <p class="muted-text">These are rules of thumb (RPE-based autoregulation plus simple session-to-session trends), not personal coaching. They don't know about a bad night's sleep, an old injury or how the bar felt today, so adjust for how you feel. Logging an RPE after your top set or run makes them more specific.</p>
       </div>
     `);
     document.querySelector('[data-action="back-to-exercise"]').addEventListener('click', () => renderExerciseDetail(exId));
   }
 
-  // `preset` ({ kind, section }) only sets the starting choices of a NEW exercise; Manage > Daily
+  // `preset` ({ kind, section }) only sets the starting choices of a new exercise; Manage > Daily
   // passes a habit.
   function openExerciseForm(exId, preset, opts = {}) {
     const editing = !!exId;
@@ -7106,8 +7077,8 @@
 
     const SECTION_HINTS = {
       goal: 'Shown on your home screen once logged today, with a full progress card in Progress.',
-      daily: 'Something you’re aiming to do every day (push-ups, pull-ups, ...). Lives in the Daily tab, and in Daily targets on your home screen.',
-      accessory: 'Hidden from your home screen. Still loggable and viewable in History — for accessory/other exercises.',
+      daily: 'Something you aim to do every day, like push-ups or pull-ups. It shows in the Daily tab and in Daily targets on Home.',
+      accessory: 'For accessory and other exercises: hidden from Home, but you can still log it and see it in History.',
       habit: 'Habits are always daily targets.',
     };
 
@@ -7193,7 +7164,7 @@
             <button type="button" data-goal-mode="fixed" role="radio" aria-checked="${selectedGoalMode === 'fixed'}">Fixed number</button>
             <button type="button" data-goal-mode="standard" role="radio" aria-checked="${selectedGoalMode === 'standard'}" ${canUseStandards || waitingStandard ? '' : 'disabled'}>Bodyweight standard</button>
           </div>
-          ${!canUseStandards ? `<span class="muted-text field-hint">Log your body weight and set your sex in Settings → Profile to unlock bodyweight-standard goals.</span>` : ''}
+          ${!canUseStandards ? `<span class="muted-text field-hint">Log your body weight and set your sex in Settings > Profile to use bodyweight-standard goals.</span>` : ''}
         </div>
         ${selectedGoalMode === 'standard' && canUseStandards ? `
           <div class="field">
@@ -7272,7 +7243,7 @@
             <input type="number" step="any" id="goalDistanceInput" value="${distVal}"${canonAttr(ex && ex.distanceGoal)} placeholder="e.g. 5" /></label>
           <div class="field"><span class="field-label">Pace goal (min:sec per ${Units.distanceUnitLabel()}) <span class="muted-text">(optional)</span></span>
             <div class="inline-time-fields"><input type="number" step="1" min="0" id="goalPaceMin" value="${mins}"${canonAttr(ex && ex.paceGoal)} placeholder="min" /><input type="number" step="1" min="0" max="59" id="goalPaceSec" value="${secs}" placeholder="sec" /></div></div>
-          <p class="field-hint muted-text">Leave either blank to skip that goal — one logged run updates progress toward both.</p>`;
+          <p class="field-hint muted-text">Leave either blank to skip that goal. One logged run counts toward both.</p>`;
       }
     }
 
@@ -7430,7 +7401,7 @@
         <label class="field"><span class="field-label">Date</span><input type="date" id="editMeasurementDate" value="${m.date}" /></label>
         <label class="field"><span class="field-label">${isSleep ? 'Hours slept' : `Value${tracker ? ` (${trackerUnitLabel(tracker)})` : ''}`}</span>
           <input type="number" step="any" id="editMeasurementValue" value="${tracker ? trackerDisplayFromCanonical(tracker, m.value) : m.value}"${canonAttr(m.value)} /></label>
-        ${isSleep ? `<div class="field"><span class="field-label">Sleep quality <span class="muted-text">(optional — tap again to clear)</span></span>
+        ${isSleep ? `<div class="field"><span class="field-label">Sleep quality <span class="muted-text">(optional; tap again to clear)</span></span>
           ${qualityChipsHtml('editMeasurementQuality', m.quality != null ? m.quality : null)}</div>` : ''}
         <label class="field"><span class="field-label">Note</span><input type="text" id="editMeasurementNote" value="${m.note ? escapeHtml(m.note) : ''}" maxlength="200" /></label>
         <div class="btn-row"><button class="btn btn-primary btn-block" id="saveMeasurementBtn">Save changes</button></div>
@@ -7457,7 +7428,7 @@
       renderRecentEntries(); renderDashboard(); renderHistory();
     });
     document.getElementById('deleteMeasurementBtn').addEventListener('click', () => {
-      confirmDialog('Delete entry?', 'This can’t be undone.', 'Delete', () => {
+      confirmDialog('Delete entry?', "This can't be undone.", 'Delete', () => {
         state.measurements = state.measurements.filter((x) => x.id !== measurementId);
         if (m.trackerId === BODY_WEIGHT_TRACKER_ID) recomputeStandardGoals();
         if (!save()) return;
@@ -7467,8 +7438,6 @@
     });
   }
 
-  // Like renderExerciseDetail but simpler: current value, goal, meter, trend chart
-  // and entry list, with no suggestion or PR grid.
   // How far the latest reading is from the goal and which way the last four weeks point.
   // A percentage only means something once there is a start to measure from.
   function trackerGapText(tracker, value) {
@@ -7574,7 +7543,7 @@
         ${nameIconHtml({ iconId: 'trkIcon', inputId: 'trkName', value: tracker && tracker.name, placeholder: 'e.g. Waist, Protein, Resting Heart Rate', maxlength: 60 })}
 
         <div class="field">
-          <span class="field-label">Value type${isSleep ? ' (fixed — Sleep also tracks quality)' : hasEntries ? ' (locked — has logged entries)' : ''}</span>
+          <span class="field-label">Value type${isSleep ? ' (fixed, since Sleep also tracks quality)' : hasEntries ? ' (locked: it has logged entries)' : ''}</span>
           <div class="segmented segmented-grid" id="trkUnitKindSegmented" role="radiogroup">
             ${['weight', 'length', 'percent', 'hours', 'rating', 'count'].map((k) => `<button type="button" data-unit-kind="${k}" role="radio" ${typeLocked && unitKind !== k ? 'disabled' : ''}>${UNIT_KIND_LABELS[k]}</button>`).join('')}
           </div>
@@ -7667,7 +7636,7 @@
       const fields = { unitKind: selectedUnitKind, unitLabel, ratingMax: selectedUnitKind === 'rating' ? selectedRatingMax : null, direction: selectedDirection, showOnDashboard: selectedShowOnDashboard, ...(iconField.value() && { icon: iconField.value() }) };
       const canonicalGoal = hasGoal ? fieldCanon(document.getElementById('trkGoalInput'), (v) => trackerCanonicalFromDisplay(Object.assign({}, tracker, fields), v)) : null;
       if (editing) {
-        // A baseline is where progress toward THIS goal starts. A new goal number or
+        // A baseline is where progress toward this goal starts. A new goal number or
         // direction can leave the old baseline on the wrong side of the goal, so
         // recapture it from the latest value; removing the goal clears it.
         const prevGoal = tracker.goal;
@@ -7766,7 +7735,7 @@
     });
     if (editing) {
       document.getElementById('deleteCupBtn').addEventListener('click', () => {
-        confirmDialog('Delete this cup?', 'This can’t be undone. Water already logged with it keeps its amount and name.', 'Delete', () => {
+        confirmDialog('Delete this cup?', "This can't be undone. Water already logged with it keeps its amount and name.", 'Delete', () => {
           // Keep the name on past entries so History still says what was logged.
           state.waterEntries.forEach((w) => { if (w.cupId === cupId) w.cupName = cup.name; });
           state.water.cups = state.water.cups.filter((c) => c.id !== cupId);
@@ -7824,7 +7793,7 @@
     const select = document.getElementById('nutritionActivityLevel');
     if (!select.dataset.built) {
       select.innerHTML = Object.keys(ACTIVITY_LEVELS)
-        .map((k) => `<option value="${k}">${ACTIVITY_LEVELS[k].label} — ${ACTIVITY_LEVELS[k].hint}</option>`)
+        .map((k) => `<option value="${k}">${ACTIVITY_LEVELS[k].label}: ${ACTIVITY_LEVELS[k].hint}</option>`)
         .join('');
       select.dataset.built = '1';
     }
@@ -7845,7 +7814,7 @@
         ? `${result.missing.slice(0, -1).join(', ')} and ${result.missing[result.missing.length - 1]}`
         : result.missing[0];
       missingEl.hidden = false;
-      missingEl.textContent = `Set your ${list} (Settings → Profile, or log a body weight) to calculate this.`;
+      missingEl.textContent = `Set your ${list} (Settings > Profile, or log a body weight) to calculate this.`;
       previewEl.hidden = true;
       applyBtn.disabled = true;
     } else {
@@ -7960,7 +7929,7 @@
   function renderTrackerManageList() {
     if (!renderDomainTrackToggle('measurements')) return;
     const wrap = document.getElementById('trackerManageList');
-    wrap.innerHTML = state.trackers.map(trackerManageRowHtml).join('') || '<p class="muted-text">No trackers yet — add one to start tracking anything you like.</p>';
+    wrap.innerHTML = state.trackers.map(trackerManageRowHtml).join('') || '<p class="muted-text">No trackers yet. Add one to track anything you like.</p>';
     wrap.querySelectorAll('[data-action="edit-tracker"]').forEach((btn) => btn.addEventListener('click', () => openTrackerForm(btn.dataset.id)));
     wrap.querySelectorAll('[data-action="unarchive-tracker"]').forEach((btn) => btn.addEventListener('click', () => {
       const t = trackerById(btn.dataset.id);
@@ -7980,7 +7949,7 @@
     if (document.activeElement !== document.getElementById('waterGoalInput')) {
       const goalInput = document.getElementById('waterGoalInput');
       goalInput.value = state.water.goalMl ? round(Units.mlToDisplay(state.water.goalMl), 1) : '';
-      // See fieldCanon(): saving the untouched field must keep the stored millilitres.
+      // See fieldCanon(): saving the untouched field must keep the stored milliliters.
       goalInput.defaultValue = goalInput.value;
       if (state.water.goalMl) goalInput.dataset.canon = state.water.goalMl; else delete goalInput.dataset.canon;
     }
@@ -8105,7 +8074,7 @@
     toast('Backup downloaded');
   }
 
-  // Settings -> Erase data. Removes the one storage key and reloads, so the app comes back
+  // Settings > Erase data. Removes the one storage key and reloads, so the app comes back
   // exactly as on a first install (the setup guide). Nothing is sent anywhere; there is no
   // other copy, which is why the dialog says so and offers a backup first.
   function eraseAllData() {
@@ -8130,7 +8099,7 @@
   // A real backup is well under a few MB; refuse absurd files before parsing them.
   const MAX_IMPORT_BYTES = 25 * 1024 * 1024;
   function importBackup(file) {
-    if (file && file.size > MAX_IMPORT_BYTES) { toast('Can’t import: that file is too large to be a Fit Log backup.'); return; }
+    if (file && file.size > MAX_IMPORT_BYTES) { toast("Can't import: that file is too large to be a Fit Log backup."); return; }
     const reader = new FileReader();
     reader.onload = () => {
       try {
@@ -8142,14 +8111,14 @@
           // Kept so a failed write below can restore the in-memory state.
           const previousState = state;
           // Same pipeline as load(): older backups are upgraded additively, not rejected.
-          try { state = upgradeData(parsed); } catch (e) { state = previousState; toast('Can’t import: that backup could not be upgraded.'); return; }
+          try { state = upgradeData(parsed); } catch (e) { state = previousState; toast("Can't import: that backup could not be upgraded."); return; }
           if (!save()) { state = previousState; return; }
           applyTheme();
           renderAll();
           toast('Backup imported');
         }, true);
       } catch (e) {
-        toast('That file doesn’t look like a valid Fit Log backup.');
+        toast("That file doesn't look like a valid Fit Log backup.");
       }
     };
     reader.onerror = () => toast('Could not read that file.');
@@ -8207,8 +8176,8 @@
     about: 'All optional. Each answer powers one thing, and every one can be skipped.',
     lifting: 'Every lift is added to your library for you. Tick the ones you want a goal for; each goal can be changed later.',
     cardio: 'Every cardio activity is added to your library for you. Tick the ones you want a distance or pace goal for.',
-    food: 'Set a daily calorie target and choose what to track. All of it can be changed in Manage → Food.',
-    water: 'A guide from your height and weight, or type your own number. You can change it in Manage → Water.',
+    food: 'Set a daily calorie target and choose what to track. All of it can be changed in Manage > Food.',
+    water: 'A guide from your height and weight, or type your own number. You can change it in Manage > Water.',
     habits: 'Anything you want to check off and keep consistent. Tap to add, or add your own; you can change how often later.',
   };
   const SETUP_STEP_TITLES = { interests: 'What do you want to track?', about: 'A little about you', lifting: 'Lifting goals', cardio: 'Cardio goals', food: 'Food targets', water: 'Daily water', habits: 'Daily habits' };
@@ -8378,13 +8347,13 @@
         ${field('setupWeight', a.skipWeight ? '' : a.weight, Units.weightUnitLabel(), `Body weight in ${Units.weightUnitLabel()}`, 'step="any" min="0" inputmode="decimal"', a.skipWeight)}
         ${i.bodyweight ? `<span class="lbl">Target weight (optional)</span>
         ${field('setupWeightGoal', a.skipWeight ? '' : a.weightGoalValue, Units.weightUnitLabel(), `Target weight in ${Units.weightUnitLabel()}`, 'step="any" min="0" inputmode="decimal"', a.skipWeight)}` : ''}
-        ${why('Used for your weight chart’s starting point and for strength standards such as bench press relative to body weight.')}
+        ${why("Used for your weight chart's starting point and for strength standards such as bench press relative to body weight.")}
       </div>` : ''}
       ${showBody ? `<div class="card pad setup-card">
         <div class="setup-card-head"><span class="setup-card-title">${itemIconHtml('standing', true)}<span class="lbl">Height, age and sex</span></span>${skipLink('body', a.skipBody)}</div>
         <div class="input-pair${cm ? '' : ' is-wide'}">
           ${cm
-            ? field('setupHeightCm', a.skipBody ? '' : a.heightCm, 'cm', 'Height in centimetres', 'step="any" min="50" max="272" inputmode="decimal"', a.skipBody)
+            ? field('setupHeightCm', a.skipBody ? '' : a.heightCm, 'cm', 'Height in centimeters', 'step="any" min="50" max="272" inputmode="decimal"', a.skipBody)
             : `<div class="input-pair">${field('setupHeightFt', a.skipBody ? '' : a.heightFt, 'ft', 'Height, feet', 'step="1" min="0" max="8" inputmode="numeric" placeholder="0"', a.skipBody)}${field('setupHeightIn', a.skipBody ? '' : a.heightIn, 'in', 'Height, inches', 'step="1" min="0" max="11" inputmode="numeric" placeholder="0"', a.skipBody)}</div>`}
           ${field('setupAge', a.skipBody ? '' : a.age, 'age', 'Age in years', 'step="1" min="1" max="120" inputmode="numeric" placeholder="–"', a.skipBody)}
         </div>
@@ -8698,7 +8667,7 @@
     if (!(w > 0) || !h) return null;
     return S.waterTarget(Units.displayToLb(w), h, setupAnswers.waterActivity);
   }
-  // Water in the chosen volume unit, with litres alongside for US units.
+  // Water in the chosen volume unit, with liters alongside for US units.
   function fmtWaterParts(ml) {
     return { main: `${round(Units.mlToDisplay(ml), 0).toLocaleString()} ${Units.volumeUnitLabel()}`, alt: state.settings.volumeUnit === 'mL' ? '' : `${round(ml / 1000, 1)} L` };
   }
@@ -9047,7 +9016,7 @@
     showAppChrome();
     switchTab('dashboard');
     renderAll();
-    toast('All set — welcome to Fit Log!');
+    toast('All set. Welcome to Fit Log!');
   }
 
   // Show only the `.view` whose data-view matches `tab`, highlight its bottom tab
@@ -9381,7 +9350,7 @@
       profileHeightShown = profileHeightKey();
       toast('Profile saved');
       closeProfilePanels();
-      // renderAll() refreshes the calculator preview in Manage -> Food. Do not
+      // renderAll() refreshes the calculator preview in Manage > Food. Do not
       // re-apply into macroGoals here: only "Apply to daily goals" does that, so a
       // Profile edit never overwrites goals.
       renderAll();
@@ -9423,7 +9392,7 @@
     document.getElementById('recoverResetBtn').addEventListener('click', () => {
       confirmDialog(
         'Permanently delete this data?',
-        'This clears the data Fit Log couldn’t read and starts fresh. Export a recovery file first if you haven’t already — this can’t be undone.',
+        "This clears the data Fit Log couldn't read and starts fresh. Export a recovery file first if you haven't already. This can't be undone.",
         'Delete and start fresh',
         () => {
           try { localStorage.removeItem(STORAGE_KEY); } catch (e) { toast('Could not erase: your browser blocked access to storage.'); return; }

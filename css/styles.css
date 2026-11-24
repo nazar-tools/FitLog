@@ -14,7 +14,7 @@
   --border-strong:   #b4b3a8;   /* control borders that must stay visible on a surface (checkboxes) */
   --border:          rgba(11,11,11,0.10); /* the subtle 1px border every card uses */
 
-  --accent:          #2570cc;   /* THE app color  -  meter fill, links, active tab */
+  --accent:          #2570cc;   /* the app color: meter fill, links, active tab */
   --accent-fill:     #2570cc;   /* behind white text (buttons, selected day); 4.5:1 or better with --on-accent */
   --accent-track:    #b7d3f6;   /* the unfilled part of a progress meter (a lighter step of --accent) */
   --accent-strong:   #184f95;   /* a darker step of --accent: text and icons sitting on --accent-soft */
@@ -31,7 +31,7 @@
   --on-critical:     #ffffff;
   --dot-body:        #8b5cf6;   /* History calendar's "body measurement logged" dot (workout reuses --good, water reuses --accent) */
   --dot-food:        #d9852b;   /* History calendar's "food logged" dot */
-  --dot-daily:       #e87ba4;   /* History calendar's "daily check-in logged" dot (checked against the other dots for colour-blind separation) */
+  --dot-daily:       #e87ba4;   /* History calendar's "daily check-in logged" dot (checked against the other dots for color-blind separation) */
   --streak:          #e8622c;   /* the Home streak card's flame, number and glow */
   --chart-over:      #b27900;   /* chart status: a day over the calorie target by 10% or more */
   --macro-1:         #2a78d6;   /* macro split slots (protein, carbs, fat), checked with the dataviz validator */
@@ -41,8 +41,7 @@
   --radius-sm: 10px;  /* inputs, small buttons */
   --radius-md: 14px;  /* rows, meters */
   --radius-lg: 20px;  /* cards, modal sheet corners */
-  /* Shadows intentionally stay a fixed dark tone in both themes (a shadow is
-     a depth cue, not a brand color) rather than being theme-tokenized. */
+  /* Shadows stay one dark tone in both themes: a shadow is a depth cue, not a brand color. */
   --shadow-1: 0 1px 2px rgba(11,11,11,0.06), 0 1px 1px rgba(11,11,11,0.04);
 
   /* Spacing scale: every gap, padding and margin below uses one of these. */
@@ -139,10 +138,9 @@
 }
 
 * { box-sizing: border-box; }
-/* The native `hidden` attribute is UA-stylesheet [hidden]{display:none}, which
-   loses to any author rule setting `display` at equal specificity (.view,
-   .field, .empty-state, etc. all set display: flex/grid). Force it globally
-   so `el.hidden = true` always actually hides the element. */
+/* The `hidden` attribute is only [hidden]{display:none} in the browser stylesheet, which loses
+   to any rule here that sets display (.view, .field, .empty-state). Force it, so `el.hidden =
+   true` always hides. */
 [hidden] { display: none !important; }
 /* Sideways swipes belong to the app (pages and sheets). The page pans up and down only, so
    the browser never takes a sideways drag for its own swipe-to-go-back; rows that scroll
@@ -424,8 +422,8 @@ button { font-family: inherit; }
   border-radius: 999px;
   white-space: nowrap;
 }
-/* Used when a badge sits on its own line (exercise detail modal) instead of
-   inside a flex row (dashboard card)  -  layout only, no visual/color change. */
+/* For a badge on its own line (item page) rather than inside a flex row (Home card). Layout
+   only. */
 .badge-standalone { display: inline-block; margin-bottom: var(--sp-8); }
 .ex-card-values { display: flex; align-items: baseline; gap: var(--sp-6); margin-top: var(--sp-6); }
 .ex-card-current { font-size: var(--fs-2xl); font-weight: 600; }
@@ -440,10 +438,8 @@ button { font-family: inherit; }
   overflow: hidden;
 }
 .meter-fill {
-  /* --fill is the one thing app.js sets inline on this element, and it's a
-     data value (current progress %), not a design choice  -  every visual
-     property (color, thickness, corner radius, animation) is defined here
-     in CSS, driven by `--accent` above. */
+  /* --fill is the only thing app.js sets inline here, and it is data (the progress %). Color,
+     thickness, corners and motion all come from this rule. */
   --fill: 0%;
   position: absolute; left: 0; top: 0; bottom: 0;
   width: var(--fill);
@@ -458,24 +454,20 @@ button { font-family: inherit; }
 .ex-card-pct.is-complete { color: var(--good); font-weight: 600; display: flex; align-items: center; gap: var(--sp-4); }
 .ex-card-chart { margin-top: var(--sp-8); }
 
-/* The optional trend-delta badge on the Body Weight card ("+4.8 lb in 3
-   months")  -  sentiment color follows the tracker's own goal direction
-   (see deltaSentiment() in app.js), so it's neutral whenever that isn't
-   set rather than guessing whether a change is good news. */
+/* The trend badge on the Body Weight card ("+4.8 lb in 3 months"). Its color follows the
+   tracker's goal direction (deltaSentiment() in app.js) and stays neutral when there is none,
+   rather than guessing whether a change is good news. */
 .ex-card-delta { font-size: var(--fs-sm); font-weight: 600; white-space: nowrap; color: var(--text-secondary); }
 .ex-card-delta.is-good { color: var(--good); }
 /* Moving away from a goal is a heads-up, not an error: amber text, never the delete red. */
 .ex-card-delta.is-bad { color: var(--warning-ink); }
 
-/* A one-line optional-insight readout under a card's chart  -  BMI, a
-   strength-vs-bodyweight ratio, a pace level, or (in muted-text) a prompt
-   for the Profile fact it still needs. */
+/* A one-line insight under a card's chart (BMI, strength ratio, pace level), or in muted text
+   the Profile fact it still needs. */
 .insight-line { font-size: var(--fs-sm); margin-top: var(--sp-8); }
 
-/* A cardio exercise with both a distance and a pace goal renders one of
-   these per goal, stacked, inside the same card/detail view  -  one logged
-   run updates both blocks from the same entry. Single-goal cardio and every
-   non-cardio kind render just one plain .ex-card-values/.meter, unwrapped. */
+/* Cardio with both a distance and a pace goal gets one of these per goal, stacked in the same
+   card; one run updates both. Everything else renders a plain .ex-card-values/.meter. */
 .ex-card-metric + .ex-card-metric { margin-top: var(--sp-12); }
 .ex-card-metric-label {
   font-size: var(--fs-xs);
@@ -490,9 +482,8 @@ button { font-family: inherit; }
 .suggestion-headline { font-size: var(--fs-input); font-weight: 600; }
 .suggestion-detail { font-size: var(--fs-sm); color: var(--text-secondary); margin-top: var(--sp-4); }
 .suggestion-method { font-size: var(--fs-xs); color: var(--muted); margin-top: var(--sp-8); line-height: 1.5; }
-/* The one-tap "at a glance headline only" affordance  -  the full detail
-   sentence, method note, and general explanation live in
-   openSuggestionInfoModal() instead of always being visible here. */
+/* Only the headline shows here. The full sentence, method note and explanation are in
+   openSuggestionInfoModal(). */
 .suggestion-tap-hint { font-size: var(--fs-xs); font-weight: 600; color: var(--accent); margin-top: var(--sp-6); }
 
 /* Tier bar (Strength level / Pace level detail)
@@ -508,11 +499,9 @@ button { font-family: inherit; }
 }
 .tier-bar-caption { font-size: var(--fs-xs); margin-top: var(--sp-6); line-height: 1.5; }
 
-/* Category dot (BMI standards-preview row)
-   A small colored dot before a .standards-preview-row's label, naming
-   which zone that row is without needing a separate legend  -  reused
-   wherever a table row stands for a named category rather than a plain
-   number (currently just BMI's table in bmiDetailHtml()). */
+/* Category dot (BMI table)
+      A small colored dot before a .standards-preview-row label that names the zone the row
+   stands for, so the table needs no legend. */
 .category-dot { width: 8px; height: 8px; border-radius: 999px; display: inline-block; margin-right: var(--sp-6); }
 .category-dot.is-underweight { background: var(--accent); }
 .category-dot.is-normal { background: var(--good); }
@@ -528,8 +517,8 @@ button { font-family: inherit; }
 }
 .modal-back-link .icon { width: 16px; height: 16px; flex: none; }
 
-/* Plain-language reference content (e.g. "how progression decisions work")
-   inside a modal  -  ordinary prose with small subheadings, not a card. */
+/* Plain reference text inside a modal (how progression decisions work): prose with small
+   subheadings, not a card. */
 .info-block h3 { font-size: var(--fs-md); margin: var(--sp-12) 0 var(--sp-4); }
 .info-block p { font-size: var(--fs-sm); color: var(--text-secondary); line-height: 1.5; margin: 0 0 var(--sp-4); }
 
@@ -551,10 +540,8 @@ button { font-family: inherit; }
 .card > .standards-preview:last-child { border-bottom: 0; }
 .card:has(> .standards-preview:last-child) { overflow: hidden; padding-bottom: 0; }
 .card > .standards-preview .standards-preview-row { padding: var(--sp-8) var(--sp-16); }
-/* Daily-value guidance table (openFoodDetail)  -  a row past its DV for
-   Sugar/Sodium/Caffeine (see MACRO_DV_OVER_FLAGS) gets its whole value
-   column in red, not just the "% DV" part, per the user's request to
-   highlight the number itself. */
+/* Daily-value table (openFoodDetail). A Sugar, Sodium or Caffeine row past its DV
+   (MACRO_DV_OVER_FLAGS) turns its whole value column red, not just the % DV. */
 .standards-preview-row.over > span:last-child, .standards-preview-row.over .pct { color: var(--critical); font-weight: 700; }
 .standards-preview-row .macro-val { display: flex; flex-direction: column; align-items: flex-end; gap: 1px; text-align: right; }
 .standards-preview-row .pct { font-size: var(--fs-xs); font-weight: 400; color: var(--text-secondary); }
@@ -580,13 +567,12 @@ button { font-family: inherit; }
 #logFoodDynamicFields { display: flex; flex-direction: column; gap: var(--sp-12); }
 .field { display: flex; flex-direction: column; gap: var(--sp-6); }
 .field-label { font-size: var(--fs-sm); color: var(--text-secondary); font-weight: 500; }
-/* Required-field marker  -  currently just Calories in the food log/edit
-   forms (see handleLogFoodSubmit). */
+/* Required-field marker, used only on Calories in the food log and edit forms
+   (handleLogFoodSubmit). */
 /* A short explainer line under a field's control, e.g. the Section picker's
    "shown as a full progress card..." text. */
-/* Two number inputs side by side (minutes+seconds, etc.)  -  anywhere a field
-   needs a horizontal pair instead of stacking, use this instead of an
-   inline style. */
+/* Two number inputs side by side (minutes and seconds) wherever a field needs a pair instead
+   of a stack. Use this, not an inline style. */
 .inline-time-fields { display: flex; gap: var(--sp-6); }
 .inline-time-fields input { width: 100%; }
 .inline-time-fields .btn { flex: none; white-space: nowrap; }
@@ -660,8 +646,7 @@ input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; marg
 .danger-zone .danger-title .icon { width: 18px; height: 18px; flex: none; }
 .btn-block { width: 100%; }
 .btn-sm { padding: var(--sp-6) var(--sp-12); font-size: var(--fs-sm); }
-/* "+ Add exercise / tracker / cup"  -  a real Lucide `plus` icon in place of
-   the old literal "+" character, vertically centered against the label. */
+/* "+ Add exercise / tracker / cup": the Lucide plus icon, centered on the label. */
 .btn-icon-label { display: inline-flex; align-items: center; gap: var(--sp-4); }
 .btn-icon-label .icon { width: 14px; height: 14px; }
 .btn-row { display: flex; gap: var(--sp-8); flex-wrap: wrap; margin-top: var(--sp-8); }
@@ -773,10 +758,10 @@ input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; marg
 #nutritionCalcFields { padding: var(--sp-16) var(--sp-16) var(--sp-16); border-top: 1px solid var(--gridline); }
 
 
-/* Chip picker  -  a row of discrete-choice tap targets (e.g. a 1-5 rating,
-   or which macros are tracked in Manage → Food) in place of a number input
-   or a full toggle row, sized like the other touch targets on this page
-   rather than a compact segmented control. */
+/* Chip picker
+      A row of tap targets for a few fixed choices (a 1-5 rating, or which macros Manage > Food
+   tracks), used instead of a number input or a row of switches. Chips are full touch-target
+   size, not a compact segmented control. */
 .chip-picker { display: flex; gap: var(--sp-8); flex-wrap: wrap; }
 .chip-option {
   min-width: 44px; height: 44px;
@@ -855,7 +840,7 @@ input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; marg
 .calendar-day.is-selected.is-today { box-shadow: inset 0 0 0 2px var(--surface-1); }
 .calendar-day-dots { display: flex; gap: var(--sp-2); height: 5px; }
 .cal-dot { width: 5px; height: 5px; border-radius: 999px; display: inline-block; }
-/* Each area keeps its own slot in the row, so position tells the dots apart as well as colour. */
+/* Each area keeps its own slot in the row, so position tells the dots apart as well as color. */
 .cal-dot.is-empty { visibility: hidden; }
 /* Five slots must fit a day cell on a 320px screen. */
 @media (max-width: 359px) { .calendar-day-dots .cal-dot { width: 4px; height: 4px; } }
@@ -876,7 +861,7 @@ input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; marg
 }
 .calendar-legend .cal-key { display: inline-flex; align-items: center; gap: var(--sp-4); }
 .calendar-legend .cal-dot { width: 7px; height: 7px; }
-/* A legend entry's current streak, in the calendar's own type: no pill, no colour. */
+/* A legend entry's current streak, in the calendar's own type: no pill, no color. */
 .cal-streak { display: inline-flex; align-items: center; gap: var(--sp-2); margin-left: var(--sp-2); font-weight: 700; color: var(--text-primary); font-variant-numeric: tabular-nums; }
 .cal-streak .icon { width: 12px; height: 12px; color: var(--muted); }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
@@ -939,7 +924,7 @@ input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; marg
 .modal-sheet.is-detail-sheet { min-height: 88vh; }
 .modal-sheet > * { flex-shrink: 0; }
 /* The drag handle sits in the sheet's top padding. The bar is 36x4; the padding
-   only widens the touch target, and background-clip keeps it uncoloured. */
+   only widens the touch target, and background-clip keeps it uncolored. */
 .modal-handle {
   position: absolute; top: var(--sp-8); left: 50%; transform: translateX(-50%);
   box-sizing: content-box;
@@ -957,10 +942,9 @@ input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; marg
 .modal-title-row { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-8); }
 .modal-title-row h2 { font-size: var(--fs-lg); }
 .title-with-icon { display: flex; align-items: center; gap: var(--sp-8); }
-/* Groups the title row's action icons (Edit, then ✕) so a detail modal
-   can offer Edit right where the title already is  -  the "more convenient
-   place" for it than a full-width button buried below the fold  -  without
-   the two buttons touching or wrapping oddly at 44px each. */
+/* The title row's action icons (Edit, then close), so an item page offers Edit beside its
+   title instead of a full-width button further down, without the two 44px buttons touching or
+   wrapping. */
 .modal-title-actions { display: flex; align-items: center; gap: var(--sp-8); flex-shrink: 0; }
 /* Muted line of context under a modal title. Spacing comes from the sheet's gap. */
 .modal-close { border: none; background: var(--surface-2); width: 44px; height: 44px; border-radius: 999px; color: var(--text-primary); cursor: pointer; display: flex; align-items: center; justify-content: center; }
@@ -1113,7 +1097,7 @@ button.row-switch { width: 100%; border: 0; background: none; font: inherit; col
 .segmented-fill { display: flex; }
 .segmented-fill button { flex: 1 1 0; min-width: 0; }
 
-/* ---------- Add from catalog sheet ---------- */
+/* Add from catalog sheet */
 .head-actions { display: flex; gap: var(--sp-8); align-items: center; }
 .cat-row { cursor: pointer; align-items: center; gap: var(--sp-12); }
 .cat-row.is-toggled-off { opacity: .6; cursor: default; }
@@ -1134,7 +1118,7 @@ button.row-switch { width: 100%; border: 0; background: none; font: inherit; col
 }
 .chip-option.is-active.is-added { background: var(--accent-soft); color: var(--accent-strong); border-color: transparent; }
 
-/* ---------- Home sections ---------- */
+/* Home sections */
 .tag { display: inline-block; font-size: var(--fs-xs); font-weight: 700; padding: var(--sp-2) var(--sp-8); border-radius: 999px; background: var(--accent-soft); color: var(--accent-strong); }
 .tag-good { background: var(--good-bg); color: var(--good); }
 .link-btn { background: none; border: 0; padding: var(--sp-4) 0; font: inherit; font-size: var(--fs-sm); font-weight: 700; color: var(--accent); cursor: pointer; }
@@ -1188,20 +1172,20 @@ button.row-switch { width: 100%; border: 0; background: none; font: inherit; col
 .home-mini [data-cup-id] { display: flex; flex-direction: column; align-items: center; gap: 0; line-height: 1.25; padding-block: var(--sp-6); height: auto; }
 .home-mini [data-cup-id] .muted-text { font-size: var(--fs-xs); font-weight: 500; }
 
-/* ---------- Servings stepper ---------- */
+/* Servings stepper */
 .stepper { display: inline-flex; align-items: center; gap: 0; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface-2); overflow: hidden; align-self: flex-start; }
 .stepper-btn { width: 48px; height: 48px; display: inline-flex; align-items: center; justify-content: center; border: 0; background: transparent; color: var(--text-primary); cursor: pointer; }
 .stepper-btn:active { background: var(--accent-soft); }
 .stepper input { width: 72px; height: 48px; text-align: center; border: 0; border-inline: 1px solid var(--border); background: var(--surface-1); font-size: var(--fs-lg); font-weight: 700; font-variant-numeric: tabular-nums; color: var(--text-primary); -moz-appearance: textfield; }
 .stepper input::-webkit-outer-spin-button, .stepper input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 
-/* ---------- Tidy up ---------- */
+/* Tidy up */
 .tidy-card { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-12); padding: var(--sp-16) var(--sp-16); background: var(--accent-soft); border-color: transparent; }
 .tidy-text { display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; }
 .tidy-text .muted-text { font-size: var(--fs-sm); }
 .tidy-actions { display: flex; flex-direction: column; align-items: flex-end; gap: var(--sp-2); flex: none; }
 
-/* ---------- Equipment variant chips (Log) ---------- */
+/* Equipment variant chips (Log) */
 .variant-chips { display: flex; flex-wrap: wrap; gap: var(--sp-6); margin-top: var(--sp-8); }
 .variant-chip { padding: var(--sp-4) var(--sp-12); min-height: 30px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface-2); color: var(--text-primary); font: inherit; font-size: var(--fs-xs); font-weight: 600; cursor: pointer; }
 .variant-chip.is-new { background: transparent; border-style: dashed; color: var(--text-secondary); }
@@ -1209,7 +1193,7 @@ button.row-switch { width: 100%; border: 0; background: none; font: inherit; col
 #logExerciseHead .variant-chips { flex: 1 0 100%; margin-top: 0; }
 .entry-row-actions .icon-btn { width: 38px; height: 38px; }
 
-/* ---------- Split sheets: fixed header, scrolling list, fixed footer ---------- */
+/* Split sheets: fixed header, scrolling list, fixed footer */
 .modal-sheet.is-split-sheet { overflow: hidden; height: 90vh; max-height: 90vh; padding-bottom: 0; }
 .split-shell { display: flex; flex-direction: column; gap: var(--sp-12); flex: 1; min-height: 0; }
 .split-controls { display: flex; flex-direction: column; gap: var(--sp-8); }
@@ -1234,7 +1218,7 @@ button.row-switch { width: 100%; border: 0; background: none; font: inherit; col
 .cat-row .entry-row-sub { white-space: normal; }
 .chip-lead { flex: none; align-self: center; font-size: var(--fs-xs); font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); padding-right: var(--sp-2); }
 
-/* ---------- Log > Food (matches the Food boards) ---------- */
+/* Log > Food (matches the Food boards) */
 .saved-food-log-row .entry-row-sub { white-space: normal; }
 .qty-label { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-8); }
 .row-icon { flex: none; width: 40px; height: 40px; border-radius: 12px; background: var(--surface-2); display: inline-flex; align-items: center; justify-content: center; color: var(--text-primary); }
@@ -1251,7 +1235,7 @@ button.row-switch { width: 100%; border: 0; background: none; font: inherit; col
 .best-tags { display: flex; flex-wrap: wrap; gap: var(--sp-6); }
 .best-note .tag-good { display: inline-flex; align-items: center; }
 
-/* ---------- Setup (matches the Setup boards) ---------- */
+/* Setup (matches the Setup boards) */
 .setup-view { gap: var(--sp-20); }
 .setup-progress { display: flex; gap: var(--sp-6); }
 .setup-progress i { flex: 1; height: 5px; border-radius: 9px; background: var(--accent-track); }
@@ -1340,7 +1324,7 @@ button.row-switch { width: 100%; border: 0; background: none; font: inherit; col
 .last-time-sets { font-weight: 700; font-size: var(--fs-base); overflow-wrap: normal; }
 #logForm > .log-head.card { padding: var(--sp-12) var(--sp-16); }
 
-/* ---------- About the numbers ---------- */
+/* About the numbers */
 .ref-card { display: flex; flex-direction: column; gap: var(--sp-6); }
 .ref-card p { margin: 0; }
 .ref-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-8); }
@@ -1660,7 +1644,7 @@ button.row-switch { width: 100%; border: 0; background: none; font: inherit; col
 .mm .mm-stripe-bg { fill: color-mix(in srgb, var(--text-primary) 19%, var(--surface-1)); }
 .mm .mm-stripe { fill: color-mix(in srgb, var(--accent) 75%, var(--surface-2)); }
 .sw.mm-striped { background: repeating-linear-gradient(45deg, color-mix(in srgb, var(--accent) 75%, var(--surface-2)) 0 2px, color-mix(in srgb, var(--text-primary) 19%, var(--surface-1)) 2px 4px); }
-/* Recovery: warm steps from just trained to almost ready; ready is the plain grey of l0. */
+/* Recovery: warm steps from just trained to almost ready; ready is the plain gray of l0. */
 .mm .mm-m.r1, .sw.mm-r1 { fill: color-mix(in srgb, var(--warning) 32%, var(--surface-2)); background: color-mix(in srgb, var(--warning) 32%, var(--surface-2)); }
 .mm .mm-m.r2, .sw.mm-r2 { fill: color-mix(in srgb, var(--warning) 65%, var(--surface-2)); background: color-mix(in srgb, var(--warning) 65%, var(--surface-2)); }
 .mm .mm-m.r3, .sw.mm-r3 { fill: var(--streak); background: var(--streak); }

@@ -1,8 +1,8 @@
-// Small dependency-free SVG chart helpers.
-// lineChart() is the compact trend used on goal cards and detail sheets. columns(), line() and
-// heatmap() draw the Progress charts: a viewBox as wide as the card (setWidth), one axis,
+// Small SVG chart helpers with no dependencies.
+// lineChart() is the compact trend on goal cards and detail sheets. columns(), line() and
+// heatmap() draw the Progress charts: a viewBox as wide as the card (setWidth), one axis, a
 // hairline grid, and only goals dashed. Each returns markup for a .chart-box; wire() then
-// adds the press-and-hold (or hover, or arrow key) readout using the tips registered for it.
+// adds the press-and-hold (or hover, or arrow key) readout from the tips registered for it.
 
 const Charts = (() => {
 
@@ -27,7 +27,7 @@ const Charts = (() => {
     const goal = opts.goal;
 
     if (!entries.length) {
-      return `<div class="chart-empty">No entries yet — log one to start your trend line.</div>`;
+      return `<div class="chart-empty">No entries yet. Log one to start your trend line.</div>`;
     }
     if (entries.length === 1) {
       const v = opts.formatValue ? opts.formatValue(entries[0].value) : entries[0].value;
@@ -45,15 +45,8 @@ const Charts = (() => {
     const innerW = width - padL - padR;
     const innerH = height - padT - padB;
     const n = entries.length;
-    // X position by actual elapsed time between the first and last logged
-    // date, not by index -  a plain index spacing put every entry the same
-    // distance apart regardless of when it was actually logged, so a run of
-    // daily entries followed by a two-week gap then one more looked exactly
-    // like perfectly even logging: the gap and the density were both
-    // flattened into identical spacing, distorting the very trend the chart
-    // exists to show. Falls back to even spacing only when every entry
-    // shares one date (totalSpan 0), where a time-proportional x is
-    // undefined anyway.
+    // x follows the dates, not the index, so a two-week gap shows as a gap. Even spacing is
+    // only used when every entry shares one date.
     const firstTime = new Date(entries[0].date + 'T00:00:00').getTime();
     const totalSpan = new Date(entries[n - 1].date + 'T00:00:00').getTime() - firstTime;
     const points = entries.map((e, i) => {
@@ -83,10 +76,8 @@ const Charts = (() => {
         <text x="${width - padR}" y="${(gy - 4).toFixed(2)}" text-anchor="end" class="chart-axis-text">Goal ${fmtVal(goal)}</text>`;
     }
 
-    // The SVG's box is sized purely in CSS (width:100%, height derived from
-    // the aspect-ratio below) rather than a fixed pixel height, so the chart
-    // always fills its container edge-to-edge instead of "meet" scaling
-    // letterboxing it down to fit a mismatched fixed height.
+    // Sized by CSS (full width, height from the aspect ratio) so the chart fills its box
+    // instead of being letterboxed into a fixed height.
     return `
       <svg viewBox="0 0 ${width} ${height}" style="width:100%;height:auto;aspect-ratio:${width}/${height};display:block" role="img" aria-label="Progress over time">
         ${goalLine}
@@ -314,10 +305,10 @@ const Charts = (() => {
   }
 
   /* Body map: a front and a back figure with one shape per muscle (19 of them), each shaded by
-     its own class: l0 to l3 for sets, r1 to r3 for recovery. The drawing is the app's own: every shape is
-     a short list of points on a 200 x 400 figure, rounded into a smooth outline. Points are
-     given for the left half; `pair` shapes are mirrored, `mid` shapes run down the centre
-     line and close with their own mirror image. */
+     its own class: l0 to l3 for sets, r1 to r3 for recovery. Every shape is a short list of
+     points on a 200 x 400 figure, rounded into a smooth outline. Points are given for the left
+     half; `pair` shapes are mirrored, and `mid` shapes run down the center line and close with
+     their own mirror image. */
   const BODY_SIL = [
     ['mid', [[91, 46], [90, 54], [87, 62]]],
     ['mid', [[86, 58], [66, 63], [55, 75], [58, 104], [64, 134], [67, 156], [63, 178], [60, 200], [78, 208]]],

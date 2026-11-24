@@ -1,10 +1,9 @@
 /* Unit conversion and display formatting.
 
-   Data is stored in one canonical unit (pounds, miles, centimetres,
-   millilitres, seconds per mile) whatever the Settings toggle says. `Units`
-   converts to the selected display unit, so changing the toggle only ever
-   changes presentation. create(getSettings) takes a function returning the
-   current settings, which keeps this file free of app state. */
+   Data is stored in one unit per quantity (pounds, miles, centimeters, milliliters,
+   seconds per mile) whatever Settings says, and `Units` converts for display, so
+   switching lb/kg or mi/km never touches the history. create(getSettings) takes a
+   function returning the current settings, which keeps this file free of app state. */
 (function (root) {
   'use strict';
 
@@ -14,21 +13,13 @@
     const CM_PER_IN = 2.54;
     const ML_PER_FLOZ = 29.5735295625;
 
-    // Sanity bounds for profile fields -  generous enough to cover every real
-    // human (and then some) while still catching fat-fingered or garbage
-    // input like "999" years old or "40 ft" tall. Used by both the setup
-    // wizard's About step and Settings' Profile card so the two can't drift.
+    // Wide enough for any real person, tight enough to catch a typo like 999 years or 40 ft.
+    // The setup wizard and Settings > Profile both use these.
     const MIN_AGE = 1;
     const MAX_AGE = 120;
     const MIN_HEIGHT_CM = 50;   // ~1'8"
     const MAX_HEIGHT_CM = 272;  // ~8'11"
 
-    // Data is saved in one fixed ("canonical") unit -  pounds for weight, miles
-    // for distance/pace -  regardless of the current Settings toggle. `Units`
-    // is the only place that converts canonical to whichever unit is currently
-    // selected for *display*. This split means the lb/kg or mi/km toggle can
-    // only ever change presentation, never the logged history itself, and
-    // entries stay comparable even if the unit is switched partway through.
     const Units = {
       lbToDisplay: (lb) => (getSettings().weightUnit === 'kg' ? lb * LB_PER_KG : lb),
       displayToLb: (v) => (getSettings().weightUnit === 'kg' ? v / LB_PER_KG : v),
@@ -38,18 +29,17 @@
       displayToMi: (v) => (getSettings().distanceUnit === 'km' ? v / KM_PER_MI : v),
       distanceUnitLabel: () => getSettings().distanceUnit,
 
-      // pace stored canonically as seconds per mile
+      // Pace is stored as seconds per mile.
       secPerMiToDisplaySecPerUnit: (s) => (getSettings().distanceUnit === 'km' ? s / KM_PER_MI : s),
       displaySecPerUnitToSecPerMi: (s) => (getSettings().distanceUnit === 'km' ? s * KM_PER_MI : s),
 
-      // Body-measurement lengths (height, waist, bicep, ...) canonically in
-      // centimeters -  a separate unit from running distance (miles/km above)
-      // since inches/cm and miles/km are different scales for different things.
+      // Body measurements (height, waist, arm) are stored in centimeters, apart from running
+      // distance.
       cmToDisplay: (cm) => (getSettings().lengthUnit === 'cm' ? cm : cm / CM_PER_IN),
       displayToCm: (v) => (getSettings().lengthUnit === 'cm' ? v : v * CM_PER_IN),
       lengthUnitLabel: () => getSettings().lengthUnit,
 
-      // Water volume canonically in milliliters.
+      // Water is stored in milliliters.
       mlToDisplay: (ml) => (getSettings().volumeUnit === 'mL' ? ml : ml / ML_PER_FLOZ),
       displayToMl: (v) => (getSettings().volumeUnit === 'mL' ? v : v * ML_PER_FLOZ),
       volumeUnitLabel: () => (getSettings().volumeUnit === 'mL' ? 'mL' : 'fl oz'),
@@ -60,10 +50,8 @@
       return Math.round(v * f) / f;
     }
 
-    // Splits a canonical height in cm into whole feet + inches for display - 
-    // nobody knows their height as a single number of inches, so Profile's
-    // imperial height field is feet-and-inches (see the Settings section
-    // below), never the plain "in" a length tracker like Waist uses.
+    // Height in whole feet and inches: Profile asks for feet and inches, never a plain
+    // number of inches like a Waist tracker.
     function cmToFtIn(cm) {
       const totalIn = round(cm / CM_PER_IN, 1);
       const ft = Math.floor(totalIn / 12);
@@ -127,11 +115,8 @@
       return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${String(r).padStart(2, '0')}` : `${m}:${String(r).padStart(2, '0')}`;
     }
 
-    // A calendar day is a YYYY-MM-DD label, not a timestamp -  reading it back
-    // off a Date's local getters (never .toISOString(), which reports UTC and
-    // silently shifts the date by a day in any timezone ahead of UTC) is what
-    // keeps "today," streaks, and trend windows agreeing with the calendar on
-    // the wall rather than the calendar in Greenwich.
+    // A day is a YYYY-MM-DD label built from the local date. toISOString() is UTC and would
+    // put "today" a day off in any timezone ahead of UTC.
     function localDateISO(d) {
       const y = d.getFullYear();
       const m = String(d.getMonth() + 1).padStart(2, '0');

@@ -218,8 +218,8 @@
     };
   }
 
-  // FDA Daily Values for a 2,000 calorie diet. Total sugar has NO Daily Value
-  // (the 50 g figure is for ADDED sugar only), so it is deliberately absent.
+  // FDA Daily Values for a 2,000 calorie diet. Total sugar has no Daily Value (the 50 g
+  // figure is for added sugar), so it is left out.
   // Caffeine has no DV; 400 mg is the FDA's general consumer guidance.
   const DAILY_VALUES = { protein: 50, carbs: 275, fat: 78, sodium: 2300, caffeine: 400 };
   const DV_OVER_FLAGS = ['sodium', 'caffeine'];
@@ -268,7 +268,7 @@
       summary: STREAK_RULE + ' Today may be empty without breaking the streak until the day ends.',
       source: null },
     { id: 'sleep', title: 'Sleep range', kind: 'reference',
-      summary: 'Adults: 7 to 9 hours a night. Under 6 is labelled Short, 6 to under 7 Slightly short, 7 to 9 Adequate, over 9 Long. The main average covers the last 7 calendar nights and needs at least 3 logged; a separate line averages your last logged nights, whenever they were.',
+      summary: 'Adults: 7 to 9 hours a night. Under 6 is labeled Short, 6 to under 7 Slightly short, 7 to 9 Adequate, over 9 Long. The main average covers the last 7 calendar nights and needs at least 3 logged; a separate line averages your last logged nights, whenever they were.',
       source: { label: 'Hirshkowitz et al. 2015 (NSF), Sleep Health', url: 'https://doi.org/10.1016/j.sleh.2014.12.010' },
       alt: { label: 'Watson et al. 2015 (AASM/SRS), SLEEP', url: 'https://doi.org/10.5665/sleep.4716' },
       caveat: 'Needs vary by person. This is not a medical assessment.' },
@@ -283,7 +283,7 @@
       alt: { label: 'Morán-Navarro et al. 2017, Eur J Appl Physiol (failure slows recovery)', url: 'https://doi.org/10.1007/s00421-017-3725-7' },
       caveat: 'An estimate from what you log, not a measurement. Ready means the usual time has passed, not that you have to train.' },
     { id: 'oneRM', title: 'Estimated 1RM', kind: 'reference',
-      summary: 'Epley formula: weight x (1 + reps / 30). Only sets of ' + ONE_RM_MAX_REPS + ' reps or fewer are used, because the estimate drifts high on longer sets. A set of one rep is a real lift and is labelled as such; everything else is calculated.',
+      summary: 'Epley formula: weight x (1 + reps / 30). Only sets of ' + ONE_RM_MAX_REPS + ' reps or fewer are used, because the estimate drifts high on longer sets. A set of one rep is a real lift and is labeled as such; everything else is calculated.',
       source: { label: 'Epley, B. (1985) Poundage Chart, Boyd Epley Workout', url: null },
       alt: { label: 'LeSuer et al. 1997, J Strength Cond Res 11(4): prediction equations tested on bench press, squat and deadlift', url: null },
       caveat: 'An estimate, not a tested max.' },
@@ -303,7 +303,7 @@
       alt: { label: 'Riegel, P. (1981) Athletic Records and Human Endurance, American Scientist', url: null },
       caveat: 'Community data, not a study, and a 5K-equivalent is an estimate: it drifts for runs far from 5K and for untrained pacing.' },
     { id: 'bmi', title: 'BMI', kind: 'reference',
-      summary: 'Weight in kg divided by height in metres squared. Under 18.5 Underweight, 18.5 to under 25 Healthy weight, 25 to under 30 Overweight, 30 and over Obese (adults 20+).',
+      summary: 'Weight in kg divided by height in meters squared. Under 18.5 Underweight, 18.5 to under 25 Healthy weight, 25 to under 30 Overweight, 30 and over Obese (adults 20+).',
       source: { label: 'CDC adult BMI categories', url: 'https://www.cdc.gov/bmi/adult-calculator/bmi-categories.html' },
       caveat: 'BMI ignores muscle mass, so it can read high for people who lift. Not for under 20s.' },
     { id: 'calories', title: 'Calorie target', kind: 'reference',

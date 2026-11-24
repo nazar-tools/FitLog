@@ -1,7 +1,7 @@
-/* Calculations that depend only on the data passed in: the activity streak,
-   the 7-night sleep summary and the best estimated one-rep max. Reference
-   numbers (sleep bands, Epley cap) come from FitStandards, passed as `S`, so
-   this file has no access to app state and can be tested on its own. */
+/* Maths that depends only on what is passed in: streaks, logging rhythm, rolling averages
+   and trends, the sleep summary, estimated one-rep maxes, strength levels, weekly sets per
+   muscle and plate loading. Reference numbers come from FitStandards, passed as `S`, so this
+   file never sees app state and can be tested on its own. */
 (function (root) {
   'use strict';
 
@@ -12,8 +12,8 @@
     return `${y}-${m}-${day}`;
   }
 
-  /** Dates with something logged in a section the user tracks.
-   *  `tracked` is { workout, measurements, water, food } booleans. */
+  // Dates with something logged in a section the user tracks.
+  // `tracked` is { workout, measurements, water, food } booleans.
   function activityDays(data, tracked) {
     const days = new Set();
     // `workout` may be a per-entry check, so habit check-ins only count while Daily is on.
@@ -25,8 +25,8 @@
     return days;
   }
 
-  /** Consecutive logged days ending today. Today may still be empty without
-   *  breaking the streak; it then counts back from yesterday. */
+  // Consecutive logged days ending today. Today may still be empty without
+  // breaking the streak; it then counts back from yesterday.
   function computeStreak(days, todayIso) {
     let streak = 0;
     const cursor = new Date(todayIso + 'T00:00:00');
@@ -45,8 +45,8 @@
     return localDateISO(d);
   }
 
-  /** Consecutive weeks (Monday to Sunday) with at least one of `dates`, ending this
-   *  week. Like computeStreak, the current week may still be empty without breaking it. */
+  // Consecutive weeks (Monday to Sunday) with at least one of `dates`, ending this
+  // week. Like computeStreak, the current week may still be empty without breaking it.
   function computeWeekStreak(dates, todayIso) {
     const weeks = new Set([...dates].map(weekStartISO));
     const cursor = new Date(weekStartISO(todayIso) + 'T00:00:00');
@@ -59,7 +59,7 @@
     return streak;
   }
 
-  /** The longest run of consecutive days (or Monday-to-Sunday weeks) in `dates`. */
+  // The longest run of consecutive days (or Monday-to-Sunday weeks) in `dates`.
   function longestStreak(dates, unit = 'day') {
     const keys = [...new Set([...dates].map((d) => (unit === 'week' ? weekStartISO(d) : d)))].sort();
     const step = unit === 'week' ? 7 : 1;
@@ -73,8 +73,8 @@
     return best;
   }
 
-  /** 'week' when entries are usually 4 or more days apart (a weekly tape measure),
-   *  otherwise 'day'. Looks at the last 6 gaps; fewer than 3 entries counts as daily. */
+  // 'week' when entries are usually 4 or more days apart (a weekly tape measure),
+  // otherwise 'day'. Looks at the last 6 gaps; fewer than 3 entries counts as daily.
   function loggingRhythm(dates) {
     const sorted = [...new Set(dates)].sort();
     if (sorted.length < 3) return 'day';
@@ -92,15 +92,15 @@
     return localDateISO(d);
   }
 
-  /** Mondays from the week holding `fromIso` through the week holding `toIso`. */
+  // Mondays from the week holding `fromIso` through the week holding `toIso`.
   function weekStarts(fromIso, toIso) {
     const out = [];
     for (let w = weekStartISO(fromIso), end = weekStartISO(toIso); w <= end; w = addDaysISO(w, 7)) out.push(w);
     return out;
   }
 
-  /** For each of the date-sorted `points` ({ date, value }), the mean of every point
-   *  in the `days` days ending on its date. */
+  // For each of the date-sorted `points` ({ date, value }), the mean of every point
+  // in the `days` days ending on its date.
   function trailingAverage(points, days) {
     return points.map((p) => {
       const from = addDaysISO(p.date, 1 - days);
@@ -109,8 +109,8 @@
     });
   }
 
-  /** Least-squares change per day over `points`, and the fitted value on the last
-   *  date. Null with fewer than 3 points or under a week between first and last. */
+  // Least-squares change per day over `points`, and the fitted value on the last
+  // date. Null with fewer than 3 points or under a week between first and last.
   function linearTrend(points) {
     if (points.length < 3) return null;
     const t0 = new Date(points[0].date + 'T00:00:00').getTime();
@@ -153,10 +153,10 @@
     return { muscles, direct, areas };
   }
 
-  /** Plates for one side of a bar that load `total` as closely as possible without going
-   *  over, heaviest first. `plates` is the set to use, heaviest first. Works in hundredths
-   *  so 1.25 kg plates add up exactly. Returns { perSide, loaded, short }, where `short` is
-   *  what could not be loaded (0 when the total is exact). */
+  // Plates for one side of a bar that load `total` as closely as possible without going
+  // over, heaviest first. `plates` is the set to use, heaviest first. Works in hundredths
+  // so 1.25 kg plates add up exactly. Returns { perSide, loaded, short }, where `short` is
+  // what could not be loaded (0 when the total is exact).
   function platesPerSide(total, bar, plates) {
     const c = (v) => Math.round(v * 100);
     let left = Math.floor(Math.max(0, c(total) - c(bar)) / 2);
@@ -166,10 +166,10 @@
     return { perSide, loaded, short: Math.max(0, Math.round((c(total) - c(loaded))) / 100) };
   }
 
-  /** `list` is one tracker's measurements. Two views of the same data:
-   *  `window` covers the last S.SLEEP.windowDays calendar nights and gets a
-   *  category only with at least S.SLEEP.minNightsForLabel nights logged;
-   *  `recent` averages the last windowDays logged nights whenever they were. */
+  // `list` is one tracker's measurements. Two views of the same data:
+  // `window` covers the last S.SLEEP.windowDays calendar nights and gets a
+  // category only with at least S.SLEEP.minNightsForLabel nights logged;
+  // `recent` averages the last windowDays logged nights whenever they were.
   function sleepInsights(measurements, todayIso, S) {
     const list = measurements.filter((m) => m.value != null).sort((a, b) => (a.date + a.id).localeCompare(b.date + b.id));
     if (!list.length) return null;
@@ -195,9 +195,9 @@
     };
   }
 
-  /** Best estimated 1RM over one exercise's entries, using sets of
-   *  S.ONE_RM_MAX_REPS reps or fewer, with the set behind it and whether it
-   *  is a real single or an Epley estimate. */
+  // Best estimated 1RM over one exercise's entries, using sets of
+  // S.ONE_RM_MAX_REPS reps or fewer, with the set behind it and whether it
+  // is a real single or an Epley estimate.
   function bestEstimatedOneRM(entries, S) {
     let best = null;
     entries.forEach((entry) => {
@@ -210,8 +210,8 @@
     return best;
   }
 
-  /** Most reps in one set done at body weight (sets with added weight are left to
-   *  bestAddedOneRM), with that set. Null when none. */
+  // Most reps in one set done at body weight (sets with added weight are left to
+  // bestAddedOneRM), with that set. Null when none.
   function bestReps(entries) {
     let best = null;
     entries.forEach((entry) => {
@@ -223,10 +223,10 @@
     return best;
   }
 
-  /** Best estimated 1RM of the weight added to the body, over sets of 1 to
-   *  S.ONE_RM_MAX_REPS reps with added weight. The whole load (body weight + added)
-   *  goes through Epley, then the body weight is taken off again. Null without a
-   *  body weight or a weighted set. */
+  // Best estimated 1RM of the weight added to the body, over sets of 1 to
+  // S.ONE_RM_MAX_REPS reps with added weight. The whole load (body weight + added)
+  // goes through Epley, then the body weight is taken off again. Null without a
+  // body weight or a weighted set.
   function bestAddedOneRM(entries, bodyweightLb, S) {
     if (!(bodyweightLb > 0)) return null;
     let best = null;
@@ -242,15 +242,15 @@
     return best;
   }
 
-  /** An exercise's strength level against Strength Level's tables (S.STRENGTH).
-   *  `key` names the standard, `entries` are the exercise's entries, `who` is
-   *  { sex, bodyweightLb }. Returns { missing: 'sex' | 'bodyweight' } when the
-   *  tables cannot be read yet, null when there is no such standard, otherwise
-   *  the standard's label and `results`: one per way of measuring it ('1rm'
-   *  estimated one-rep max, 'reps' best set at body weight, 'added' one-rep max of
-   *  the weight added to the body), each with its value, the five thresholds and
-   *  the tier reached (0 = Untrained .. 5 = Elite). `best` is the index of the
-   *  result with the highest tier, or -1 when nothing is logged yet. */
+  // An exercise's strength level against Strength Level's tables (S.STRENGTH).
+  // `key` names the standard, `entries` are the exercise's entries, `who` is
+  // { sex, bodyweightLb }. Returns { missing: 'sex' | 'bodyweight' } when the
+  // tables cannot be read yet, null when there is no such standard, otherwise
+  // the standard's label and `results`: one per way of measuring it ('1rm'
+  // estimated one-rep max, 'reps' best set at body weight, 'added' one-rep max of
+  // the weight added to the body), each with its value, the five thresholds and
+  // the tier reached (0 = Untrained .. 5 = Elite). `best` is the index of the
+  // result with the highest tier, or -1 when nothing is logged yet.
   function strengthLevel(key, entries, who, S) {
     const std = S.STRENGTH[key];
     if (!std) return null;
