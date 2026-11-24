@@ -849,6 +849,8 @@ input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; marg
 }
 .calendar-day:disabled { visibility: hidden; cursor: default; }
 .calendar-day.is-today { background: var(--surface-2); font-weight: 700; }
+/* The tapped day's week, Monday to Sunday. */
+.calendar-day.in-week { background: var(--accent-soft); }
 .calendar-day.is-selected { background: var(--accent-fill); color: var(--on-accent); font-weight: 700; }
 .calendar-day.is-selected.is-today { box-shadow: inset 0 0 0 2px var(--surface-1); }
 .calendar-day-dots { display: flex; gap: var(--sp-2); height: 5px; }
@@ -1404,15 +1406,17 @@ button.row-switch { width: 100%; border: 0; background: none; font: inherit; col
 .cc-head > .item-icon { background: var(--accent-soft); color: var(--accent-strong); }
 .cc-titles { flex: 1 1 auto; min-width: 0; }
 .cc-name { font-size: var(--fs-base); font-weight: 700; }
-.cc-name-text { display: inline-flex; align-items: center; gap: var(--sp-2); }
-/* The i beside a card's title opens its description, drawn like the notes in setup. */
-.info-btn {
-  display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; margin: calc(var(--sp-6) * -1) 0;
-  padding: 0; border: 0; border-radius: 999px; background: none; color: var(--muted); cursor: pointer;
-}
-.info-btn svg { width: 16px; height: 16px; }
-.info-btn[aria-expanded="true"] { color: var(--accent); }
-.cc-info { font-size: var(--fs-sm); }
+/* A card with no Details sheet opens its own sheet from an i in the same corner. */
+.cc-about { flex: none; width: 32px; height: 32px; color: var(--text-secondary); }
+/* A sheet's explanation leads it, in the note style setup uses. */
+.sheet-note { margin-bottom: var(--sp-4); }
+.muscle-row .rec-value { white-space: nowrap; }
+.week-card .kpi { background: var(--surface-2); border-color: transparent; }
+.week-fact { margin: 0; font-size: var(--fs-sm); }
+.week-none { margin: 0; }
+.week-muscles { display: flex; flex-direction: column; gap: var(--sp-12); padding-top: var(--sp-12); border-top: 1px solid var(--gridline); }
+.week-rows { margin: 0 calc(var(--card-pad) * -1) calc(var(--card-pad) * -1); border-top: 1px solid var(--gridline); }
+.muscle-row.is-quiet .entry-row-title, .muscle-row.is-quiet .rec-value { color: var(--muted); }
 .cc-sub { margin-top: var(--sp-2); font-size: var(--fs-sm); color: var(--text-secondary); }
 .cc-more { flex: none; display: inline-flex; align-items: center; gap: var(--sp-2); min-height: 36px; padding: 0; }
 .cc-more .icon { width: 16px; height: 16px; }
@@ -1652,6 +1656,20 @@ button.row-switch { width: 100%; border: 0; background: none; font: inherit; col
 .mm .mm-sil { fill: color-mix(in srgb, var(--text-primary) 9%, var(--surface-1)); }
 .mm .mm-m { stroke: var(--surface-1); stroke-width: 1.4; stroke-linejoin: round; cursor: pointer; }
 .mm .mm-m.is-picked { stroke: var(--text-primary); }
+/* Only worked as a helper so far: stripes in the volume color. */
+.mm .mm-stripe-bg { fill: color-mix(in srgb, var(--text-primary) 19%, var(--surface-1)); }
+.mm .mm-stripe { fill: color-mix(in srgb, var(--accent) 75%, var(--surface-2)); }
+.sw.mm-striped { background: repeating-linear-gradient(45deg, color-mix(in srgb, var(--accent) 75%, var(--surface-2)) 0 2px, color-mix(in srgb, var(--text-primary) 19%, var(--surface-1)) 2px 4px); }
+/* Recovery: warm steps from just trained to almost ready; ready is the plain grey of l0. */
+.mm .mm-m.r1, .sw.mm-r1 { fill: color-mix(in srgb, var(--warning) 32%, var(--surface-2)); background: color-mix(in srgb, var(--warning) 32%, var(--surface-2)); }
+.mm .mm-m.r2, .sw.mm-r2 { fill: color-mix(in srgb, var(--warning) 65%, var(--surface-2)); background: color-mix(in srgb, var(--warning) 65%, var(--surface-2)); }
+.mm .mm-m.r3, .sw.mm-r3 { fill: var(--streak); background: var(--streak); }
+.mm-wrap-stack { flex-direction: column; align-items: stretch; }
+.mm-wrap-stack > .mm { flex: none; width: 100%; max-width: 250px; }
+.mm-list-wide { flex: none; }
+.mm-list-wide dt { white-space: normal; align-items: flex-start; }
+.mm-list-wide dt .sw { margin-top: var(--sp-4); }
+.mm-list dd { white-space: nowrap; }
 .mm-pick { flex: 1 0 100%; margin: 0; font-size: var(--fs-sm); text-align: center; }
 .muscle-line { display: flex; align-items: baseline; justify-content: space-between; gap: var(--sp-12); font-size: var(--fs-md); }
 .muscle-editor { display: flex; flex-direction: column; gap: var(--sp-8); margin-top: var(--sp-12); }

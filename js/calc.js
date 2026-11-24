@@ -130,10 +130,12 @@
      A set counts 1 for each primary muscle and `share` of a set for each secondary one.
      `areaOf` maps a muscle to its body area; an area takes, per set, the largest count any of
      its muscles got, so one squat set is one set for the legs however many leg muscles it works.
-     Returns { muscles: { id: [per week] }, areas: { id: [per week] } }. */
+     Returns { muscles, direct, areas }, each { id: [per week] }; `direct` counts only the sets
+     where the muscle was a main one, so a muscle with sets but no direct sets was only helped. */
   function setsPerMuscleWeek(items, weeks, areaOf, share) {
     const index = Object.fromEntries(weeks.map((w, i) => [w, i]));
     const muscles = {};
+    const direct = {};
     const areas = {};
     const add = (out, key, i, n) => { (out[key] = out[key] || weeks.map(() => 0))[i] += n; };
     items.forEach((it) => {
@@ -144,11 +146,11 @@
         add(muscles, m, i, n * it.sets);
         if (areaOf[m]) best[areaOf[m]] = Math.max(best[areaOf[m]] || 0, n);
       };
-      it.primary.forEach((m) => count(m, 1));
+      it.primary.forEach((m) => { count(m, 1); add(direct, m, i, it.sets); });
       it.secondary.forEach((m) => count(m, share));
       Object.keys(best).forEach((area) => add(areas, area, i, best[area] * it.sets));
     });
-    return { muscles, areas };
+    return { muscles, direct, areas };
   }
 
   /** Plates for one side of a bar that load `total` as closely as possible without going

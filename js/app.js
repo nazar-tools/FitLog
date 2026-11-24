@@ -71,6 +71,8 @@
     muscleView: 'map',
     // A "Show table" link under every chart.
     showChartTables: false,
+    // The Recovery card on Progress (see S.REFERENCES 'recovery').
+    showRecovery: true,
     // Master "Track this" switches. trackWorkout is the Lifting switch; the Workout
     // area stays on while Lifting or Running & cardio is on, and Daily follows trackHabits (js/features.js).
     // An off area is hidden from Log, History and Home. Manage always shows it so it
@@ -2644,8 +2646,6 @@
   }
   // Charts showing their table instead, by card id. Kept while the app is open.
   const chartTables = new Set();
-  // Cards whose description (the i beside the title) is open.
-  const chartInfoOpen = new Set();
   const ALERT_ICON_SVG = '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>';
 
   // "All" starts at the week of the first thing ever logged.
@@ -2715,17 +2715,16 @@
   }
 
   // One chart card: { id, icon, name, sub, range, open, extra, plot, table, legend, note, goals, empty: { text, have, need } }.
-  // `info` is a description kept behind the i beside the title. `range` puts the range menu in the card's title line; `swap: { label, run }` adds a link to a second view.
+  // `about` opens the card's own sheet from an i in the top-right corner, for cards with no Details. `range` puts the range menu in the card's title line; `swap: { label, run }` adds a link to a second view.
   function chartCardHtml(c) {
     const table = state.settings.showChartTables ? c.table : null;
     const asTable = !!table && chartTables.has(c.id);
-    const info = c.empty ? '' : c.info;
-    const infoOpen = !!info && chartInfoOpen.has(c.id);
     const head = `
       <div class="cc-head">
         ${c.icon || ''}
-        <div class="cc-titles"><div class="cc-name${c.range ? ' has-range' : ''}"><span class="cc-name-text">${c.name}${info ? `<button type="button" class="info-btn" data-cc-info aria-expanded="${infoOpen}" aria-label="How ${c.name} works">${uiIconInfo()}</button>` : ''}</span>${c.range ? rangeMenuHtml() : ''}</div>${c.sub ? `<div class="cc-sub">${c.sub}</div>` : ''}</div>
-        ${c.open ? `<button type="button" class="link-btn cc-more" data-cc-open>Details${CHEVRON_RIGHT_SVG}</button>` : ''}
+        <div class="cc-titles"><div class="cc-name${c.range ? ' has-range' : ''}"><span>${c.name}</span>${c.range ? rangeMenuHtml() : ''}</div>${c.sub ? `<div class="cc-sub">${c.sub}</div>` : ''}</div>
+        ${c.open ? `<button type="button" class="link-btn cc-more" data-cc-open>Details${CHEVRON_RIGHT_SVG}</button>`
+          : c.about && !c.empty ? `<button type="button" class="icon-btn-sm cc-about" data-cc-about aria-label="About ${c.name}">${uiIconInfo()}</button>` : ''}
       </div>`;
     if (c.empty) {
       const { text, have, need } = c.empty;
@@ -2738,7 +2737,6 @@
       <div class="cc-plot"${asTable ? ' hidden' : ''}>${c.plot}</div>
       ${table ? `<div class="cc-table"${asTable ? '' : ' hidden'}>${chartTableHtml(table)}</div>` : ''}
       ${c.legend || table || c.swap ? `<div class="cc-foot"><div class="cc-key">${c.legend || ''}</div><div class="cc-links">${c.swap ? `<button type="button" class="link-btn" data-cc-swap>${c.swap.label}</button>` : ''}${table ? `<button type="button" class="link-btn" data-cc-table aria-pressed="${asTable}">${asTable ? 'Show chart' : 'Show table'}</button>` : ''}</div></div>` : ''}
-      ${info ? `<div class="note-box cc-info"${infoOpen ? '' : ' hidden'}>${uiIconInfo()}<span>${info}</span></div>` : ''}
       ${c.note ? `<p class="cc-note">${c.note}</p>` : ''}
       ${cardGoalsHtml(c.goals)}
     </div>`;
@@ -2750,13 +2748,8 @@
       if (!el) return;
       const more = el.querySelector('[data-cc-open]');
       if (more && c.open) more.addEventListener('click', c.open);
-      const info = el.querySelector('[data-cc-info]');
-      if (info) info.addEventListener('click', () => {
-        const open = !chartInfoOpen.has(c.id);
-        if (open) chartInfoOpen.add(c.id); else chartInfoOpen.delete(c.id);
-        info.setAttribute('aria-expanded', String(open));
-        el.querySelector('.cc-info').hidden = !open;
-      });
+      const about = el.querySelector('[data-cc-about]');
+      if (about && c.about) about.addEventListener('click', c.about);
       el.querySelectorAll('[data-goal-i]').forEach((b) => b.addEventListener('click', () => c.goals[Number(b.dataset.goalI)].open()));
       const swapBtn = el.querySelector('[data-cc-swap]');
       if (swapBtn && c.swap) swapBtn.addEventListener('click', c.swap.run);
@@ -3026,7 +3019,8 @@
     const iconHtml = `<span class="item-icon" aria-hidden="true">${STATIC_ICONS.daily}</span>`;
     openChartSheet('Daily', iconHtml, (body) => {
       const card = { ...dailyOverviewCard(), id: 'daily-sheet', icon: '', name: 'Last weeks', open: null };
-      body.innerHTML = chartCardHtml(card) + areaListHtml('Today', items.map((ex) => {
+      const note = `${workoutGoalOn() ? 'Workout fills with a lift, a run, or one Daily item at its full target. Less than that shows as partly done. ' : ''}A weekly habit only gets a square on the days it is due. Today stays open until midnight.`;
+      body.innerHTML = aboutNoteHtml(note) + chartCardHtml(card) + areaListHtml('Today', items.map((ex) => {
         const p = todayProgressOf(ex);
         return { id: ex.id, icon: exerciseIconHtml(ex, true), name: exerciseLabelHtml(ex), value: p.pct == null ? '' : `${p.curText} ${p.goalText}` };
       }));
@@ -3062,11 +3056,66 @@
   }
 
   const MAP_GROUPS = ['chest', 'back', 'legs', 'shoulders', 'arms', 'core'];
+  const fmtNum = (n) => String(round(n, 1));
+  // What one muscle got: "Front delts: 2 sets, all as a helper".
+  function muscleSetsText(id, total, direct) {
+    if (!total) return `${MUSCLE_LABELS[id]}: no sets`;
+    const helper = total - direct;
+    return `${MUSCLE_LABELS[id]}: ${fmtSets(total)}${!direct ? ', all as a helper' : helper > 0 ? `, ${fmtNum(helper)} as a helper` : ''}`;
+  }
+  const setsLevel = (v) => { const t = S.WEEKLY_SETS_TARGET; return v <= 0 ? 'l0' : v >= t ? 'l3' : v >= t / 2 ? 'l2' : 'l1'; };
+  // The map and six-row list for one week: { html, striped } from muscleSetsByWeek's output at index i.
+  function muscleWeekMap(sets, i, label, suffix = '') {
+    const total = (id) => (sets.muscles[id] ? sets.muscles[id][i] : 0);
+    const direct = (id) => (sets.direct[id] ? sets.direct[id][i] : 0);
+    const striped = MUSCLES.map(([id]) => id).filter((id) => total(id) > 0 && !direct(id));
+    const map = Charts.bodyMap(Object.fromEntries(MUSCLES.map(([id]) => [id, setsLevel(total(id))])),
+      Object.fromEntries(MUSCLES.map(([id]) => [id, `${muscleSetsText(id, total(id), direct(id))}${suffix}`])), label, { striped });
+    const rows = MAP_GROUPS.map((g) => ({ label: EXERCISE_GROUP_LABELS[g], value: sets.areas[g] ? sets.areas[g][i] : 0 }));
+    return {
+      striped,
+      html: `<div class="mm-wrap">${map}
+        <dl class="mm-list">${rows.map((r) => `<div><dt><i class="sw mm-${setsLevel(r.value)}"></i>${r.label}</dt><dd>${fmtNum(r.value)}</dd></div>`).join('')}</dl>
+        <p class="mm-pick muted-text" aria-live="polite">Tap a muscle to see its sets.</p></div>`,
+    };
+  }
+  function setsLegend(striped) {
+    const t = S.WEEKLY_SETS_TARGET;
+    return [keyItem('sw mm-l0', '0'), keyItem('sw mm-l1', `Under ${t / 2}`), keyItem('sw mm-l2', `${t / 2} or more`), keyItem('sw mm-l3', `${t} or more`),
+      striped.length ? keyItem('sw mm-striped', 'Helped only') : ''].join('');
+  }
+  // One row per muscle in area order, as in the other Details sheets.
+  function muscleListHtml(rowFor) {
+    const order = MAP_GROUPS.flatMap((g) => MUSCLES.filter(([, , area]) => area === g));
+    return `<div class="section-head"><h2>Each muscle</h2></div>
+      <div class="card card-list">${order.map(([id, name]) => {
+        const r = rowFor(id);
+        return `<div class="entry-row muscle-row${r.quiet ? ' is-quiet' : ''}"><div class="entry-row-main"><div class="entry-row-title">${name}</div>${r.sub ? `<div class="entry-row-sub">${r.sub}</div>` : ''}</div><div class="rec-value">${r.value}</div></div>`;
+      }).join('')}</div>`;
+  }
+
+  // Sets per muscle for one week (a Monday), from Progress or from History.
+  function openMuscleSheet(week) {
+    const thisWeek = week === weekOf(todayISO());
+    openChartSheet('Sets per muscle', itemIconHtml('biceps'), (body) => {
+      const sets = muscleSetsByWeek([week]);
+      const map = muscleWeekMap(sets, 0, `Sets per muscle, ${thisWeek ? 'this week so far' : `week of ${chartDay(week)}`}`);
+      const t = S.WEEKLY_SETS_TARGET;
+      body.innerHTML = `${aboutNoteHtml(`Each working set counts once for its main muscles and half for the ones that help: a bench set is 1 for chest, ½ each for front delts and triceps. Daily items count; warm-ups under ${S.WARMUP_CUTOFF * 100}% of the day's top set do not. Striped means helper sets only. Aim for ${t} or more sets a week.`)}
+        <div class="card chart-card"><div class="cc-head"><div class="cc-titles"><div class="cc-name">${thisWeek ? 'This week so far' : `Week of ${chartDay(week)}`}</div></div></div>
+          <div class="cc-plot">${map.html}</div><div class="cc-foot"><div class="cc-key">${setsLegend(map.striped)}</div></div></div>
+        ${muscleListHtml((id) => {
+          const total = sets.muscles[id] ? sets.muscles[id][0] : 0;
+          const direct = sets.direct[id] ? sets.direct[id][0] : 0;
+          return { value: fmtNum(total), quiet: !total, sub: !total ? 'No sets' : !direct ? 'All as a helper' : total > direct ? `${fmtNum(total - direct)} as a helper` : '' };
+        })}`;
+    });
+  }
 
   function muscleSetsCard() {
     if (!domainTracked('workout') || !state.settings.showMuscleSets) return null;
     const weeks = rangeWeeks();
-    const { muscles, areas } = muscleSetsByWeek(weeks);
+    const { muscles, direct, areas } = muscleSetsByWeek(weeks);
     const groups = MAP_GROUPS.filter((g) => areas[g]);
     if (!groups.length) return null;
     const target = S.WEEKLY_SETS_TARGET;
@@ -3078,32 +3127,143 @@
       avg: done(g).length ? mean(done(g)) : null,
     }));
     const lastWeekHit = rows.filter((r) => (r.prev || 0) >= target).length;
-    // One button steps through the three views, so there is never a second switch to disagree with it.
+    // One button steps through the views, so there is never a second switch to disagree with it.
     const views = state.settings.showChartTables ? ['map', 'bars', 'table'] : ['map', 'bars'];
     const view = views.includes(state.settings.muscleView) ? state.settings.muscleView : 'map';
     const next = views[(views.indexOf(view) + 1) % views.length];
     const swap = { label: `Show ${next}`, run: () => { state.settings.muscleView = next; if (save()) renderProgressCharts(); } };
-    const asMap = view === 'map';
-    const label = `Sets per muscle group this week so far: ${rows.map((r) => `${r.label} ${r.value}`).join(', ')}. ${target} sets a week is marked.`;
-    // The rows are body areas; the map shades each muscle by its own sets against the same target.
-    const level = (v) => (v <= 0 ? 0 : v >= target ? 3 : v >= target / 2 ? 2 : 1);
-    const areaRows = MAP_GROUPS.map((g) => ({ g, label: EXERCISE_GROUP_LABELS[g], value: areas[g] ? areas[g][now] : 0 }));
-    const setsOf = (id) => (muscles[id] ? muscles[id][now] : 0);
-    const half = target / 2;
+    const label = `Sets per muscle group this week so far: ${rows.map((r) => `${r.label} ${fmtNum(r.value)}`).join(', ')}. ${target} sets a week is marked.`;
+    const map = muscleWeekMap({ muscles, direct, areas }, now, label, ' this week');
     return {
-      id: 'muscles', icon: itemIconHtml('biceps'), name: 'Sets per muscle', swap,
+      id: 'muscles', icon: itemIconHtml('biceps'), name: 'Sets per muscle', swap, about: () => openMuscleSheet(weeks[now]),
       sub: now > 0 ? `Last week ${lastWeekHit} of ${plural(rows.length, 'muscle group')} reached ${target} sets` : 'This week so far',
-      plot: asMap
-        ? `<div class="mm-wrap">${Charts.bodyMap(Object.fromEntries(MUSCLES.map(([id]) => [id, level(setsOf(id))])), Object.fromEntries(MUSCLES.map(([id, name]) => [id, `${name}: ${fmtSets(setsOf(id))} this week`])), label)}
-            <dl class="mm-list">${areaRows.map((a) => `<div><dt><i class="sw mm-l${level(a.value)}"></i>${a.label}</dt><dd>${a.value}</dd></div>`).join('')}</dl>
-            <p class="mm-pick muted-text" aria-live="polite">Tap a muscle to see its sets.</p></div>`
+      plot: view === 'map' ? map.html
         : view === 'bars' ? Charts.hbars(rows, { mark: target, markText: `${target} sets`, label })
-        : chartTableHtml({ head: ['Muscle', 'This week', 'Last week', `Avg, ${rangeInfo()[1]}`], rows: rows.map((r) => [r.label, `${r.value} so far`, r.prev != null ? String(r.prev) : '-', r.avg != null ? String(round(r.avg, 1)) : '-']) }),
-      legend: view === 'table' ? '' : asMap
-        ? [keyItem('sw mm-l0', '0'), keyItem('sw mm-l1', `Under ${half}`), keyItem('sw mm-l2', `${half} or more`), keyItem('sw mm-l3', `${target} or more sets this week`)].join('')
+        : chartTableHtml({ head: ['Muscle', 'This week', 'Last week', `Avg, ${rangeInfo()[1]}`], rows: rows.map((r) => [r.label, `${fmtNum(r.value)} so far`, r.prev != null ? fmtNum(r.prev) : '-', r.avg != null ? String(round(r.avg, 1)) : '-']) }),
+      legend: view === 'table' ? '' : view === 'map' ? setsLegend(map.striped)
         : [keyItem('sw now', 'This week, so far'), now > 0 ? keyItem('tk', 'Last week') : '', keyItem('ln goal', `${target} sets a week`)].join(''),
-      info: `Each working set counts once for its main muscles and half for the ones that help: a bench set is 1 for chest, ½ each for shoulders and triceps. Daily items count. Warm-ups under ${S.WARMUP_CUTOFF * 100}% of the day's top set don't. Aim for ${target}+ sets per muscle a week.`,
     };
+  }
+
+  /* Recovery
+     For each muscle, its most recent hard days say how long it needs: 1, 2 or 3 days by that
+     day's sets (helper sets as half) and effort (S.RECOVERY). The clock runs from the entry's
+     time, or the evening when it has none. An estimate from what is logged; see
+     S.REFERENCES 'recovery'. */
+  const RECOVERY_LOOKBACK_DAYS = 4;
+  function recoveryByMuscle(now = new Date()) {
+    const R = S.RECOVERY;
+    const from = addDays(todayISO(), -RECOVERY_LOOKBACK_DAYS);
+    const days = {};
+    const top = {};
+    state.entries.forEach((e) => (e.sets || []).forEach((st) => {
+      const k = e.exerciseId + e.date;
+      if (st.reps > 0 && st.weight > (top[k] || 0)) top[k] = st.weight;
+    }));
+    state.entries.forEach((e) => {
+      if (e.date < from || e.date > todayISO()) return;
+      const ex = exerciseById(e.exerciseId);
+      if (!ex || !countsForMuscles(ex)) return;
+      const floor = ex.kind === 'weight' ? (top[e.exerciseId + e.date] || 0) * S.WARMUP_CUTOFF : 0;
+      const work = (e.sets || []).filter((st) => st.reps > 0 && (st.weight || 0) >= floor);
+      if (!work.length) return;
+      const m = exerciseMuscles(ex);
+      const hour = /^\d\d:\d\d$/.test(e.time || '') ? Number(e.time.slice(0, 2)) + Number(e.time.slice(3)) / 60 : R.startHour;
+      const hard = work.some((st) => st.rpe != null && st.rpe >= R.failureRpe);
+      const add = (id, share, primary) => {
+        const d = (days[id] = days[id] || {});
+        const day = (d[e.date] = d[e.date] || { sets: 0, hour: 0, hard: false, light: true });
+        day.sets += work.length * share;
+        day.hour = Math.max(day.hour, hour);
+        day.hard = day.hard || (primary && hard);
+        day.light = day.light && !!e.light;
+      };
+      m.primary.forEach((id) => add(id, 1, true));
+      m.secondary.forEach((id) => add(id, S.SECONDARY_SET_SHARE, false));
+    });
+    const out = {};
+    Object.entries(days).forEach(([id, byDate]) => {
+      Object.entries(byDate).forEach(([date, d]) => {
+        let n = d.light || d.sets <= R.fewSets ? 1 : d.sets < R.manySets ? 2 : 3;
+        if (d.hard && !d.light) n = Math.min(R.maxDays, n + 1);
+        const start = new Date(`${date}T00:00:00`);
+        start.setMinutes(Math.round(d.hour * 60));
+        const end = start.getTime() + n * 86400000;
+        if (!out[id] || end > out[id].end) out[id] = { end, span: n * 86400000, date, sets: d.sets, days: n };
+      });
+    });
+    Object.values(out).forEach((r) => { r.left = Math.max(0, (r.end - now.getTime()) / r.span); });
+    return out;
+  }
+  // "tonight", "tomorrow morning", "Thu evening"
+  function readyWhen(ms, now = new Date()) {
+    const end = new Date(ms);
+    const part = end.getHours() < 12 ? 'morning' : end.getHours() < 17 ? 'afternoon' : 'evening';
+    const gap = dayGap(localDateISO(now), localDateISO(end));
+    if (gap <= 0) return part === 'evening' ? 'tonight' : `this ${part}`;
+    if (gap === 1) return `tomorrow ${part}`;
+    return `${end.toLocaleDateString(undefined, { weekday: 'short' })} ${part}`;
+  }
+  const recoveryLevel = (left) => (left <= 0 ? 'l0' : left > 2 / 3 ? 'r3' : left > 1 / 3 ? 'r2' : 'r1');
+  function recoveryMap(rec, now, label) {
+    const titles = Object.fromEntries(MUSCLES.map(([id, name]) => {
+      const r = rec[id];
+      return [id, r && r.left > 0 ? `${name}: recovering, ready ${readyWhen(r.end, now)}` : `${name}: ready`];
+    }));
+    return Charts.bodyMap(Object.fromEntries(MUSCLES.map(([id]) => [id, recoveryLevel(rec[id] ? rec[id].left : 0)])), titles, label);
+  }
+  const recoveryLegend = () => [keyItem('sw mm-r3', 'Just trained'), keyItem('sw mm-r2', 'Recovering'), keyItem('sw mm-r1', 'Almost ready'), keyItem('sw mm-l0', 'Ready')].join('');
+
+  function recoveryCard() {
+    if (!domainTracked('workout') || !state.settings.showRecovery) return null;
+    if (!state.entries.some((e) => { const ex = exerciseById(e.exerciseId); return ex && countsForMuscles(ex); })) return null;
+    const now = new Date();
+    const rec = recoveryByMuscle(now);
+    const busy = MUSCLES.filter(([id]) => rec[id] && rec[id].left > 0).sort((a, b) => rec[a[0]].end - rec[b[0]].end);
+    // Muscles that are ready at the same part of the same day share a row.
+    const groups = [];
+    busy.forEach(([id, name]) => {
+      const when = readyWhen(rec[id].end, now);
+      const g = groups.find((x) => x.when === when);
+      if (g) g.names.push(name); else groups.push({ when, names: [name], level: recoveryLevel(rec[id].left) });
+    });
+    const shown = groups.slice(-3);
+    const rows = shown.map((g) => `<div><dt><i class="sw mm-${g.level}"></i><span>${g.names.join(', ')}</span></dt><dd>${g.when[0].toUpperCase()}${g.when.slice(1)}</dd></div>`);
+    const readyCount = MUSCLES.length - busy.length;
+    if (groups.length > 3) rows.unshift(`<div><dt><i class="sw mm-r1"></i><span>${plural(groups.slice(0, -3).reduce((t, g) => t + g.names.length, 0), 'more muscle')}</span></dt><dd>Sooner</dd></div>`);
+    if (readyCount) rows.push(`<div><dt><i class="sw mm-l0"></i><span>${busy.length ? 'Everything else' : 'All muscles'}</span></dt><dd>Ready</dd></div>`);
+    return {
+      id: 'recovery', icon: itemIconHtml('timer'), name: 'Recovery', about: openRecoverySheet,
+      sub: busy.length ? `${plural(busy.length, 'muscle')} still recovering` : 'Everything is ready',
+      plot: `<div class="mm-wrap mm-wrap-stack">${recoveryMap(rec, now, `Recovery now: ${busy.length ? busy.map(([, n]) => n).join(', ') + ' still recovering' : 'everything is ready'}`)}
+        <dl class="mm-list mm-list-wide">${rows.join('')}</dl>
+        <p class="mm-pick muted-text" aria-live="polite">Tap a muscle to see when it is ready.</p></div>`,
+      legend: recoveryLegend(),
+    };
+  }
+
+  function openRecoverySheet() {
+    const R = S.RECOVERY;
+    openChartSheet('Recovery', itemIconHtml('timer'), (body) => {
+      const now = new Date();
+      const rec = recoveryByMuscle(now);
+      const last = {};
+      state.entries.forEach((e) => {
+        const ex = exerciseById(e.exerciseId);
+        if (!ex || !countsForMuscles(ex) || e.date > todayISO()) return;
+        const m = exerciseMuscles(ex);
+        m.primary.concat(m.secondary).forEach((id) => { if (!last[id] || e.date > last[id]) last[id] = e.date; });
+      });
+      body.innerHTML = `${aboutNoteHtml(`A muscle needs 1 day after 1 to ${R.fewSets} sets or a Light session, 2 days after ${R.fewSets + 1} to ${R.manySets - 1}, and 3 after ${R.manySets} or more. Helper sets count half; a set at RPE ${R.failureRpe} or 10 adds a day. The same rule for every muscle. An estimate, not a measurement.`)}
+        <div class="card chart-card"><div class="cc-head"><div class="cc-titles"><div class="cc-name">Right now</div></div></div>
+          <div class="cc-plot"><div class="mm-wrap mm-wrap-stack">${recoveryMap(rec, now, 'Recovery now')}<p class="mm-pick muted-text" aria-live="polite">Tap a muscle to see when it is ready.</p></div></div>
+          <div class="cc-foot"><div class="cc-key">${recoveryLegend()}</div></div></div>
+        ${muscleListHtml((id) => {
+          const r = rec[id];
+          if (r && r.left > 0) return { value: `Ready ${readyWhen(r.end, now)}`, sub: `${fmtSets(round(r.sets, 1))} ${chartDay(r.date) === chartDay(todayISO()) ? 'today' : `on ${new Date(`${r.date}T00:00:00`).toLocaleDateString(undefined, { weekday: 'short' })}`}` };
+          return { value: 'Ready', quiet: !last[id], sub: last[id] ? `Last worked ${dayGap(last[id], todayISO()) < 7 ? dayLabel(last[id]) : chartDay(last[id])}` : 'Not worked yet' };
+        })}`;
+    });
   }
 
   /* Daily */
@@ -3164,7 +3324,7 @@
       sub,
       plot: Charts.heatmap(rows, dates, tips, `Daily items over the last 14 days: ${rows.map((r) => `${r.name} done ${r.done} of 13`).join(', ')}`),
       legend: ['done', 'part', 'miss', 'off'].map((k) => keyItem(`sw hm-${k}`, DAILY_STATE_LABELS[k])).join(''),
-      info: `${goal ? 'Workout fills with a lift, a run, or one Daily item at its full target. Less than that shows as partly done. ' : ''}A weekly habit only gets a square on the days it is due.`,
+
       table: { head: ['Item', 'Done', 'Partly', 'Missed'], rows: rows.map((r) => [escapeHtml(r.name), String(r.done), String(r.part), String(r.miss)]) },
     };
   }
@@ -3587,7 +3747,7 @@
     const wrap = document.getElementById('chartsOverview');
     Charts.setWidth(chartWidthIn(wrap));
     chartsDrawnAt = wrap.clientWidth;
-    const cards = [workoutOverviewCard(), muscleSetsCard(), dailyOverviewCard(), bodyOverviewCard(), waterOverviewCard(), domainTracked('food') ? caloriesCard(() => openFoodCharts()) : null].filter(Boolean);
+    const cards = [workoutOverviewCard(), muscleSetsCard(), recoveryCard(), dailyOverviewCard(), bodyOverviewCard(), waterOverviewCard(), domainTracked('food') ? caloriesCard(() => openFoodCharts()) : null].filter(Boolean);
     // Long-term goals sit under their area's chart. Today's targets (Daily, food) stay on Home and Log.
     const goals = collectGoals();
     cards.forEach((c) => {
@@ -3598,7 +3758,7 @@
     const cardHtml = (c) => (quiet[c.id] ? quietCardHtml(c, quiet[c.id]) : chartCardHtml(c));
     document.getElementById('dashboardEmpty').hidden = cards.length > 0;
     document.getElementById('progressRange').innerHTML = cards.length ? rangeMenuHtml() : '';
-    wrap.innerHTML = cards.length ? `${kpiRowHtml(overviewTiles(quiet))}${cards.filter((c) => !(c.id === 'muscles' && quiet.workout)).map(cardHtml).join('')}` : '';
+    wrap.innerHTML = cards.length ? `${kpiRowHtml(overviewTiles(quiet))}${cards.filter((c) => !((c.id === 'muscles' || c.id === 'recovery') && quiet.workout)).map(cardHtml).join('')}` : '';
     if (!cards.length) return;
     wrap.querySelectorAll('[data-quiet-log]').forEach((b) => b.addEventListener('click', () => openLogCategory(b.dataset.quietLog)));
     wrap.querySelectorAll('[data-quiet-off]').forEach((b) => b.addEventListener('click', () => {
@@ -3621,6 +3781,8 @@
 
   // A tall sheet with the shared range on top. `paint(body, repaint)` fills the body; a
   // range change repaints it (and the overview behind it) without reopening the sheet.
+  const aboutNoteHtml = (text) => `<div class="note-box sheet-note">${uiIconInfo()}<span>${text}</span></div>`;
+
   function openChartSheet(title, iconHtml, paint) {
     openModal(`
       <div class="modal-title-row"><h2 class="title-with-icon">${iconHtml}${title}</h2><button class="modal-close" data-action="close-modal" aria-label="Close">${CLOSE_ICON_SVG}</button></div>
@@ -4029,18 +4191,24 @@
 
   // [id, label, the muscle group it rolls up into]
   const MUSCLES = [
-    ['chest', 'Chest', 'chest'], ['lats', 'Lats', 'back'], ['upperBack', 'Upper back', 'back'], ['lowerBack', 'Lower back', 'back'],
-    ['shoulders', 'Shoulders', 'shoulders'], ['biceps', 'Biceps', 'arms'], ['triceps', 'Triceps', 'arms'], ['forearms', 'Forearms', 'arms'],
-    ['abs', 'Abs', 'core'], ['quads', 'Quads', 'legs'], ['hamstrings', 'Hamstrings', 'legs'], ['glutes', 'Glutes', 'legs'],
+    ['chest', 'Chest', 'chest'],
+    ['traps', 'Traps', 'back'], ['upperBack', 'Upper back', 'back'], ['lats', 'Lats', 'back'], ['lowerBack', 'Lower back', 'back'],
+    ['quads', 'Quads', 'legs'], ['hamstrings', 'Hamstrings', 'legs'], ['glutes', 'Glutes', 'legs'], ['abductors', 'Abductors', 'legs'],
     ['adductors', 'Adductors', 'legs'], ['calves', 'Calves', 'legs'],
+    ['frontDelts', 'Front delts', 'shoulders'], ['sideDelts', 'Side delts', 'shoulders'], ['rearDelts', 'Rear delts', 'shoulders'],
+    ['biceps', 'Biceps', 'arms'], ['triceps', 'Triceps', 'arms'], ['forearms', 'Forearms', 'arms'],
+    ['abs', 'Abs', 'core'], ['obliques', 'Obliques', 'core'],
   ];
   const MUSCLE_LABELS = Object.fromEntries(MUSCLES.map(([id, label]) => [id, label]));
   const MUSCLE_AREA = Object.fromEntries(MUSCLES.map(([id, , area]) => [id, area]));
+  // Muscles saved by v78 to v81 that have since been split: a saved "Shoulders" pick means the
+  // whole shoulder.
+  const OLD_MUSCLES = { shoulders: ['frontDelts', 'sideDelts', 'rearDelts'] };
   const USUAL_MUSCLES = {
     chest: { primary: ['chest'], secondary: [] }, back: { primary: ['lats', 'upperBack'], secondary: [] },
-    legs: { primary: ['quads', 'glutes'], secondary: [] }, shoulders: { primary: ['shoulders'], secondary: [] },
+    legs: { primary: ['quads', 'glutes'], secondary: [] }, shoulders: { primary: ['frontDelts', 'sideDelts'], secondary: [] },
     arms: { primary: ['biceps', 'triceps'], secondary: [] }, core: { primary: ['abs'], secondary: [] },
-    full: { primary: [], secondary: ['quads', 'glutes', 'lats', 'shoulders', 'abs'] },
+    full: { primary: [], secondary: ['quads', 'glutes', 'lats', 'frontDelts', 'abs'] },
   };
 
   // Names compare without case, punctuation, plurals or filler words: "Push-ups" is "push up".
@@ -4078,7 +4246,7 @@
 
   // { primary, secondary, source }; source says where they came from: 'own', 'catalog' or 'group'.
   function exerciseMuscles(ex) {
-    const known = (list) => (Array.isArray(list) ? list.filter((id) => Object.hasOwn(MUSCLE_LABELS, id)) : []);
+    const known = (list) => (Array.isArray(list) ? [...new Set(list.flatMap((id) => OLD_MUSCLES[id] || [id]))].filter((id) => Object.hasOwn(MUSCLE_LABELS, id)) : []);
     if (ex.muscles && Array.isArray(ex.muscles.primary)) return { primary: known(ex.muscles.primary), secondary: known(ex.muscles.secondary), source: 'own' };
     const mv = movementByName(ex.name) || (ex.catalogId && Object.hasOwn(MOVEMENTS, ex.catalogId) && MOVEMENTS[ex.catalogId]);
     if (mv && mv.primary) return { primary: mv.primary, secondary: mv.secondary, source: 'catalog' };
@@ -6193,9 +6361,11 @@
     const month = calendarMonth.getMonth();
     document.getElementById('calMonthLabel').textContent = calendarMonth.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
 
-    const firstWeekday = new Date(year, month, 1).getDay();
+    // Weeks run Monday to Sunday here as everywhere else in the app.
+    const firstWeekday = (new Date(year, month, 1).getDay() + 6) % 7;
     const daysInMonth = new Date(year, month + 1, 0).getDate();
     const todayIso = todayISO();
+    const week = historySelectedDate ? weekOf(historySelectedDate) : null;
 
     let html = '';
     for (let i = 0; i < firstWeekday; i++) html += `<button type="button" class="calendar-day" disabled></button>`;
@@ -6207,7 +6377,7 @@
       const dots = CAL_DOT_SLOTS.filter(([area]) => domainTracked(area))
         .map(([area, cls]) => `<span class="cal-dot ${cls}${({ workout, daily, water: waterHit, food, measurements: body })[area] ? '' : ' is-empty'}"></span>`).join('');
       html += `
-        <button type="button" class="calendar-day ${dateIso === todayIso ? 'is-today' : ''} ${dateIso === historySelectedDate ? 'is-selected' : ''}" data-date="${dateIso}" aria-label="${label}" aria-pressed="${dateIso === historySelectedDate}">
+        <button type="button" class="calendar-day ${dateIso === todayIso ? 'is-today' : ''} ${dateIso === historySelectedDate ? 'is-selected' : ''}${week && weekOf(dateIso) === week ? ' in-week' : ''}" data-date="${dateIso}" aria-label="${label}" aria-pressed="${dateIso === historySelectedDate}">
           <span>${day}</span>
           <span class="calendar-day-dots">${dots}</span>
         </button>`;
@@ -6270,9 +6440,144 @@
     if (textEl) textEl.textContent = historySelectedDate ? `Nothing logged for ${historyListHeadingText().toLowerCase() === 'today' ? 'today' : 'this day'}.` : 'No entries logged yet.';
   }
 
+  /* The week card
+     Above the tapped day's entries: that day's Monday-to-Sunday week for the area being shown,
+     drawn with the same pieces as Progress. Days after today are left out. */
+  function weekRange(week) {
+    const end = addDays(week, 6);
+    const fmt = (iso) => new Date(`${iso}T00:00:00`).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+    return end >= todayISO() && week <= todayISO() ? `${fmt(week)} to today` : `${fmt(week)} to ${fmt(end)}`;
+  }
+  const weekDays = (week) => daysBetween(week, addDays(week, 6));
+  const weekNone = (text) => `<p class="muted-text week-none">${text}</p>`;
+
+  function workoutWeekHtml(week) {
+    const days = weekDays(week).filter((d) => d <= todayISO());
+    const inWeek = state.entries.filter((e) => days.includes(e.date));
+    const top = {};
+    inWeek.forEach((e) => (e.sets || []).forEach((st) => { const k = e.exerciseId + e.date; if (st.reps > 0 && st.weight > (top[k] || 0)) top[k] = st.weight; }));
+    let sets = 0;
+    let volume = 0;
+    let best = null;
+    const trained = new Set();
+    let cardio = 0;
+    inWeek.forEach((e) => {
+      const ex = exerciseById(e.exerciseId);
+      if (!ex) return;
+      if (!isDailyEx(ex) && ex.kind !== 'habit') trained.add(e.date);
+      if (ex.kind === 'cardio') { cardio += 1; return; }
+      if (!countsForMuscles(ex)) return;
+      const floor = ex.kind === 'weight' ? (top[e.exerciseId + e.date] || 0) * S.WARMUP_CUTOFF : 0;
+      sets += (e.sets || []).filter((st) => st.reps > 0 && (st.weight || 0) >= floor).length;
+      if (ex.kind !== 'weight' || isDailyEx(ex)) return;
+      (e.sets || []).forEach((st) => {
+        if (!(st.reps > 0) || st.weight == null) return;
+        volume += st.weight * st.reps;
+        const est = S.estimateOneRM(st.weight, st.reps);
+        if (est && (!best || est.value > best.value)) best = { value: est.value, text: `${exerciseLabel(ex)} ${fmtWeight(st.weight)} × ${st.reps}` };
+      });
+    });
+    if (!trained.size && !sets) return weekNone('No workouts this week.');
+    const tiles = [
+      { value: String(trained.size), label: trained.size === 1 ? 'Workout day' : 'Workout days' },
+      { value: String(sets), label: 'Working sets' },
+      volume ? { value: fmtInt(Units.lbToDisplay(volume)), unit: Units.weightUnitLabel(), label: 'Volume' } : null,
+      cardio ? { value: String(cardio), label: cardio === 1 ? 'Cardio session' : 'Cardio sessions' } : null,
+    ].filter(Boolean).slice(0, 3);
+    let muscles = '';
+    if (state.settings.showMuscleSets) {
+      const map = muscleWeekMap(muscleSetsByWeek([week]), 0, `Sets per muscle, week of ${chartDay(week)}`);
+      muscles = `<div class="week-muscles">${map.html}<div class="cc-foot"><div class="cc-key">${setsLegend(map.striped)}</div>
+        <div class="cc-links"><button type="button" class="link-btn" data-week-muscles>Each muscle${CHEVRON_RIGHT_SVG}</button></div></div></div>`;
+    }
+    return `${kpiRowHtml(tiles)}${best ? `<p class="week-fact muted-text">Best set: ${escapeHtml(best.text)}</p>` : ''}${muscles}`;
+  }
+
+  function dailyWeekHtml(week) {
+    const dates = weekDays(week);
+    const goal = workoutGoalOn();
+    const items = activeExercises().filter(isDailyEx).filter((ex) => !goal || ex.kind === 'habit');
+    const rows = items.map((ex) => {
+      const byDate = {};
+      entriesFor(ex.id).forEach((e) => { (byDate[e.date] = byDate[e.date] || []).push(e); });
+      const first = Object.keys(byDate).sort()[0];
+      const cells = dates.map((d) => (d > todayISO() ? 'off' : dailyCellState(ex, d, byDate, first)));
+      return { name: exerciseLabel(ex), cells, done: cells.filter((c) => c === 'done').length };
+    });
+    if (goal) {
+      const shares = workoutShares();
+      const first = Object.keys(shares).sort()[0];
+      const cells = dates.map((d) => (d > todayISO() ? 'off' : shares[d] >= 1 ? 'done' : shares[d] > 0 ? 'part' : d === todayISO() ? 'open' : !first || d < first ? 'off' : 'miss'));
+      rows.unshift({ name: 'Workout', cells, done: cells.filter((c) => c === 'done').length });
+    }
+    if (!rows.length) return weekNone('No Daily items yet.');
+    const tips = dates.map((d, i) => ({ title: dayTitle(d), rows: rows.map((r) => ['', `${r.name}: ${DAILY_STATE_LABELS[r.cells[i]]}`]) }));
+    return `${Charts.heatmap(rows, dates, tips, `Daily items, week of ${chartDay(week)}: ${rows.map((r) => `${r.name} done ${r.done} of 7`).join(', ')}`, { first: 'Mon', last: 'Sun' })}
+      <div class="cc-foot"><div class="cc-key">${['done', 'part', 'miss', 'off'].map((k) => keyItem(`sw hm-${k}`, DAILY_STATE_LABELS[k])).join('')}</div></div>`;
+  }
+
+  function bodyWeekHtml(week) {
+    const dates = weekDays(week);
+    const rows = activeTrackers().map((t) => {
+      const list = measurementsFor(t.id).filter((m) => dates.includes(m.date) && m.value != null).sort((a, b) => (a.date + a.id).localeCompare(b.date + b.id));
+      if (!list.length) return null;
+      const first = list[0].value;
+      const last = list[list.length - 1].value;
+      const change = last - first;
+      const value = list.length > 1 ? `${fmtTrackerValue(t, first)} → ${fmtTrackerValue(t, last)}` : fmtTrackerValue(t, last);
+      const sub = list.length > 1 ? `${change > 0 ? '+' : change < 0 ? '−' : ''}${fmtTrackerValue(t, Math.abs(change))} · ${list.length} readings` : '1 reading';
+      return `<div class="entry-row"><div class="entry-row-main"><div class="entry-row-title">${escapeHtml(t.name)}</div><div class="entry-row-sub">${sub}</div></div><div class="rec-value">${value}</div></div>`;
+    }).filter(Boolean);
+    return rows.length ? `<div class="card-list week-rows">${rows.join('')}</div>` : weekNone('No readings this week.');
+  }
+
+  function waterWeekHtml(week) {
+    const dates = weekDays(week);
+    const byDate = waterByDate();
+    const logged = dates.filter((d) => d <= todayISO() && byDate[d]);
+    if (!logged.length) return weekNone('No water logged this week.');
+    const goal = state.water.goalMl;
+    const avg = mean(logged.map((d) => byDate[d]));
+    const bars = dates.map((d) => ({ value: byDate[d] ? waterShown(byDate[d]) : 0, tone: d === todayISO() ? 'open' : '', tip: { title: dayTitle(d), rows: [['', byDate[d] ? fmtVolume(byDate[d]) : 'Nothing logged']] } }));
+    const [value, ...unit] = fmtVolume(avg).split(' ');
+    return `${kpiRowHtml([{ value, unit: unit.join(' '), label: 'Average a day' }, { value: `${logged.length} of 7`, label: 'Days logged' }])}
+      ${Charts.columns(bars, { height: 96, goal: goal ? waterShown(goal) : null, goalText: goal ? String(Math.round(waterShown(goal))) : '', first: 'Mon', last: 'Sun', label: `Water each day, week of ${chartDay(week)}` })}
+      ${goal ? `<div class="cc-foot"><div class="cc-key">${keyItem('ln goal', `Goal ${fmtVolume(goal)} a day`)}</div></div>` : ''}`;
+  }
+
+  function foodWeekHtml(week) {
+    const dates = weekDays(week).filter((d) => d <= todayISO());
+    const days = dates.map((d) => foodTotalsForDate(d)).filter((t) => t.calories != null);
+    if (!days.length) return weekNone('No food logged this week.');
+    const tiles = [{ value: fmtInt(mean(days.map((t) => t.calories))), label: 'Average kcal' }];
+    if (macroTracked('protein')) {
+      const p = days.map((t) => t.protein).filter((v) => v != null);
+      if (p.length) tiles.push({ value: String(Math.round(mean(p))), unit: 'g', label: 'Average protein' });
+    }
+    tiles.push({ value: `${days.length} of 7`, label: 'Days logged' });
+    return kpiRowHtml(tiles);
+  }
+
+  const WEEK_CARDS = { workout: workoutWeekHtml, daily: dailyWeekHtml, measurements: bodyWeekHtml, water: waterWeekHtml, food: foodWeekHtml };
+  function renderHistoryWeek() {
+    const host = document.getElementById('historyWeek');
+    const draw = WEEK_CARDS[historyCategory];
+    if (!historySelectedDate || !draw || !availableDomainCategories().some((c) => c.id === historyCategory)) { host.hidden = true; host.innerHTML = ''; return; }
+    const week = weekOf(historySelectedDate);
+    host.hidden = false;
+    Charts.setWidth(chartWidthIn(host));
+    host.innerHTML = `<div class="card chart-card week-card"><div class="cc-head"><div class="cc-titles">
+      <div class="cc-name">${week === weekOf(todayISO()) ? 'This week' : `Week of ${chartDay(week)}`}</div><div class="cc-sub">${weekRange(week)}</div></div></div>
+      ${draw(week)}</div>`;
+    const more = host.querySelector('[data-week-muscles]');
+    if (more) more.addEventListener('click', () => openMuscleSheet(week));
+    Charts.wire(host);
+  }
+
   function renderHistory() {
     renderHistoryCalendar();
     renderHistoryCategorySegmented();
+    renderHistoryWeek();
     const headingEl = document.getElementById('historyListHeading');
     if (headingEl) headingEl.textContent = historyListHeadingText();
     const wrap = document.getElementById('historyList');
@@ -7699,7 +8004,7 @@
     showWeightInsightsSwitch: 'showWeightInsights', showStrengthLevelSwitch: 'showStrengthLevel',
     showPaceLevelSwitch: 'showPaceLevel', showSleepInsightsSwitch: 'showSleepInsights',
     showMacroGuidanceSwitch: 'showMacroGuidance', showRpeSwitch: 'showRpe',
-    showSuggestionsSwitch: 'showSuggestions', showMuscleSetsSwitch: 'showMuscleSets', dailyWorkoutGoalSwitch: 'dailyWorkoutGoal',
+    showSuggestionsSwitch: 'showSuggestions', showMuscleSetsSwitch: 'showMuscleSets', showRecoverySwitch: 'showRecovery', dailyWorkoutGoalSwitch: 'dailyWorkoutGoal',
     showChartTablesSwitch: 'showChartTables',
   };
   // Home-block switches write into settings.homeSections rather than a flat key.
@@ -7761,7 +8066,7 @@
     const st = state.settings;
     const on = {
       sleep: st.trackMeasurements && activeTrackers().some((t) => t.kind === 'sleep'),
-      weeklySets: st.trackWorkout && st.showMuscleSets, oneRM: st.trackWorkout, nextSession: st.trackWorkout && st.showSuggestions,
+      weeklySets: st.trackWorkout && st.showMuscleSets, recovery: st.trackWorkout && st.showRecovery, oneRM: st.trackWorkout, nextSession: st.trackWorkout && st.showSuggestions,
       liftLevels: st.trackWorkout && st.showStrengthLevel, runLevels: st.trackCardio && st.showPaceLevel,
       bmi: st.trackMeasurements && st.showWeightInsights, calories: st.trackFood, protein: st.trackFood, dv: st.trackFood, water: st.trackWater,
     };

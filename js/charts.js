@@ -284,7 +284,8 @@ const Charts = (() => {
 
   /* A grid of items by day. rows: [{ name, cells: ['done' | 'part' | 'miss' | 'off' | 'open'] }],
      dates: the ISO date of each column, tips: one per column. */
-  function heatmap(rows, dates, tips, label) {
+  // opts: { first, last } name the first and last columns (the first date and Today by default).
+  function heatmap(rows, dates, tips, label, opts = {}) {
     const labelW = 80;
     const n = dates.length;
     const gap = 3;
@@ -295,7 +296,7 @@ const Charts = (() => {
     const rowH = cs + 5;
     const top = 18;
     const H = top + rows.length * rowH;
-    let out = `<text class="ct" x="${labelW}" y="10">${esc(shortDate(dates[0]))}</text><text class="ct strong" x="${r1(labelW + pitch * (n - 1) + cw)}" y="10" text-anchor="end">Today</text>`;
+    let out = `<text class="ct" x="${labelW}" y="10">${esc(opts.first || shortDate(dates[0]))}</text><text class="ct strong" x="${r1(labelW + pitch * (n - 1) + cw)}" y="10" text-anchor="end">${esc(opts.last || 'Today')}</text>`;
     rows.forEach((row, ri) => {
       const ry = top + ri * rowH;
       const name = row.name.length > 12 ? `${row.name.slice(0, 11)}…` : row.name;
@@ -312,8 +313,8 @@ const Charts = (() => {
     return boxHtml(svg, t, label);
   }
 
-  /* Body map: a front and a back figure with one shape per muscle, each shaded by that
-     muscle's own level (0 to 3). The drawing is the app's own: every shape is
+  /* Body map: a front and a back figure with one shape per muscle (19 of them), each shaded by
+     its own class: l0 to l3 for sets, r1 to r3 for recovery. The drawing is the app's own: every shape is
      a short list of points on a 200 x 400 figure, rounded into a smooth outline. Points are
      given for the left half; `pair` shapes are mirrored, `mid` shapes run down the centre
      line and close with their own mirror image. */
@@ -325,27 +326,34 @@ const Charts = (() => {
     ['pair', [[61, 196], [59, 228], [62, 262], [65, 280], [62, 306], [66, 346], [71, 374], [88, 374], [91, 346], [94, 306], [93, 280], [97, 262], [99, 230], [99, 200]]],
     ['pair', [[66, 374], [62, 383], [67, 389], [88, 389], [92, 382], [89, 374]]],
   ];
-  // One shape per muscle and side, so no area is drawn in more detail than another. The upper
-  // arm is the biceps from the front and the triceps from behind.
-  const bodyArm = (upperArm) => [
-    [upperArm, 'pair', [[45, 101], [57, 97], [60, 118], [55, 142], [46, 144], [40, 123]]],
+  // One shape per muscle and side, so no area is drawn in more detail than another. Each muscle
+  // is drawn where it shows: the upper arm is the biceps from the front and the triceps from
+  // behind, the shoulder cap is the front delt from the front and the rear delt from behind, and
+  // the side delt sits over the outer top of the cap in both.
+  const DELT = [[63, 64], [51, 68], [43, 80], [42, 94], [49, 101], [57, 92], [63, 78]];
+  const SIDE_DELT = [[51, 67], [45, 71], [42, 79], [42, 88], [45, 90], [48, 82], [52, 73]];
+  const bodyArm = (upperArm, delt) => [
+    [upperArm, 'pair', [[45, 103], [57, 99], [60, 118], [55, 142], [46, 144], [40, 123]]],
     ['forearms', 'pair', [[40, 150], [53, 147], [50, 170], [43, 202], [29, 202], [33, 174]]],
-    ['shoulders', 'pair', [[63, 64], [51, 68], [43, 80], [42, 94], [49, 101], [57, 92], [63, 78]]],
+    [delt, 'pair', DELT],
+    ['sideDelts', 'pair', SIDE_DELT],
   ];
-  const BODY_FRONT = bodyArm('biceps').concat([
-    ['upperBack', 'pair', [[91, 52], [89, 61], [70, 64], [82, 57]]],
+  const BODY_FRONT = bodyArm('biceps', 'frontDelts').concat([
+    ['traps', 'pair', [[91, 52], [89, 61], [70, 64], [82, 57]]],
     ['chest', 'pair', [[67, 69], [84, 67], [98, 71], [98, 99], [86, 108], [70, 105], [61, 94], [62, 79]]],
     ['abs', 'mid', [[88, 110], [87, 134], [88, 160], [93, 182]]],
-    ['abs', 'pair', [[68, 109], [83, 111], [84, 135], [84, 162], [75, 170], [67, 152], [64, 129]]],
+    ['obliques', 'pair', [[68, 109], [83, 111], [84, 135], [84, 162], [75, 170], [67, 152], [64, 129]]],
     ['quads', 'pair', [[62, 200], [75, 197], [85, 201], [87, 234], [85, 264], [78, 274], [68, 270], [61, 246], [59, 222]]],
     ['adductors', 'pair', [[89, 203], [99, 206], [99, 240], [95, 266], [91, 262], [90, 236]]],
     ['calves', 'pair', [[66, 288], [79, 284], [87, 300], [86, 330], [80, 362], [72, 364], [65, 330], [63, 306]]],
   ]);
-  const BODY_BACK = bodyArm('triceps').concat([
-    ['upperBack', 'mid', [[93, 48], [88, 59], [67, 64], [82, 75], [92, 97], [96, 115]]],
-    ['lats', 'pair', [[63, 98], [80, 85], [93, 105], [96, 139], [89, 161], [75, 153], [66, 127]]],
+  const BODY_BACK = bodyArm('triceps', 'rearDelts').concat([
+    ['traps', 'mid', [[93, 48], [88, 59], [67, 64], [80, 71], [96, 77]]],
+    ['upperBack', 'mid', [[96, 81], [84, 76], [78, 82], [87, 97], [96, 113]]],
+    ['lats', 'pair', [[63, 97], [79, 86], [92, 105], [96, 138], [89, 161], [75, 153], [66, 127]]],
     ['lowerBack', 'mid', [[92, 147], [88, 161], [89, 177], [96, 187]]],
-    ['glutes', 'pair', [[61, 192], [72, 186], [88, 186], [98, 192], [98, 214], [90, 226], [74, 228], [62, 218]]],
+    ['abductors', 'pair', [[62, 176], [71, 172], [81, 176], [75, 186], [62, 189]]],
+    ['glutes', 'pair', [[61, 193], [72, 189], [88, 188], [98, 193], [98, 214], [90, 226], [74, 228], [62, 218]]],
     ['hamstrings', 'pair', [[61, 232], [78, 231], [97, 230], [97, 258], [90, 274], [80, 278], [70, 274], [63, 262]]],
     ['calves', 'pair', [[64, 286], [78, 281], [91, 286], [92, 312], [86, 344], [78, 348], [69, 344], [62, 314]]],
   ]);
@@ -367,15 +375,25 @@ const Charts = (() => {
     return kind === 'mid' ? [blobPath(pts.concat(flipX(pts).reverse()))] : [blobPath(pts), blobPath(flipX(pts))];
   }
 
-  // levels: { chest, lats, quads, ... } -> 0 to 3. `titles` names each muscle's value.
-  function bodyMap(levels, titles, label) {
+  // cls: { chest: 'l2', lats: 'r1', ... }, a class per muscle (l0 when missing). `titles` names
+  // each muscle's value. Muscles in opts.striped were only worked as a helper so far and are
+  // drawn with stripes. Each map gets its own pattern id, since several can share a page.
+  let bodyMapCount = 0;
+  function bodyMap(cls, titles, label, opts = {}) {
+    const striped = new Set(opts.striped || []);
+    const stripeId = `mm-stripe-${++bodyMapCount}`;
     const figure = (muscles, dx, name) => {
       const sil = `<ellipse class="mm-sil" cx="100" cy="27" rx="19.5" ry="24"></ellipse>${BODY_SIL.map(([kind, pts]) => bodyShapes(kind, pts).map((d) => `<path class="mm-sil" d="${d}"></path>`).join('')).join('')}`;
-      const parts = muscles.map(([muscle, kind, pts]) => bodyShapes(kind, pts).map((d) => `<path class="mm-m l${levels[muscle] || 0}" data-muscle="${muscle}" d="${d}"><title>${esc(titles[muscle] || '')}</title></path>`).join('')).join('');
+      const parts = muscles.map(([muscle, kind, pts]) => bodyShapes(kind, pts).map((d) => {
+        const stripe = striped.has(muscle);
+        return `<path class="mm-m ${cls[muscle] || 'l0'}${stripe ? ' is-striped' : ''}" data-muscle="${muscle}"${stripe ? ` style="fill:url(#${stripeId})"` : ''} d="${d}"><title>${esc(titles[muscle] || '')}</title></path>`;
+      }).join('')).join('');
       return `<g transform="translate(${dx} 0)">${sil}${parts}<text class="ct" x="100" y="410" text-anchor="middle">${name}</text></g>`;
     };
-    return `<svg viewBox="0 0 410 416" class="chart-svg mm" role="img" aria-label="${esc(label)}">${figure(BODY_FRONT, 0, 'Front')}${figure(BODY_BACK, 210, 'Back')}</svg>`;
+    const defs = striped.size ? `<defs><pattern id="${stripeId}" patternUnits="userSpaceOnUse" width="5" height="5" patternTransform="rotate(45)"><rect class="mm-stripe-bg" width="5" height="5"></rect><rect class="mm-stripe" width="2" height="5"></rect></pattern></defs>` : '';
+    return `<svg viewBox="0 0 410 416" class="chart-svg mm" role="img" aria-label="${esc(label)}">${defs}${figure(BODY_FRONT, 0, 'Front')}${figure(BODY_BACK, 210, 'Back')}</svg>`;
   }
+
 
   /* Horizontal bars, one row per category: this period's value as the bar, a tick for the
      previous period, and an optional dashed reference line with a label at the top. Each

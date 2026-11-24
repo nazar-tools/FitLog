@@ -257,17 +257,19 @@
           </button>
         </div>
         <div class="calendar-weekdays">
-          <span>S</span><span>M</span><span>T</span><span>W</span><span>T</span><span>F</span><span>S</span>
+          <span>M</span><span>T</span><span>W</span><span>T</span><span>F</span><span>S</span><span>S</span>
         </div>
         <div class="calendar-grid" id="calendarGrid"></div>
         <div class="calendar-legend" id="calendarLegend"></div>
       </div>
 
+      <!-- Filled by renderHistoryCategorySegmented() with domainTabsHtml(), shared with Log and Manage. -->
+      <div class="domain-tabs" id="historyCategorySegmented" role="radiogroup" aria-label="History category"></div>
+      <!-- The tapped day's week, for the area shown (renderHistoryWeek). -->
+      <div id="historyWeek" hidden></div>
       <div class="section-head">
         <h2 id="historyListHeading">All entries</h2>
       </div>
-      <!-- Filled by renderHistoryCategorySegmented() with domainTabsHtml(), shared with Log and Manage. -->
-      <div class="domain-tabs" id="historyCategorySegmented" role="radiogroup" aria-label="History category"></div>
       <label class="field" id="historyFilterField">
         <span class="field-label">Filter by exercise</span>
         <select id="historyFilter"></select>
@@ -512,6 +514,10 @@
         <div class="setting-row is-sub" data-sub-of="trackWorkout">
           <span>Sets per muscle <span class="muted-text">(a card on Progress)</span></span>
           <button type="button" class="switch" id="showMuscleSetsSwitch" role="switch" aria-checked="false" aria-label="Sets per muscle"><span class="switch-track"><span class="switch-thumb"></span></span></button>
+        </div>
+        <div class="setting-row is-sub" data-sub-of="trackWorkout">
+          <span>Recovery <span class="muted-text">(a card on Progress)</span></span>
+          <button type="button" class="switch" id="showRecoverySwitch" role="switch" aria-checked="false" aria-label="Recovery"><span class="switch-track"><span class="switch-thumb"></span></span></button>
         </div>
         <div class="setting-row is-sub" data-sub-of="trackWorkout">
           <span>Next session tips <span class="muted-text">(what to try next time)</span></span>

@@ -258,6 +258,10 @@
   const WARMUP_CUTOFF = 0.6;
   // A set counts this much for a muscle that helps the lift without being its main mover.
   const SECONDARY_SET_SHARE = 0.5;
+  // Recovery after one day's sets for one muscle (see REFERENCES 'recovery'): up to `fewSets`
+  // sets is one day, under `manySets` two, more three. A set at `failureRpe` or harder adds a day,
+  // never past three. The clock starts at `startHour` when an entry has no time.
+  const RECOVERY = { fewSets: 3, manySets: 10, failureRpe: 9.5, maxDays: 3, startHour: 18 };
 
   const REFERENCES = [
     { id: 'streak', title: 'Day streak', kind: 'assumption',
@@ -273,6 +277,11 @@
       source: { label: 'Schoenfeld, Ogborn & Krieger 2017, J Sports Sci', url: 'https://doi.org/10.1080/02640414.2016.1210197' },
       alt: { label: 'Pelland et al. 2024, SportRxiv preprint (counting helping muscles as half a set fits muscle growth best)', url: 'https://sportrxiv.org/index.php/server/preprint/view/460' },
       caveat: 'A guide for building muscle, not a rule. Effort and recovery matter as much as the count. Cardio is left out.' },
+    { id: 'recovery', title: 'Recovery', kind: 'assumption',
+      summary: 'The Recovery card estimates when each muscle has recovered from its last session. Sets count as in Sets per muscle, helper sets as half. For one muscle on one day: 1 to ' + RECOVERY.fewSets + ' sets, or a Light session, means 1 day; ' + (RECOVERY.fewSets + 1) + ' to ' + (RECOVERY.manySets - 1) + ' sets, 2 days; ' + RECOVERY.manySets + ' or more, 3 days. A set logged at RPE ' + RECOVERY.failureRpe + ' or 10 adds a day, up to 3. The time runs from when the entry was logged, or 6 pm when it has no time. Every muscle follows the same rule: in trained men the bench press, squat and deadlift recovered on a similar time course, sets to failure and high volume took longer (up to 48 to 72 hours), and no study shows small muscles recovering faster.',
+      source: { label: 'Belcher et al. 2019, Appl Physiol Nutr Metab', url: 'https://pubmed.ncbi.nlm.nih.gov/30779596/' },
+      alt: { label: 'Morán-Navarro et al. 2017, Eur J Appl Physiol (failure slows recovery)', url: 'https://doi.org/10.1007/s00421-017-3725-7' },
+      caveat: 'An estimate from what you log, not a measurement. Ready means the usual time has passed, not that you have to train.' },
     { id: 'oneRM', title: 'Estimated 1RM', kind: 'reference',
       summary: 'Epley formula: weight x (1 + reps / 30). Only sets of ' + ONE_RM_MAX_REPS + ' reps or fewer are used, because the estimate drifts high on longer sets. A set of one rep is a real lift and is labelled as such; everything else is calculated.',
       source: { label: 'Epley, B. (1985) Poundage Chart, Boyd Epley Workout', url: null },
@@ -326,7 +335,7 @@
     reviewed: '2026-10-20',
     LB_PER_KG,
     TIER_LABELS, STRENGTH, STRENGTH_KEYS, strengthThresholds, tierIndex, CATALOG_STANDARDS, standardKeyFor,
-    ONE_RM_MAX_REPS, estimateOneRM, BAR_WEIGHT, PLATES, WEEKLY_SETS_TARGET, WARMUP_CUTOFF, SECONDARY_SET_SHARE,
+    ONE_RM_MAX_REPS, estimateOneRM, BAR_WEIGHT, PLATES, WEEKLY_SETS_TARGET, WARMUP_CUTOFF, SECONDARY_SET_SHARE, RECOVERY,
     RUN_TIER_LABELS, RUN_5K, RUN_MIN_MI, RUN_MAX_MI, DEFAULT_RUN_AGE, fiveKEquivalentSec, runThresholds, runLevel,
     BMI_CATEGORIES, bmiFromKgCm, bmiCategory,
     SLEEP, sleepCategory,
